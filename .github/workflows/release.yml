@@ -45,6 +45,7 @@ jobs:
           cd ..
           lipo -archs "release-assets/Codex SyncBar.app/Contents/MacOS/CodexSyncBar" \
             | grep -q 'x86_64 arm64\|arm64 x86_64'
+          test "$(stat -f '%Lp' 'release-assets/Codex SyncBar.app/Contents/Resources/codex-syncbar-askpass')" = 700
           codesign --verify --deep --strict --verbose=2 "release-assets/Codex SyncBar.app"
 
       - name: Create GitHub release

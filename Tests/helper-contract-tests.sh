@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 HELPER="$ROOT/Support/gpt-switch"
-ASKPASS_SOURCE="$ROOT/Support/codex-syncbar-askpass"
+ASKPASS_REPOSITORY_SOURCE="$ROOT/Support/codex-syncbar-askpass"
 USAGE_SOURCE="$ROOT/Support/usage-summary.mjs"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/codex-syncbar-helper.XXXXXX")
 TEST_PROCESS_PIDS=()
@@ -16,6 +16,13 @@ cleanup() {
   rm -rf "$TMP"
 }
 trap cleanup EXIT
+
+# Git records only the executable bit, not the distinction between 0755 and
+# the owner-only 0700 mode required by the installed Keychain bridge. Exercise
+# the helper with the same secured copy that build-app.sh places in the bundle.
+ASKPASS_SOURCE="$TMP/codex-syncbar-askpass"
+cp "$ASKPASS_REPOSITORY_SOURCE" "$ASKPASS_SOURCE"
+chmod 700 "$ASKPASS_SOURCE"
 
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/.local/share/gpt-switch"
