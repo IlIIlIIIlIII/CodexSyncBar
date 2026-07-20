@@ -25,6 +25,11 @@ jobs:
 
       - name: Verify source
         run: |
+          if ! command -v lockf >/dev/null && ! command -v flock >/dev/null; then
+            brew install util-linux
+            echo "$(brew --prefix util-linux)/bin" >> "$GITHUB_PATH"
+            export PATH="$(brew --prefix util-linux)/bin:$PATH"
+          fi
           bash Tests/helper-contract-tests.sh
           swift test
 
