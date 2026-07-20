@@ -61,9 +61,3 @@ jobs:
             --title "Codex SyncBar $version" \
             --notes-file "docs/releases/$GITHUB_REF_NAME.md" \
             --verify-tag
-
-      - name: Remove pre-1.0 release history
-        if: github.ref_name == 'v1.0.0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release delete v2.3.3 --cleanup-tag --yes
