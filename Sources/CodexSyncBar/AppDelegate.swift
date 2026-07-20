@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewWindow: NSWindow?
     private var previewModel: AppModel?
     private var settingsWindowController: SettingsWindowController?
+    private var readmeCaptureController: ReadmeCaptureController?
 
     func presentSettings(model: AppModel) {
         model.refreshLaunchAtLoginState()
@@ -20,6 +21,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let command = ReadmeDemoCommand.parse(arguments: CommandLine.arguments) {
+            let model = AppModel(readmeDemoFixture: .standard)
+            let controller = ReadmeCaptureController(command: command)
+            readmeCaptureController = controller
+            previewModel = model
+            controller.present(model: model)
+            return
+        }
+        if CommandLine.arguments.contains(where: {
+            $0.hasPrefix("--readme-demo=") || $0.hasPrefix("--readme-output=")
+        }) {
+            FileHandle.standardError.write(Data("README UI 캡처 인자가 올바르지 않습니다.\n".utf8))
+            exit(EXIT_FAILURE)
+        }
         do {
             try BundledHelperInstaller.installFromMainBundleIfPresent()
         } catch {

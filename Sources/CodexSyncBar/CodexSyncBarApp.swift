@@ -6,7 +6,9 @@ struct CodexSyncBarApp: App {
     @StateObject private var model: AppModel
 
     init() {
-        let model = AppModel()
+        let model = ReadmeDemoCommand.parse(arguments: CommandLine.arguments) == nil
+            ? AppModel()
+            : AppModel(readmeDemoFixture: .standard)
         _model = StateObject(wrappedValue: model)
         guard !Self.isSpecialLaunch else { return }
         Task { @MainActor in
@@ -36,5 +38,6 @@ struct CodexSyncBarApp: App {
     private static var isSpecialLaunch: Bool {
         CommandLine.arguments.contains("--preview-window")
             || CommandLine.arguments.contains(where: { $0.hasPrefix("--login-profile=") })
+            || CommandLine.arguments.contains(where: { $0.hasPrefix("--readme-demo=") })
     }
 }

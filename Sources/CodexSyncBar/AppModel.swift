@@ -61,6 +61,7 @@ final class AppModel: ObservableObject {
     @Published var launchAtLogin = false
     @Published private(set) var launchAtLoginRequiresApproval = false
     @Published private(set) var launchAtLoginStatusText = "확인 중…"
+    @Published private(set) var isReadmeDemo = false
 
     private let usageService: UsageService
     private let switchService: SwitchService
@@ -93,7 +94,7 @@ final class AppModel: ObservableObject {
     private let usageInterval: UInt64 = 300_000_000_000
     private let fullSyncInterval: TimeInterval = 6 * 60 * 60
 
-    init() {
+    init(readmeDemoFixture: ReadmeDemoFixture? = nil) {
         let store = AuthStore()
         let switcher = SwitchService()
         let configurationStore = AppConfigurationStore()
@@ -102,7 +103,14 @@ final class AppModel: ObservableObject {
         let weeklyAnchorStore = WeeklyAnchorStore()
         let loadedConfiguration: AppConfiguration?
         let initialConfigurationError: String?
-        if FileManager.default.fileExists(atPath: configurationStore.configurationURL.path) {
+        if let readmeDemoFixture {
+            loadedConfiguration = AppConfiguration(
+                schemaVersion: AppConfiguration.schemaVersion,
+                nextAccountID: (readmeDemoFixture.profiles.map(\.id).max() ?? 0) + 1,
+                accounts: readmeDemoFixture.profiles,
+                devices: readmeDemoFixture.configuredDevices)
+            initialConfigurationError = nil
+        } else if FileManager.default.fileExists(atPath: configurationStore.configurationURL.path) {
             do {
                 loadedConfiguration = try configurationStore.load()
                 initialConfigurationError = nil
@@ -117,11 +125,18 @@ final class AppModel: ObservableObject {
         let loadedProfiles = loadedConfiguration?.accounts ?? []
         profiles = loadedProfiles
         configuredDevices = loadedConfiguration?.devices ?? []
-        usageStates = Dictionary(uniqueKeysWithValues: loadedProfiles.map { ($0.id, UsageState.idle) })
-        usageDisplayPreferences = usageDisplayPreferencesStore.load()
-        menuBarUsagePreferences = menuBarUsagePreferencesStore.load()
-        weeklyAnchorPreferences = weeklyAnchorStore.loadPreferences()
-        weeklyAnchorRecords = weeklyAnchorStore.loadRecords()
+        usageStates = readmeDemoFixture?.usageStates
+            ?? Dictionary(uniqueKeysWithValues: loadedProfiles.map { ($0.id, UsageState.idle) })
+        usageDisplayPreferences = readmeDemoFixture == nil
+            ? usageDisplayPreferencesStore.load()
+            : .allVisible
+        menuBarUsagePreferences = readmeDemoFixture == nil
+            ? menuBarUsagePreferencesStore.load()
+            : MenuBarUsagePreferences(items: [.codexWeekly, .sparkWeekly])
+        weeklyAnchorPreferences = readmeDemoFixture == nil
+            ? weeklyAnchorStore.loadPreferences()
+            : .disabled
+        weeklyAnchorRecords = readmeDemoFixture == nil ? weeklyAnchorStore.loadRecords() : [:]
         configurationError = initialConfigurationError
         authStore = store
         switchService = switcher
@@ -139,14 +154,19 @@ final class AppModel: ObservableObject {
         secretStore = SystemKeychainStore()
         usageService = UsageService(authStore: store, switchService: switcher)
         loginCoordinator = LoginCoordinator(authStore: store)
-        let stored = UserDefaults.standard.integer(forKey: "selectedProfileID")
-        selectedProfileID = loadedProfiles.contains(where: { $0.id == stored })
-            ? stored
-            : (loadedProfiles.first?.id ?? 0)
-        browserCleanupPendingProfileIDs = Set(
-            profiles.map(\.id).filter {
-                UserDefaults.standard.bool(forKey: browserCleanupDefaultsKey(profileID: $0))
-            })
+        if let readmeDemoFixture {
+            selectedProfileID = readmeDemoFixture.selectedProfileID
+            browserCleanupPendingProfileIDs = []
+        } else {
+            let stored = UserDefaults.standard.integer(forKey: "selectedProfileID")
+            selectedProfileID = loadedProfiles.contains(where: { $0.id == stored })
+                ? stored
+                : (loadedProfiles.first?.id ?? 0)
+            browserCleanupPendingProfileIDs = Set(
+                profiles.map(\.id).filter {
+                    UserDefaults.standard.bool(forKey: browserCleanupDefaultsKey(profileID: $0))
+                })
+        }
 
         loginCoordinator.onCompletion = { [weak self] result in
             guard let self else { return }
@@ -185,6 +205,15 @@ final class AppModel: ObservableObject {
                 }
                 self.banner = AppBanner(style: .error, message: error.localizedDescription)
             }
+        }
+
+        if let readmeDemoFixture {
+            devices = readmeDemoFixture.devices
+            tokenUsageSnapshot = readmeDemoFixture.tokenUsageSnapshot
+            authMaintenanceSummary = "데모 인증 정상"
+            launchAtLoginStatusText = "데모 모드"
+            isReadmeDemo = true
+            hasStarted = true
         }
     }
 

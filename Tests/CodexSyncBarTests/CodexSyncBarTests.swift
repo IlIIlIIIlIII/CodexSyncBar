@@ -3,6 +3,132 @@ import XCTest
 @testable import CodexSyncBar
 
 final class CodexSyncBarTests: XCTestCase {
+    func testReadmeDemoCommandAcceptsKnownScreenAndAbsoluteOutput() {
+        let output = URL(fileURLWithPath: "/tmp/readme-popover.png")
+
+        XCTAssertEqual(
+            ReadmeDemoCommand.parse(arguments: [
+                "CodexSyncBar",
+                "--readme-demo=popover",
+                "--readme-output=\(output.path)",
+            ]),
+            ReadmeDemoCommand(screen: .popover, outputURL: output))
+    }
+
+    func testReadmeDemoCommandRejectsUnknownDuplicateAndRelativeArguments() {
+        XCTAssertNil(ReadmeDemoCommand.parse(arguments: [
+            "CodexSyncBar",
+            "--readme-demo=unknown",
+            "--readme-output=/tmp/demo.png",
+        ]))
+        XCTAssertNil(ReadmeDemoCommand.parse(arguments: [
+            "CodexSyncBar",
+            "--readme-demo=popover",
+            "--readme-demo=settings",
+            "--readme-output=/tmp/demo.png",
+        ]))
+        XCTAssertNil(ReadmeDemoCommand.parse(arguments: [
+            "CodexSyncBar",
+            "--readme-demo=settings",
+            "--readme-output=docs/images/demo.png",
+        ]))
+    }
+
+    func testReadmeDemoFixtureUsesOnlyDeterministicDocumentationIdentities() throws {
+        let createdAfter = Date()
+        let fixture = ReadmeDemoFixture.standard
+
+        XCTAssertEqual(fixture.referenceDate, Date(timeIntervalSince1970: 1_784_552_400))
+        XCTAssertEqual(fixture.selectedProfileID, 1)
+        XCTAssertEqual(fixture.profiles.map(\.email), [
+            "demo.main@example.com",
+            "demo.sub@example.com",
+        ])
+        XCTAssertEqual(fixture.profiles.map(\.alias), ["메인", "서브"])
+        XCTAssertEqual(
+            fixture.usageStates[1]?.snapshot?.weekly?.remainingPercent,
+            68)
+        XCTAssertEqual(
+            fixture.usageStates[2]?.snapshot?.weekly?.remainingPercent,
+            42)
+        let sessionReset = try XCTUnwrap(
+            fixture.usageStates[1]?.snapshot?.session?.resetsAt)
+        XCTAssertGreaterThanOrEqual(
+            sessionReset.timeIntervalSince(createdAfter),
+            2 * 60 * 60 + 34 * 60)
+        XCTAssertLessThanOrEqual(
+            sessionReset.timeIntervalSince(createdAfter),
+            2 * 60 * 60 + 36 * 60)
+        XCTAssertEqual(fixture.configuredDevices.map(\.displayName), ["작업 서버", "빌드 서버"])
+        XCTAssertEqual(fixture.configuredDevices.map(\.host), [
+            "workstation.example.net",
+            "build.example.net",
+        ])
+        XCTAssertEqual(fixture.tokenUsageSnapshot.counts.totalTokens, 12_345_678)
+
+        let identityText = (
+            fixture.profiles.map(\.email)
+                + fixture.configuredDevices.flatMap {
+                    [$0.displayName, $0.host, $0.username]
+                })
+            .joined(separator: "\n")
+        XCTAssertFalse(identityText.contains("/Users/"))
+        XCTAssertNil(identityText.range(
+            of: #"\b(?:\d{1,3}\.){3}\d{1,3}\b"#,
+            options: .regularExpression))
+        XCTAssertTrue(fixture.profiles.allSatisfy { $0.email.hasSuffix("@example.com") })
+        XCTAssertTrue(fixture.configuredDevices.allSatisfy { $0.host.hasSuffix(".example.net") })
+    }
+
+    @MainActor
+    func testReadmeDemoModelStartsFromFixtureAndDoesNotRefreshExternalState() async {
+        let fixture = ReadmeDemoFixture.standard
+        let model = AppModel(readmeDemoFixture: fixture)
+
+        XCTAssertEqual(model.profiles, fixture.profiles)
+        XCTAssertEqual(model.selectedProfileID, 1)
+        XCTAssertEqual(model.activeProfileID, 1)
+        XCTAssertEqual(model.configuredDevices, fixture.configuredDevices)
+        XCTAssertEqual(model.devices, fixture.devices)
+        XCTAssertEqual(model.usageStates, fixture.usageStates)
+        XCTAssertEqual(model.tokenUsageSnapshot, fixture.tokenUsageSnapshot)
+        XCTAssertEqual(model.usageDisplayPreferences, .allVisible)
+        XCTAssertEqual(
+            model.menuBarUsagePreferences,
+            MenuBarUsagePreferences(items: [.codexWeekly, .sparkWeekly]))
+        XCTAssertNil(model.configurationError)
+
+        await model.start()
+
+        XCTAssertEqual(model.profiles, fixture.profiles)
+        XCTAssertEqual(model.devices, fixture.devices)
+        XCTAssertEqual(model.usageStates, fixture.usageStates)
+        XCTAssertFalse(model.isRefreshing)
+        XCTAssertFalse(model.isMaintainingAuth)
+        XCTAssertFalse(model.isCollectingTokenUsage)
+    }
+
+    func testReadmeCaptureOutputRequiresExistingDirectoryAndRejectsSymlink() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-readme-output-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let valid = root.appendingPathComponent("demo.png")
+        XCTAssertEqual(
+            try ReadmeCaptureOutputValidator.validatedOutputURL(valid),
+            valid.standardizedFileURL)
+
+        let missingParent = root.appendingPathComponent("missing/demo.png")
+        XCTAssertThrowsError(try ReadmeCaptureOutputValidator.validatedOutputURL(missingParent))
+
+        let target = root.appendingPathComponent("target.png")
+        XCTAssertTrue(FileManager.default.createFile(atPath: target.path, contents: Data()))
+        let symlink = root.appendingPathComponent("linked.png")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+        XCTAssertThrowsError(try ReadmeCaptureOutputValidator.validatedOutputURL(symlink))
+    }
+
     func testTokenPricingSeparatesCachedInputAndAppliesAPIPriorityPricing() {
         let usage = ModelTokenUsage(
             model: "gpt-5.6-sol",

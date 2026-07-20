@@ -8,6 +8,26 @@
 
 > 이 프로젝트는 개인용 유틸리티이며 OpenAI의 공식 제품이 아닙니다. ChatGPT 사용량 응답은 공개된 안정 API가 아니므로 OpenAI의 응답 형식이 바뀌면 일부 표시가 일시적으로 동작하지 않을 수 있습니다.
 
+## 사용자 UI
+
+아래 화면의 계정, 장치와 사용량은 README를 위해 만든 가상 예시이며 실제 사용자 정보가 아닙니다.
+
+### 메뉴 막대 화면
+
+계정을 선택하면 사용량, 초기화권과 모든 장치의 적용 상태를 한눈에 확인할 수 있습니다.
+
+<p align="center">
+  <img src="docs/images/readme-popover.png" width="420" alt="가상 데이터로 구성한 Codex SyncBar 메뉴 막대 화면">
+</p>
+
+### 설정 화면
+
+계정의 별칭과 표시 순서를 관리하고, 필요한 계정만 다시 로그인하거나 로그아웃할 수 있습니다.
+
+<p align="center">
+  <img src="docs/images/readme-settings.png" width="760" alt="가상 데이터로 구성한 Codex SyncBar 계정 설정 화면">
+</p>
+
 ## 주요 기능
 
 - 계정을 두 개 이상 등록하고 별칭과 표시 순서를 관리합니다.

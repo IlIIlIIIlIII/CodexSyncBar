@@ -36,6 +36,7 @@ enum AccountReorderLayout {
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
+    let readmeDetailOnly: Bool
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: SettingsSection? = .accounts
     @State private var accountToLogout: AccountProfile?
@@ -44,6 +45,11 @@ struct SettingsView: View {
     @State private var accountDragToken: String?
     @State private var deviceDraft: SSHDeviceConfiguration?
     @State private var deviceToRemove: SSHDeviceConfiguration?
+
+    init(model: AppModel, readmeDetailOnly: Bool = false) {
+        self.model = model
+        self.readmeDetailOnly = readmeDetailOnly
+    }
 
     private var settingsMutationDisabled: Bool {
         model.managementActionsDisabled
@@ -58,31 +64,16 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selection) { section in
-                Label(section.rawValue, systemImage: section.icon)
-                    .tag(section)
-            }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190)
-        } detail: {
-            ZStack {
-                AppTheme.panel.ignoresSafeArea()
-                Group {
-                    switch selection ?? .accounts {
-                    case .accounts: accountsPage
-                    case .devices: devicesPage
-                    case .general: generalPage
-                    }
-                }
-            }
-        }
-        .frame(minWidth: 720, minHeight: 540)
+        rootContent
+        .frame(minWidth: 720, minHeight: readmeDetailOnly ? 0 : 540)
         .accessibilityIdentifier("settings-root")
         .preferredColorScheme(.dark)
         .task { await model.start() }
-        .onAppear { model.refreshLaunchAtLoginState() }
+        .onAppear {
+            if !model.isReadmeDemo { model.refreshLaunchAtLoginState() }
+        }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { model.refreshLaunchAtLoginState() }
+            if phase == .active, !model.isReadmeDemo { model.refreshLaunchAtLoginState() }
         }
         .sheet(item: $deviceDraft) { draft in
             DeviceEditorView(model: model, initial: draft)
@@ -112,6 +103,36 @@ struct SettingsView: View {
             }
         } message: {
             Text("이 Mac의 장치 설정과 Keychain 비밀을 삭제합니다. 원격 장치의 Codex 파일은 변경하지 않습니다.")
+        }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        if readmeDetailOnly {
+            settingsDetail
+        } else {
+            NavigationSplitView {
+                List(SettingsSection.allCases, selection: $selection) { section in
+                    Label(section.rawValue, systemImage: section.icon)
+                        .tag(section)
+                }
+                .navigationSplitViewColumnWidth(min: 170, ideal: 190)
+            } detail: {
+                settingsDetail
+            }
+        }
+    }
+
+    private var settingsDetail: some View {
+        ZStack {
+            AppTheme.panel.ignoresSafeArea()
+            Group {
+                switch selection ?? .accounts {
+                case .accounts: accountsPage
+                case .devices: devicesPage
+                case .general: generalPage
+                }
+            }
         }
     }
 
