@@ -111,11 +111,19 @@ final class LoginCoordinator: ObservableObject {
             return
         }
 
+        guard let codexExecutable = WeeklyUsageAnchorService.locateCodex(
+            home: FileManager.default.homeDirectoryForCurrentUser)
+        else {
+            finish(.failure(AppError.processFailed(
+                "Codex CLI를 찾지 못했습니다. 공식 Codex CLI를 설치해 주세요.")))
+            return
+        }
+
         let process = Process()
         let input = Pipe()
         let output = Pipe()
         let errors = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/codex")
+        process.executableURL = codexExecutable
         process.arguments = [
             "app-server",
             "--stdio",

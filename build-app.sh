@@ -10,7 +10,24 @@ APP="$STAGE_DIR/$APP_NAME.app"
 OUTPUT_DIR="${1:-$ROOT/../../outputs}"
 
 cd "$ROOT"
-swift build -c release
+if [ "${CODEX_SYNCBAR_UNIVERSAL:-0}" = 1 ]; then
+  ARM_SCRATCH="$ROOT/.build/release-arm64"
+  INTEL_SCRATCH="$ROOT/.build/release-x86_64"
+  UNIVERSAL_DIR="$ROOT/.build/release-universal"
+  swift build -c release --triple arm64-apple-macosx13.0 --scratch-path "$ARM_SCRATCH"
+  swift build -c release --triple x86_64-apple-macosx13.0 --scratch-path "$INTEL_SCRATCH"
+  ARM_BIN=$(swift build -c release --triple arm64-apple-macosx13.0 --scratch-path "$ARM_SCRATCH" --show-bin-path)
+  INTEL_BIN=$(swift build -c release --triple x86_64-apple-macosx13.0 --scratch-path "$INTEL_SCRATCH" --show-bin-path)
+  rm -rf "$UNIVERSAL_DIR"
+  mkdir -p "$UNIVERSAL_DIR"
+  lipo -create \
+    "$ARM_BIN/CodexSyncBar" \
+    "$INTEL_BIN/CodexSyncBar" \
+    -output "$UNIVERSAL_DIR/CodexSyncBar"
+  BUILD_DIR="$UNIVERSAL_DIR"
+else
+  swift build -c release
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$OUTPUT_DIR"
