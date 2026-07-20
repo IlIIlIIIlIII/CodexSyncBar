@@ -1,0 +1,4220 @@
+#!/usr/bin/env bash
+
+set +x
+set -euo pipefail
+
+PROGRAM_NAME="gpt-switch"
+SCRIPT_VERSION="2.1.2"
+STATE_ROOT="${GPT_SWITCH_STATE_ROOT:-$HOME/.local/share/gpt-switch}"
+CONFIG_FILE="${GPT_SWITCH_CONFIG_FILE:-$STATE_ROOT/config.json}"
+PROFILE_DIR="$STATE_ROOT/profiles"
+CURRENT_FILE="$STATE_ROOT/current"
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+AUTH_FILE="$CODEX_DIR/auth.json"
+LOCK_PATH="$STATE_ROOT/.lock"
+CONTROLLER_LOCK_PATH="$STATE_ROOT/.controller-lock"
+LOCK_GATE_PATH="$STATE_ROOT/.lock-gate"
+CONTROLLER_GATE_PATH="$STATE_ROOT/.controller-gate"
+PENDING_DIR="$STATE_ROOT/pending"
+REFRESH_TXN_DIR="$STATE_ROOT/refresh-transactions"
+LOGIN_TXN_DIR="$STATE_ROOT/login-transactions"
+LOGOUT_TXN_DIR="$STATE_ROOT/logout-transactions"
+CONTROLLER_TXN_DIR="$STATE_ROOT/controller-transactions"
+DEVICE_ACTIVATION_TXN_DIR="$STATE_ROOT/device-activation-transactions"
+REFRESH_HELPER="${GPT_SWITCH_REFRESH_HELPER:-$HOME/.local/lib/gpt-switch/refresh-auth.mjs}"
+NODE_BIN="${GPT_SWITCH_NODE_BIN:-node}"
+DEFAULT_REFRESH_THRESHOLD="${GPT_SWITCH_REFRESH_THRESHOLD_SECONDS:-259200}"
+REMOTE_BIN='${HOME}/.local/bin/gpt-switch'
+SSH_BIN="${GPT_SWITCH_SSH_BIN:-/usr/bin/ssh}"
+ASKPASS_HELPER="${GPT_SWITCH_ASKPASS_HELPER:-$HOME/.local/lib/gpt-switch/codex-syncbar-askpass}"
+USAGE_HELPER="${GPT_SWITCH_USAGE_HELPER:-$HOME/.local/lib/gpt-switch/usage-summary.mjs}"
+CODEX_APP_SERVER_PATTERN='^(([^[:space:]]*/)?[c]odex([.]js)?|([^[:space:]]*/)?node[[:space:]]+[^[:space:]]*/codex([.]js)?)([[:space:]]+-c[[:space:]]+[^[:space:]]+)*[[:space:]]+app-server[[:space:]]+(proxy([[:space:]]|$)|--listen[[:space:]]+unix://)'
+
+REMOTE_LABELS=()
+REMOTE_DISPLAY_NAMES=()
+REMOTE_TARGETS=()
+REMOTE_PORTS=()
+REMOTE_AUTH_KINDS=()
+REMOTE_IDENTITIES=()
+REMOTE_CERTIFICATES=()
+REMOTE_HAS_PASSPHRASES=()
+REMOTE_CREDENTIAL_IDS=()
+
+LOCK_HELD=0
+CONTROLLER_LOCK_HELD=0
+LOCK_GATE_HELD=0
+CONTROLLER_GATE_HELD=0
+LOCK_TOKEN=""
+CONTROLLER_LOCK_TOKEN=""
+ACQUIRED_FILE_LOCK_TOKEN=""
+PREPARED_LOCK_OWNER_FILE=""
+REFRESH_APPS_STOPPED=0
+REFRESH_APP_STATE="none"
+REFRESH_RESTART_APPS=1
+LOGIN_ROLLBACK_NEEDED=0
+LOGIN_BACKUP_DIR=""
+LOGIN_PROFILE_FILE=""
+LOGIN_PROFILE_EXISTED=0
+LOGIN_ACTIVE_FLAG=0
+LOGIN_CURRENT_EXISTED=0
+SWAP_ROLLBACK_NEEDED=0
+SWAP_BACKUP_DIR=""
+SWAP_FIRST_FILE=""
+SWAP_SECOND_FILE=""
+BOOTSTRAP_ROLLBACK_NEEDED=0
+BOOTSTRAP_REMOTE_INDEX=-1
+BOOTSTRAP_REMOTE_SNAPSHOT=""
+
+die() {
+  printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2
+  exit 1
+}
+
+warn() {
+  printf '%s: warning: %s\n' "$PROGRAM_NAME" "$*" >&2
+}
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  gpt-switch PROFILE [--no-restart-app]
+  gpt-switch switch PROFILE [--no-restart-app]
+  gpt-switch refresh-if-needed [PROFILE|all] [--threshold-seconds N]
+  gpt-switch refresh [PROFILE|all]
+  gpt-switch sync-access [PROFILE|all]
+  gpt-switch import-login PROFILE [--replace-account]
+  gpt-switch recover-controller
+  gpt-switch reconcile-profile-swap FINGERPRINT1 FINGERPRINT2
+  gpt-switch logout PROFILE --fallback PROFILE
+  gpt-switch cleanup-logouts
+  gpt-switch status
+  gpt-switch status-json
+  gpt-switch usage-summary
+  gpt-switch accounts-json
+  gpt-switch test-device DEVICE-ID
+  gpt-switch bootstrap-device DEVICE-ID
+  gpt-switch --version
+  gpt-switch help
+
+Profiles are stable positive integer IDs stored in config.json. Their display
+order never changes auth files or Chromium profile directories.
+
+Options:
+  --no-restart-app  Switch credential files without restarting clients.
+                    Intended for testing only.
+  --threshold-seconds N
+                    Refresh when an access token has at most N seconds left.
+                    The default is 259200 seconds (three days).
+
+Refresh model:
+  The MacBook stores the only full credentials. SSH replicas receive an
+  access-only auth.json whose refresh_token field is an empty string. Every
+  refresh check also retries replicas that were previously unreachable.
+
+Login import:
+  Reads a full Codex auth.json from standard input and installs it under the
+  same controller/local locks used by refresh and switching. The active Mac
+  copy is updated in the same transaction when the imported profile is active.
+
+Profile management:
+  logout first moves all configured nodes to an explicit fallback profile,
+  then removes the selected credential slot. Legacy profile-slot recovery is
+  internal and is not exposed as a public account-management command.
+
+By default, running clients are stopped before the credential switch and the
+local desktop app is reopened afterward. Run this command from Terminal.app or
+another shell outside the ChatGPT/Codex desktop app.
+USAGE
+}
+
+require_usage_helper() {
+  [ -f "$USAGE_HELPER" ] && [ ! -L "$USAGE_HELPER" ] || die "usage summary helper is unavailable"
+  [ "$(file_owner_id "$USAGE_HELPER")" = "$(id -u)" ] || die "usage summary helper owner is unsafe"
+  case "$(file_mode "$USAGE_HELPER")" in 500|700|755) ;; *) die "usage summary helper permissions are unsafe" ;; esac
+}
+
+jq_usage_summary() {
+  local buckets program scanned=0 generated cutoff file
+  command -v jq >/dev/null 2>&1 || die "jq is required for usage collection"
+  ensure_dirs
+  buckets=$(mktemp "$STATE_ROOT/.usage-jq-buckets.XXXXXX") || die "could not prepare usage collection"
+  program=$(mktemp "$STATE_ROOT/.usage-jq-program.XXXXXX") || { rm -f "$buckets"; die "could not prepare usage collection"; }
+  chmod 600 "$buckets" "$program"
+  trap 'rm -f "$buckets" "$program"' RETURN
+  cat >"$program" <<'JQ'
+def tokens($v): {
+  inputTokens: ($v.input_tokens // 0), cachedInputTokens: ($v.cached_input_tokens // 0),
+  cacheWriteInputTokens: ($v.cache_write_input_tokens // 0), outputTokens: ($v.output_tokens // 0),
+  reasoningOutputTokens: ($v.reasoning_output_tokens // 0), totalTokens: ($v.total_tokens // 0)
+};
+def delta($a; $b):
+  if ($a.inputTokens < $b.inputTokens or $a.cachedInputTokens < $b.cachedInputTokens or
+      $a.outputTokens < $b.outputTokens or $a.totalTokens < $b.totalTokens)
+  then $a
+  else {
+    inputTokens: ($a.inputTokens - $b.inputTokens),
+    cachedInputTokens: ($a.cachedInputTokens - $b.cachedInputTokens),
+    cacheWriteInputTokens: ($a.cacheWriteInputTokens - $b.cacheWriteInputTokens),
+    outputTokens: ($a.outputTokens - $b.outputTokens),
+    reasoningOutputTokens: ($a.reasoningOutputTokens - $b.reasoningOutputTokens),
+    totalTokens: ($a.totalTokens - $b.totalTokens)
+  } end;
+def add_bucket($key; $model; $tier; $inc):
+  if .buckets[$key] == null then
+    .buckets[$key] = {model:$model,serviceTier:$tier,inputTokens:0,cachedInputTokens:0,
+      cacheWriteInputTokens:0,outputTokens:0,reasoningOutputTokens:0,totalTokens:0,requests:0}
+  else . end |
+  .buckets[$key].inputTokens += $inc.inputTokens |
+  .buckets[$key].cachedInputTokens += $inc.cachedInputTokens |
+  .buckets[$key].cacheWriteInputTokens += $inc.cacheWriteInputTokens |
+  .buckets[$key].outputTokens += $inc.outputTokens |
+  .buckets[$key].reasoningOutputTokens += $inc.reasoningOutputTokens |
+  .buckets[$key].totalTokens += $inc.totalTokens |
+  .buckets[$key].requests += 1;
+reduce inputs as $e ({model:null,tier:"default",last:null,buckets:{}};
+  if ($e.type == "event_msg" and $e.payload.type == "thread_settings_applied") then
+    .model = ($e.payload.thread_settings.model // .model) |
+    .tier = ($e.payload.thread_settings.service_tier // .tier)
+  elif $e.type == "turn_context" then
+    .model = ($e.payload.model // .model) | .tier = ($e.payload.service_tier // .tier)
+  elif ($e.type == "event_msg" and $e.payload.type == "token_count" and $e.payload.info != null) then
+    (tokens($e.payload.info.total_token_usage)) as $current |
+    (tokens($e.payload.info.last_token_usage)) as $lastUsage |
+    if .model == null then
+      if $current.totalTokens > 0 then .last = $current else . end
+    else
+      . as $state |
+      (if $current.totalTokens > 0 then
+         (if $state.last == null then $lastUsage else delta($current; $state.last) end)
+       else $lastUsage end) as $inc |
+      (if $current.totalTokens > 0 then .last = $current else . end) |
+      if ($inc.totalTokens > 0 and (($e.timestamp // $now) >= $cutoff)) then
+        add_bucket(($state.model + "\u001f" + $state.tier); $state.model; $state.tier; $inc)
+      else . end
+    end
+  else . end
+) | .buckets[]?
+JQ
+  generated=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  if cutoff=$(date -u -v-30d '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null); then :
+  else cutoff=$(date -u -d '30 days ago' '+%Y-%m-%dT%H:%M:%SZ') || die "could not calculate usage window"; fi
+  if [ -d "$CODEX_DIR/sessions" ]; then
+    while IFS= read -r -d '' file; do
+      scanned=$((scanned + 1))
+      jq -nc --arg cutoff "$cutoff" --arg now "$generated" -f "$program" "$file" >>"$buckets" 2>/dev/null || true
+    done < <(find "$CODEX_DIR/sessions" -type f -name '*.jsonl' -print0)
+  fi
+  jq -sc --arg generatedAt "$generated" --arg windowStartedAt "$cutoff" --argjson scannedFiles "$scanned" '
+    reduce .[] as $b ({};
+      ($b.model + "\u001f" + $b.serviceTier) as $key |
+      if .[$key] == null then .[$key] = $b else
+        .[$key].inputTokens += $b.inputTokens |
+        .[$key].cachedInputTokens += $b.cachedInputTokens |
+        .[$key].cacheWriteInputTokens += $b.cacheWriteInputTokens |
+        .[$key].outputTokens += $b.outputTokens |
+        .[$key].reasoningOutputTokens += $b.reasoningOutputTokens |
+        .[$key].totalTokens += $b.totalTokens |
+        .[$key].requests += $b.requests end
+    ) | [.[]] | sort_by(-.totalTokens) as $buckets |
+    (reduce $buckets[] as $b ({inputTokens:0,cachedInputTokens:0,cacheWriteInputTokens:0,
+      outputTokens:0,reasoningOutputTokens:0,totalTokens:0,requests:0};
+      .inputTokens += $b.inputTokens | .cachedInputTokens += $b.cachedInputTokens |
+      .cacheWriteInputTokens += $b.cacheWriteInputTokens | .outputTokens += $b.outputTokens |
+      .reasoningOutputTokens += $b.reasoningOutputTokens | .totalTokens += $b.totalTokens |
+      .requests += $b.requests)) as $totals |
+    {schemaVersion:4,generatedAt:$generatedAt,windowDays:30,windowStartedAt:$windowStartedAt,
+      scannedFiles:$scannedFiles,
+      requests:$totals.requests,inputTokens:$totals.inputTokens,
+      cachedInputTokens:$totals.cachedInputTokens,cacheWriteInputTokens:$totals.cacheWriteInputTokens,
+      outputTokens:$totals.outputTokens,reasoningOutputTokens:$totals.reasoningOutputTokens,
+      totalTokens:$totals.totalTokens,buckets:$buckets,errors:[]}
+  ' "$buckets"
+  rm -f "$buckets" "$program"
+  trap - RETURN
+}
+
+node_usage_summary() {
+  require_usage_helper
+  if command -v "$NODE_BIN" >/dev/null 2>&1; then
+    "$NODE_BIN" "$USAGE_HELPER" "$CODEX_DIR/sessions" "$STATE_ROOT/usage-cache.json"
+  else
+    jq_usage_summary
+  fi
+}
+
+validate_profile_name() {
+  local profile="${1:-}"
+  case "$profile" in
+    ''|0|*[!0-9]*) die "profile must be a positive integer" ;;
+    *) return 0 ;;
+  esac
+}
+
+is_profile_name() {
+  case "${1:-}" in ''|0|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+
+valid_profile_pair() {
+  is_profile_name "${1:-}" && is_profile_name "${2:-}" && [ "$1" != "$2" ]
+}
+
+list_profile_ids() {
+  local entry name
+  if [ -f "$CONFIG_FILE" ] && [ ! -L "$CONFIG_FILE" ] && jq -e '.schemaVersion == 1 and (.accounts | type == "array")' "$CONFIG_FILE" >/dev/null 2>&1; then
+    jq -r '.accounts[].id | select(type == "number" and . > 0 and floor == .)' "$CONFIG_FILE"
+    return
+  fi
+  for entry in "$PROFILE_DIR"/*.auth.json; do
+    [ -e "$entry" ] || continue
+    name=${entry##*/}
+    name=${name%.auth.json}
+    is_profile_name "$name" && printf '%s\n' "$name"
+  done | sort -n
+}
+
+load_configuration() {
+  local wanted="${1:-}"
+  local id display host port username credential_id authentication identity certificate has_password has_passphrase enabled parsed found=0
+  [ -e "$CONFIG_FILE" ] || return 0
+  [ -f "$CONFIG_FILE" ] && [ ! -L "$CONFIG_FILE" ] || die "configuration must be a regular non-symlink file"
+  [ "$(file_mode "$CONFIG_FILE")" = 600 ] || die "configuration must have mode 600"
+  jq -e '
+    .schemaVersion == 1 and
+    (.nextAccountID | type == "number" and floor == . and . > 0) and
+    (.accounts | type == "array" and length > 0) and
+    (all(.accounts[];
+      type == "object" and
+      (.id | type == "number" and floor == . and . > 0) and
+      (.email | type == "string" and length > 0))) and
+    (([.accounts[].id] | length) == ([.accounts[].id] | unique | length)) and
+    (.devices | type == "array") and
+    (all(.devices[];
+      type == "object" and
+      (.id | type == "string" and test("^[a-z0-9][a-z0-9-]{0,62}$") and . != "macbook") and
+      (.displayName | type == "string" and length > 0 and length <= 64 and (test("[\u0000-\u001F\u007F]") | not)) and
+      (.host | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$")) and
+      (.port | type == "number" and floor == . and . >= 1 and . <= 65535) and
+      (.username | type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")) and
+      ((.credentialID == null) or
+        (.credentialID | type == "string" and
+          test("^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[1-5][A-Fa-f0-9]{3}-[89ABab][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}$"))) and
+      (.authentication == "openSSHConfig" or .authentication == "privateKey" or .authentication == "password") and
+      ((.identityFile == null) or (.identityFile | type == "string")) and
+      ((.certificateFile == null) or (.certificateFile | type == "string")) and
+      (.hasPassword | type == "boolean") and
+      (.hasKeyPassphrase | type == "boolean") and
+      ((.authentication != "password") or (.hasPassword == true and .credentialID != null)) and
+      ((.hasKeyPassphrase == false) or .credentialID != null) and
+      ((.authentication != "privateKey") or
+        (.identityFile | type == "string" and startswith("/")) and
+        ((.certificateFile == null) or (.certificateFile | startswith("/")))) and
+      (.enabled | type == "boolean"))) and
+    (([.devices[].id] | length) == ([.devices[].id] | unique | length)) and
+    (([.devices[].credentialID | select(. != null)] | length) ==
+      ([.devices[].credentialID | select(. != null)] | unique | length))
+  ' "$CONFIG_FILE" >/dev/null || \
+    die "configuration is invalid"
+
+  parsed=$(mktemp "$STATE_ROOT/.config-devices.XXXXXX") || die "could not prepare configuration"
+  chmod 600 "$parsed"
+  if ! jq -r '.devices[] | [
+      .id, .displayName, .host, (.port|tostring), .username, (.credentialID // .id), .authentication,
+      (.identityFile // ""), (.certificateFile // ""),
+      (.hasPassword|tostring), (.hasKeyPassphrase|tostring), (.enabled|tostring)
+    ] | join("\u001f")' "$CONFIG_FILE" >"$parsed"; then
+    rm -f "$parsed"
+    die "configuration device parsing failed"
+  fi
+
+  REMOTE_LABELS=()
+  REMOTE_DISPLAY_NAMES=()
+  REMOTE_TARGETS=()
+  REMOTE_PORTS=()
+  REMOTE_AUTH_KINDS=()
+  REMOTE_IDENTITIES=()
+  REMOTE_CERTIFICATES=()
+  REMOTE_HAS_PASSPHRASES=()
+  REMOTE_CREDENTIAL_IDS=()
+  while IFS=$'\037' read -r id display host port username credential_id authentication identity certificate has_password has_passphrase enabled; do
+    if [ -n "$wanted" ]; then
+      [ "$id" = "$wanted" ] || continue
+    else
+      [ "$enabled" = true ] || continue
+    fi
+    case "$id" in ''|*[!a-z0-9-]*|-*) die "unsafe device id in configuration" ;; esac
+    case "$host" in ''|*[!a-zA-Z0-9._:-]*|-*) die "unsafe SSH host in configuration" ;; esac
+    case "$username" in ''|*[!a-zA-Z0-9._-]*|-*) die "unsafe SSH username in configuration" ;; esac
+    case "$credential_id" in ''|*[!A-Za-z0-9-]*|-*) die "unsafe SSH credential id in configuration" ;; esac
+    case "$port" in ''|*[!0-9]*) die "unsafe SSH port in configuration" ;; esac
+    [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || die "unsafe SSH port in configuration"
+    case "$authentication" in openSSHConfig|privateKey|password) ;; *) die "unsupported SSH authentication mode" ;; esac
+    case "$identity$certificate" in *$'\n'*|*$'\r'*|*$'\t'*) die "unsafe SSH credential path" ;; esac
+    REMOTE_LABELS+=("$id")
+    REMOTE_DISPLAY_NAMES+=("$display")
+    REMOTE_TARGETS+=("$username@$host")
+    REMOTE_PORTS+=("$port")
+    REMOTE_AUTH_KINDS+=("$authentication")
+    REMOTE_IDENTITIES+=("$identity")
+    REMOTE_CERTIFICATES+=("$certificate")
+    [ "$has_passphrase" = true ] && REMOTE_HAS_PASSPHRASES+=(1) || REMOTE_HAS_PASSPHRASES+=(0)
+    REMOTE_CREDENTIAL_IDS+=("$credential_id")
+    found=1
+  done <"$parsed"
+  rm -f "$parsed"
+  [ -z "$wanted" ] || [ "$found" -eq 1 ] || die "device not found: $wanted"
+}
+
+ensure_dirs() {
+  umask 077
+  [ ! -L "$STATE_ROOT" ] || die "refusing symlinked state directory: $STATE_ROOT"
+  [ ! -L "$CODEX_DIR" ] || die "refusing symlinked Codex directory: $CODEX_DIR"
+  mkdir -p "$PROFILE_DIR" "$CODEX_DIR" "$PENDING_DIR" "$REFRESH_TXN_DIR" "$LOGIN_TXN_DIR" "$LOGOUT_TXN_DIR" "$CONTROLLER_TXN_DIR"
+  chmod 700 "$STATE_ROOT" "$PROFILE_DIR" "$CODEX_DIR" "$PENDING_DIR" "$REFRESH_TXN_DIR" "$LOGIN_TXN_DIR" "$LOGOUT_TXN_DIR" "$CONTROLLER_TXN_DIR"
+  recover_profile_swap_transactions
+}
+
+profile_path() {
+  printf '%s/%s.auth.json\n' "$PROFILE_DIR" "$1"
+}
+
+validate_auth_file() {
+  local file="$1"
+  [ -f "$file" ] || return 1
+  [ ! -L "$file" ] || return 1
+  jq -e '
+    (.auth_mode == "chatgpt") and
+    (.tokens | type == "object") and
+    (.tokens.id_token | type == "string" and length > 0) and
+    (.tokens.account_id | type == "string" and length > 0) and
+    (.tokens.access_token | type == "string" and length > 0) and
+    (.tokens.refresh_token | type == "string")
+  ' "$file" >/dev/null 2>&1
+}
+
+validate_full_auth_file() {
+  local file="$1"
+  validate_auth_file "$file" || return 1
+  jq -e '.tokens.refresh_token | type == "string" and length > 0' "$file" >/dev/null 2>&1
+}
+
+validate_access_only_auth_file() {
+  local file="$1"
+  validate_auth_file "$file" || return 1
+  jq -e '.tokens.refresh_token == ""' "$file" >/dev/null 2>&1
+}
+
+file_owner_id() {
+  local file="$1"
+  if stat -c '%u' "$file" >/dev/null 2>&1; then
+    stat -c '%u' "$file"
+  else
+    stat -f '%u' "$file"
+  fi
+}
+
+validate_secure_auth_file() {
+  local file="$1"
+  local kind="${2:-either}"
+  case "$kind" in
+    full) validate_full_auth_file "$file" || return 1 ;;
+    access-only) validate_access_only_auth_file "$file" || return 1 ;;
+    either) validate_auth_file "$file" || return 1 ;;
+    *) return 1 ;;
+  esac
+  [ "$(file_mode "$file")" = "600" ] || return 1
+  [ "$(file_owner_id "$file")" = "$(id -u)" ] || return 1
+}
+
+account_id() {
+  jq -er '.tokens.account_id | strings | select(length > 0)' "$1"
+}
+
+fingerprint() {
+  local id
+  id=$(account_id "$1") || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$id" | sha256sum | awk '{print substr($1,1,12)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$id" | shasum -a 256 | awk '{print substr($1,1,12)}'
+  else
+    die "sha256sum or shasum is required"
+  fi
+}
+
+token_fingerprint() {
+  local file="$1"
+  local token
+  token=$(jq -er '.tokens.access_token | strings | select(length > 0)' "$file") || return 1
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$token" | sha256sum | awk '{print substr($1,1,12)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$token" | shasum -a 256 | awk '{print substr($1,1,12)}'
+  else
+    die "sha256sum or shasum is required"
+  fi
+}
+
+credential_kind() {
+  local file="$1"
+  if validate_access_only_auth_file "$file"; then
+    printf 'access-only\n'
+  elif validate_full_auth_file "$file"; then
+    printf 'full\n'
+  else
+    printf 'invalid\n'
+    return 1
+  fi
+}
+
+access_expiry() {
+  local file="$1"
+  local payload padding decoded
+  payload=$(jq -er '.tokens.access_token | split(".") | select(length == 3) | .[1]' "$file") || return 1
+  case $((${#payload} % 4)) in
+    0) padding="" ;;
+    2) padding="==" ;;
+    3) padding="=" ;;
+    *) return 1 ;;
+  esac
+  decoded=$(printf '%s%s' "$payload" "$padding" | tr '_-' '/+' | openssl base64 -d -A 2>/dev/null) || return 1
+  printf '%s' "$decoded" | jq -er '.exp | numbers | floor' 2>/dev/null
+}
+
+file_mode() {
+  local file="$1"
+  if stat -c '%a' "$file" >/dev/null 2>&1; then
+    stat -c '%a' "$file"
+  else
+    stat -f '%Lp' "$file"
+  fi
+}
+
+atomic_copy() {
+  local source="$1"
+  local destination="$2"
+  local destination_dir temporary
+  destination_dir=$(dirname "$destination")
+  [ ! -L "$destination" ] || die "refusing symlinked destination: $destination"
+  temporary=$(mktemp "$destination_dir/.gpt-switch.XXXXXX")
+  if ! cp "$source" "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! chmod 600 "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv -f "$temporary" "$destination"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+
+atomic_write_current() {
+  local profile="$1"
+  local temporary
+  [ ! -L "$CURRENT_FILE" ] || die "refusing symlinked current marker: $CURRENT_FILE"
+  temporary=$(mktemp "$STATE_ROOT/.current.XXXXXX")
+  if ! printf '%s\n' "$profile" >"$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! chmod 600 "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  if ! mv -f "$temporary" "$CURRENT_FILE"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+
+lock_owner_file_safe() {
+  local owner_file="$1"
+  [ -f "$owner_file" ] && [ ! -L "$owner_file" ] || return 1
+  [ "$(file_owner_id "$owner_file")" = "$(id -u)" ] || return 1
+  [ "$(file_mode "$owner_file")" = 600 ] || return 1
+  awk '
+    NR == 1 && $0 ~ /^pid=[0-9]+$/ { pid = 1; next }
+    NR == 2 && $0 ~ /^token=[A-Za-z0-9._-]+$/ { token = 1; next }
+    { invalid = 1 }
+    END { exit !(NR == 2 && pid && token && !invalid) }
+  ' "$owner_file" >/dev/null 2>&1
+}
+
+lock_owner_pid() {
+  sed -n 's/^pid=//p' "$1" 2>/dev/null | head -n 1
+}
+
+lock_owner_token() {
+  sed -n 's/^token=//p' "$1" 2>/dev/null | head -n 1
+}
+
+lock_owner_running() {
+  local owner_file="$1"
+  local owner
+  lock_owner_file_safe "$owner_file" || return 1
+  owner=$(lock_owner_pid "$owner_file")
+  kill -0 "$owner" >/dev/null 2>&1
+}
+
+hardlink_lock_file() {
+  local source="$1"
+  local destination="$2"
+  # `ln source existing-directory` succeeds by creating a child entry on
+  # BSD/macOS. The two-argument `link` utility maps directly to link(2), so
+  # LOCK_PATH itself is the atomic create-if-absent destination everywhere.
+  command -v link >/dev/null 2>&1 || die "link utility is required for atomic locking"
+  link "$source" "$destination" 2>/dev/null
+}
+
+gate_file_safe() {
+  local gate_file="$1"
+  [ -f "$gate_file" ] && [ ! -L "$gate_file" ] || return 1
+  [ "$(file_owner_id "$gate_file")" = "$(id -u)" ] || return 1
+  [ "$(file_mode "$gate_file")" = 600 ]
+}
+
+file_identity_following_symlinks() {
+  local file="$1"
+  if stat -Lc '%d:%i' "$file" >/dev/null 2>&1; then
+    stat -Lc '%d:%i' "$file"
+  else
+    # macOS devfs reports a synthetic device id for /dev/fd/N even though
+    # stat(2) exposes the underlying file inode and metadata.
+    stat -Lf '%i' "$file"
+  fi
+}
+
+file_owner_id_following_symlinks() {
+  local file="$1"
+  if stat -Lc '%u' "$file" >/dev/null 2>&1; then
+    stat -Lc '%u' "$file"
+  else
+    stat -Lf '%u' "$file"
+  fi
+}
+
+file_mode_following_symlinks() {
+  local file="$1"
+  if stat -Lc '%a' "$file" >/dev/null 2>&1; then
+    stat -Lc '%a' "$file"
+  else
+    stat -Lf '%Lp' "$file"
+  fi
+}
+
+prepare_gate_file() {
+  local path="$1"
+  local label="$2"
+  local temporary
+  temporary=$(mktemp "$STATE_ROOT/.$label-gate.XXXXXX")
+  chmod 600 "$temporary" || { rm -f "$temporary"; die "could not prepare $label gate"; }
+  if ! hardlink_lock_file "$temporary" "$path"; then
+    if ! gate_file_safe "$path"; then
+      rm -f "$temporary"
+      die "unsafe $label gate file"
+    fi
+  fi
+  rm -f "$temporary"
+  gate_file_safe "$path" || die "unsafe $label gate file"
+}
+
+lock_open_gate_fd() {
+  local path="$1"
+  local label="$2"
+  local fd="$3"
+  local locked=0
+  case "$fd" in
+    8) exec 8<>"$path" ;;
+    9) exec 9<>"$path" ;;
+    *) die "invalid $label gate descriptor" ;;
+  esac
+
+  if ! gate_file_safe "$path" || \
+     [ "$(file_owner_id_following_symlinks "/dev/fd/$fd")" != "$(id -u)" ] || \
+     [ "$(file_mode_following_symlinks "/dev/fd/$fd")" != 600 ] || \
+     [ "$(file_identity_following_symlinks "/dev/fd/$fd")" != \
+       "$(file_identity_following_symlinks "$path")" ]; then
+    case "$fd" in 8) exec 8>&- ;; 9) exec 9>&- ;; esac
+    die "unsafe $label gate file changed while opening"
+  fi
+
+  if [ -x /usr/bin/lockf ]; then
+    /usr/bin/lockf -s -t 0 "$fd" && locked=1
+  elif command -v flock >/dev/null 2>&1; then
+    flock -n "$fd" && locked=1
+  else
+    case "$fd" in 8) exec 8>&- ;; 9) exec 9>&- ;; esac
+    die "lockf or flock is required for $label locking"
+  fi
+  if [ "$locked" -ne 1 ]; then
+    case "$fd" in 8) exec 8>&- ;; 9) exec 9>&- ;; esac
+    die "another $label operation is already running on $(hostname)"
+  fi
+}
+
+acquire_switch_gate() {
+  prepare_gate_file "$LOCK_GATE_PATH" switch
+  lock_open_gate_fd "$LOCK_GATE_PATH" switch 8
+  LOCK_GATE_HELD=1
+  trap cleanup_lock_acquisition EXIT HUP INT TERM
+}
+
+acquire_controller_gate() {
+  prepare_gate_file "$CONTROLLER_GATE_PATH" controller
+  lock_open_gate_fd "$CONTROLLER_GATE_PATH" controller 9
+  CONTROLLER_GATE_HELD=1
+  trap cleanup_lock_acquisition EXIT HUP INT TERM
+}
+
+release_switch_gate() {
+  if [ "$LOCK_GATE_HELD" -eq 1 ]; then
+    exec 8>&-
+    LOCK_GATE_HELD=0
+  fi
+}
+
+release_controller_gate() {
+  if [ "$CONTROLLER_GATE_HELD" -eq 1 ]; then
+    exec 9>&-
+    CONTROLLER_GATE_HELD=0
+  fi
+}
+
+cleanup_lock_acquisition() {
+  if [ -n "$PREPARED_LOCK_OWNER_FILE" ]; then
+    rm -f "$PREPARED_LOCK_OWNER_FILE"
+    PREPARED_LOCK_OWNER_FILE=""
+  fi
+  release_switch_gate
+  if [ "$CONTROLLER_LOCK_HELD" -eq 1 ]; then
+    release_controller_lock
+  else
+    release_controller_gate
+  fi
+}
+
+restore_renamed_file_lock() {
+  local stale="$1"
+  local path="$2"
+  if hardlink_lock_file "$stale" "$path"; then
+    rm -f "$stale"
+    return 0
+  fi
+  return 1
+}
+
+legacy_lock_directory_safe() {
+  local directory="$1"
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  [ "$(file_owner_id "$directory")" = "$(id -u)" ] || return 1
+  [ "$(file_mode "$directory")" = 700 ] || return 1
+  legacy_lock_owner_file_safe "$directory/owner" || return 1
+  [ -z "$(find "$directory" -mindepth 1 -maxdepth 1 ! -name owner -print -quit 2>/dev/null)" ]
+}
+
+legacy_lock_owner_file_safe() {
+  local owner_file="$1"
+  [ -f "$owner_file" ] && [ ! -L "$owner_file" ] || return 1
+  [ "$(file_owner_id "$owner_file")" = "$(id -u)" ] || return 1
+  [ "$(file_mode "$owner_file")" = 600 ] || return 1
+  awk '
+    NR == 1 && $0 ~ /^pid=[0-9]+$/ { pid = 1; next }
+    { invalid = 1 }
+    END { exit !(NR == 1 && pid && !invalid) }
+  ' "$owner_file" >/dev/null 2>&1
+}
+
+legacy_lock_owner_running() {
+  local owner_file="$1"
+  local owner
+  legacy_lock_owner_file_safe "$owner_file" || return 1
+  owner=$(lock_owner_pid "$owner_file")
+  kill -0 "$owner" >/dev/null 2>&1
+}
+
+migrate_legacy_lock_directory() {
+  local directory="$1"
+  local label="$2"
+  local stale
+  legacy_lock_directory_safe "$directory" || die "unsafe legacy $label lock directory"
+  if legacy_lock_owner_running "$directory/owner"; then
+    die "another $label operation is already running on $(hostname)"
+  fi
+
+  stale="$directory.legacy-stale.$$.$(date +%s).${RANDOM:-0}"
+  if mv "$directory" "$stale" 2>/dev/null; then
+    if ! legacy_lock_directory_safe "$stale"; then
+      if [ ! -e "$directory" ]; then mv "$stale" "$directory" 2>/dev/null || true; fi
+      die "unsafe legacy $label lock directory changed during migration"
+    fi
+    if legacy_lock_owner_running "$stale/owner"; then
+      if [ ! -e "$directory" ]; then mv "$stale" "$directory" 2>/dev/null || true; fi
+      die "another $label operation is already running on $(hostname)"
+    fi
+    rm -rf "$stale" || die "could not remove stale legacy $label lock"
+  fi
+}
+
+remove_stale_file_lock() {
+  local path="$1"
+  local label="$2"
+  local stale
+  stale="$path.stale.$$.$(date +%s).${RANDOM:-0}"
+  if mv "$path" "$stale" 2>/dev/null; then
+    if ! lock_owner_file_safe "$stale"; then
+      restore_renamed_file_lock "$stale" "$path" || true
+      die "unsafe $label lock changed during stale recovery"
+    fi
+    if lock_owner_running "$stale"; then
+      restore_renamed_file_lock "$stale" "$path" || true
+      die "another $label operation is already running on $(hostname)"
+    fi
+    rm -f "$stale" || die "could not remove stale $label lock"
+  fi
+}
+
+acquire_file_lock() {
+  local path="$1"
+  local label="$2"
+  local token temporary
+  token="$$.$(date +%s).${RANDOM:-0}"
+  temporary=$(mktemp "$STATE_ROOT/.$label-lock-owner.XXXXXX")
+  PREPARED_LOCK_OWNER_FILE="$temporary"
+  if ! printf 'pid=%s\ntoken=%s\n' "$$" "$token" >"$temporary" || \
+     ! chmod 600 "$temporary" || ! lock_owner_file_safe "$temporary"; then
+    rm -f "$temporary"
+    die "could not prepare $label lock owner"
+  fi
+
+  while ! hardlink_lock_file "$temporary" "$path"; do
+    [ ! -L "$path" ] || { rm -f "$temporary"; die "refusing symlinked $label lock"; }
+    if [ -d "$path" ]; then
+      migrate_legacy_lock_directory "$path" "$label"
+      continue
+    fi
+    [ -e "$path" ] || continue
+    if ! lock_owner_file_safe "$path"; then
+      rm -f "$temporary"
+      die "unsafe $label lock file"
+    fi
+    if lock_owner_running "$path"; then
+      rm -f "$temporary"
+      die "another $label operation is already running on $(hostname)"
+    fi
+    remove_stale_file_lock "$path" "$label"
+  done
+
+  rm -f "$temporary"
+  PREPARED_LOCK_OWNER_FILE=""
+  ACQUIRED_FILE_LOCK_TOKEN="$token"
+}
+
+acquire_lock() {
+  ensure_dirs
+  acquire_switch_gate
+  acquire_file_lock "$LOCK_PATH" switch
+  LOCK_TOKEN="$ACQUIRED_FILE_LOCK_TOKEN"
+  LOCK_HELD=1
+  trap cleanup_locks EXIT HUP INT TERM
+}
+
+release_lock() {
+  if [ "$LOCK_HELD" -eq 1 ]; then
+    if lock_owner_file_safe "$LOCK_PATH" && [ -n "$LOCK_TOKEN" ] && \
+       [ "$(lock_owner_token "$LOCK_PATH")" = "$LOCK_TOKEN" ]; then
+      rm -f "$LOCK_PATH" || warn "could not release switch lock cleanly"
+    else
+      warn "switch lock ownership changed; refusing to remove it"
+    fi
+    LOCK_HELD=0
+    LOCK_TOKEN=""
+  fi
+  release_switch_gate
+}
+
+acquire_controller_lock() {
+  [ "$CONTROLLER_LOCK_HELD" -eq 0 ] || return 0
+  ensure_dirs
+  acquire_controller_gate
+  acquire_file_lock "$CONTROLLER_LOCK_PATH" controller
+  CONTROLLER_LOCK_TOKEN="$ACQUIRED_FILE_LOCK_TOKEN"
+  CONTROLLER_LOCK_HELD=1
+  trap cleanup_locks EXIT HUP INT TERM
+}
+
+release_controller_lock() {
+  if [ "$CONTROLLER_LOCK_HELD" -eq 1 ]; then
+    if lock_owner_file_safe "$CONTROLLER_LOCK_PATH" && [ -n "$CONTROLLER_LOCK_TOKEN" ] && \
+       [ "$(lock_owner_token "$CONTROLLER_LOCK_PATH")" = "$CONTROLLER_LOCK_TOKEN" ]; then
+      rm -f "$CONTROLLER_LOCK_PATH" || warn "could not release controller lock cleanly"
+    else
+      warn "controller lock ownership changed; refusing to remove it"
+    fi
+    CONTROLLER_LOCK_HELD=0
+    CONTROLLER_LOCK_TOKEN=""
+  fi
+  release_controller_gate
+}
+
+cleanup_locks() {
+  if [ -n "$PREPARED_LOCK_OWNER_FILE" ]; then
+    rm -f "$PREPARED_LOCK_OWNER_FILE"
+    PREPARED_LOCK_OWNER_FILE=""
+  fi
+  rollback_profile_swap_in_progress
+  rollback_login_import
+  rollback_remote_bootstrap_in_progress || true
+  if [ -n "$LOGIN_BACKUP_DIR" ]; then
+    rm -rf "$LOGIN_BACKUP_DIR"
+    LOGIN_BACKUP_DIR=""
+  fi
+  if [ "$REFRESH_APPS_STOPPED" -eq 1 ]; then
+    start_local_apps "$REFRESH_APP_STATE"
+    REFRESH_APPS_STOPPED=0
+    REFRESH_APP_STATE="none"
+  fi
+  release_lock
+  release_controller_lock
+}
+
+rollback_login_import() {
+  local rollback_failed=0 preserved=""
+  [ "$LOGIN_ROLLBACK_NEEDED" -eq 1 ] || return 0
+  warn "login import did not complete; restoring the previous local credentials"
+  if [ "$LOGIN_PROFILE_EXISTED" -eq 1 ]; then
+    if [ -f "$LOGIN_BACKUP_DIR/profile.auth.json" ]; then
+      atomic_copy "$LOGIN_BACKUP_DIR/profile.auth.json" "$LOGIN_PROFILE_FILE" || \
+        { warn "could not restore canonical profile"; rollback_failed=1; }
+    else
+      warn "canonical profile backup is missing"
+      rollback_failed=1
+    fi
+  else
+    rm -f "$LOGIN_PROFILE_FILE" || rollback_failed=1
+  fi
+  if [ "$LOGIN_ACTIVE_FLAG" -eq 1 ]; then
+    if [ -f "$LOGIN_BACKUP_DIR/active.auth.json" ]; then
+      atomic_copy "$LOGIN_BACKUP_DIR/active.auth.json" "$AUTH_FILE" || \
+        { warn "could not restore active auth"; rollback_failed=1; }
+    else
+      warn "active auth backup is missing"
+      rollback_failed=1
+    fi
+    if [ "$LOGIN_CURRENT_EXISTED" -eq 1 ]; then
+      if [ -f "$LOGIN_BACKUP_DIR/current" ]; then
+        atomic_copy "$LOGIN_BACKUP_DIR/current" "$CURRENT_FILE" || \
+          { warn "could not restore current marker"; rollback_failed=1; }
+      else
+        warn "current marker backup is missing"
+        rollback_failed=1
+      fi
+    else
+      rm -f "$CURRENT_FILE" || rollback_failed=1
+    fi
+  fi
+  preserved="$LOGIN_BACKUP_DIR"
+  if [ "$rollback_failed" -eq 0 ]; then
+    rm -rf "$LOGIN_BACKUP_DIR" || rollback_failed=1
+  fi
+  LOGIN_BACKUP_DIR=""
+  LOGIN_ROLLBACK_NEEDED=0
+  if [ "$rollback_failed" -ne 0 ]; then
+    warn "login rollback could not be verified; transaction was preserved at $preserved"
+    return 1
+  fi
+}
+
+sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    die "sha256sum or shasum is required"
+  fi
+}
+
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  else
+    die "sha256sum or shasum is required"
+  fi
+}
+
+remote_endpoint_fingerprint() {
+  local index="$1"
+  jq -cn \
+    --arg target "${REMOTE_TARGETS[$index]}" \
+    --argjson port "${REMOTE_PORTS[$index]}" \
+    --arg authentication "${REMOTE_AUTH_KINDS[$index]}" \
+    --arg identity "${REMOTE_IDENTITIES[$index]}" \
+    --arg certificate "${REMOTE_CERTIFICATES[$index]}" \
+    '{target:$target,port:$port,authentication:$authentication,identity:$identity,certificate:$certificate}' | \
+    sha256_stdin
+}
+
+valid_sha256() {
+  local value="${1:-}"
+  [ "${#value}" -eq 64 ] || return 1
+  case "$value" in *[!0-9a-f]*) return 1 ;; *) return 0 ;; esac
+}
+
+write_login_transaction_manifest() {
+  local directory="$1"
+  local state="$2"
+  local profile="$3"
+  local profile_existed="${4:-}"
+  local active="${5:-}"
+  local current_existed="${6:-}"
+  local incoming_sha="${7:-}"
+  local profile_backup_sha="${8:-}"
+  local active_backup_sha="${9:-}"
+  local current_backup_sha="${10:-}"
+  local temporary
+  temporary=$(mktemp "$directory/.manifest.XXXXXX") || return 1
+  case "$state" in
+    collecting)
+      if ! printf 'state=collecting profile=%s pid=%s\n' "$profile" "$$" >"$temporary"; then
+        rm -f "$temporary"
+        return 1
+      fi
+      ;;
+    prepared|committed)
+      if ! printf 'state=%s profile=%s pid=%s profile_existed=%s active=%s current_existed=%s incoming_sha=%s profile_backup_sha=%s active_backup_sha=%s current_backup_sha=%s\n' \
+          "$state" "$profile" "$$" "$profile_existed" "$active" "$current_existed" \
+          "$incoming_sha" "$profile_backup_sha" "$active_backup_sha" "$current_backup_sha" >"$temporary"; then
+        rm -f "$temporary"
+        return 1
+      fi
+      ;;
+    *)
+      rm -f "$temporary"
+      return 1
+      ;;
+  esac
+  if ! chmod 600 "$temporary" || ! mv -f "$temporary" "$directory/manifest"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+
+login_path_exists() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+login_auth_target_recoverable() {
+  local target="$1"
+  local incoming_sha="$2"
+  local previous_existed="$3"
+  local previous_sha="$4"
+  local actual_sha
+  if ! login_path_exists "$target"; then
+    [ "$previous_existed" -eq 0 ]
+    return
+  fi
+  validate_secure_auth_file "$target" full || return 1
+  actual_sha=$(sha256_file "$target") || return 1
+  [ "$actual_sha" = "$incoming_sha" ] || \
+    { [ "$previous_existed" -eq 1 ] && [ "$actual_sha" = "$previous_sha" ]; }
+}
+
+secure_current_marker_for_profile() {
+  local file="$1"
+  local profile="$2"
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  [ "$(file_mode "$file")" = 600 ] || return 1
+  [ "$(file_owner_id "$file")" = "$(id -u)" ] || return 1
+  printf '%s\n' "$profile" | cmp -s - "$file"
+}
+
+login_current_target_recoverable() {
+  local target="$1"
+  local profile="$2"
+  local previous_existed="$3"
+  local previous_sha="$4"
+  local actual_sha
+  if ! login_path_exists "$target"; then
+    [ "$previous_existed" -eq 0 ]
+    return
+  fi
+  secure_current_marker_for_profile "$target" "$profile" || return 1
+  if [ "$previous_existed" -eq 0 ]; then
+    return 0
+  fi
+  actual_sha=$(sha256_file "$target") || return 1
+  [ "$actual_sha" = "$previous_sha" ] || secure_current_marker_for_profile "$target" "$profile"
+}
+
+recover_prepared_login_transaction() {
+  local transaction="$1"
+  local profile="$2"
+  local profile_existed="$3"
+  local active="$4"
+  local current_existed="$5"
+  local incoming_sha="$6"
+  local profile_backup_sha="$7"
+  local active_backup_sha="$8"
+  local current_backup_sha="$9"
+  local profile_file incoming profile_backup active_backup current_backup
+  local actual_sha
+
+  profile_file=$(profile_path "$profile")
+  incoming="$transaction/incoming.auth.json"
+  profile_backup="$transaction/profile.auth.json"
+  active_backup="$transaction/active.auth.json"
+  current_backup="$transaction/current"
+
+  validate_secure_auth_file "$incoming" full || return 1
+  [ "$(sha256_file "$incoming")" = "$incoming_sha" ] || return 1
+
+  if [ "$profile_existed" -eq 1 ]; then
+    validate_secure_auth_file "$profile_backup" full || return 1
+    [ "$(sha256_file "$profile_backup")" = "$profile_backup_sha" ] || return 1
+  else
+    [ "$profile_backup_sha" = none ] || return 1
+    ! login_path_exists "$profile_backup" || return 1
+  fi
+
+  if [ "$active" -eq 1 ]; then
+    validate_secure_auth_file "$active_backup" full || return 1
+    [ "$(sha256_file "$active_backup")" = "$active_backup_sha" ] || return 1
+    if [ "$current_existed" -eq 1 ]; then
+      secure_current_marker_for_profile "$current_backup" "$profile" || return 1
+      [ "$(sha256_file "$current_backup")" = "$current_backup_sha" ] || return 1
+    else
+      [ "$current_backup_sha" = none ] || return 1
+      ! login_path_exists "$current_backup" || return 1
+    fi
+  else
+    [ "$current_existed" -eq 0 ] || return 1
+    [ "$active_backup_sha" = none ] && [ "$current_backup_sha" = none ] || return 1
+    ! login_path_exists "$active_backup" || return 1
+    ! login_path_exists "$current_backup" || return 1
+  fi
+
+  login_auth_target_recoverable "$profile_file" "$incoming_sha" "$profile_existed" "$profile_backup_sha" || return 1
+  if [ "$active" -eq 1 ]; then
+    login_auth_target_recoverable "$AUTH_FILE" "$incoming_sha" 1 "$active_backup_sha" || return 1
+    login_current_target_recoverable "$CURRENT_FILE" "$profile" "$current_existed" "$current_backup_sha" || return 1
+  fi
+
+  if [ "$profile_existed" -eq 1 ]; then
+    atomic_copy "$profile_backup" "$profile_file" || return 1
+  else
+    rm -f "$profile_file" || return 1
+  fi
+  if [ "$active" -eq 1 ]; then
+    atomic_copy "$active_backup" "$AUTH_FILE" || return 1
+    if [ "$current_existed" -eq 1 ]; then
+      atomic_copy "$current_backup" "$CURRENT_FILE" || return 1
+    else
+      rm -f "$CURRENT_FILE" || return 1
+    fi
+  fi
+
+  if [ "$profile_existed" -eq 1 ]; then
+    actual_sha=$(sha256_file "$profile_file") || return 1
+    [ "$actual_sha" = "$profile_backup_sha" ] || return 1
+  else
+    ! login_path_exists "$profile_file" || return 1
+  fi
+  if [ "$active" -eq 1 ]; then
+    [ "$(sha256_file "$AUTH_FILE")" = "$active_backup_sha" ] || return 1
+    if [ "$current_existed" -eq 1 ]; then
+      [ "$(sha256_file "$CURRENT_FILE")" = "$current_backup_sha" ] || return 1
+    else
+      ! login_path_exists "$CURRENT_FILE" || return 1
+    fi
+  fi
+}
+
+controller_recover_login_transactions() {
+  local transaction building name remainder manifest line state profile owner expected entries
+  local profile_existed active current_existed incoming_sha profile_backup_sha active_backup_sha current_backup_sha
+  local rc=0
+  ensure_dirs
+  acquire_lock
+  for building in "$STATE_ROOT"/.login-building.*; do
+    [ -e "$building" ] || [ -L "$building" ] || continue
+    if [ ! -d "$building" ] || [ -L "$building" ] || \
+       [ "$(file_mode "$building" 2>/dev/null || true)" != 700 ] || \
+       [ "$(file_owner_id "$building" 2>/dev/null || true)" != "$(id -u)" ]; then
+      warn "unsafe login transaction builder was preserved: $building"
+      rc=2
+      continue
+    fi
+    entries=$(find "$building" -mindepth 1 -maxdepth 1 -print 2>/dev/null)
+    if [ -z "$entries" ]; then
+      rm -rf "$building" || { warn "could not clear empty login transaction builder"; rc=2; }
+      continue
+    fi
+    name=${building##*/}
+    remainder=${name#.login-building.}
+    profile=${remainder%%.*}
+    manifest="$building/manifest"
+    if ! is_profile_name "$profile" || [ "$remainder" = "$profile" ] || \
+       [ "$entries" != "$manifest" ] || [ ! -f "$manifest" ] || [ -L "$manifest" ] || \
+       [ "$(file_mode "$manifest" 2>/dev/null || true)" != 600 ] || \
+       [ "$(file_owner_id "$manifest" 2>/dev/null || true)" != "$(id -u)" ]; then
+      warn "ambiguous login transaction builder was preserved: $building"
+      rc=2
+      continue
+    fi
+    line=$(cat "$manifest")
+    owner=$(field_value "$line" pid 2>/dev/null || true)
+    case "$owner" in ''|*[!0-9]*) owner="" ;; esac
+    expected="state=collecting profile=$profile pid=$owner"
+    if [ -z "$owner" ] || [ "$line" != "$expected" ]; then
+      warn "invalid login transaction builder was preserved: $building"
+      rc=2
+      continue
+    fi
+    rm -rf "$building" || { warn "could not clear login transaction builder"; rc=2; }
+  done
+  for transaction in "$LOGIN_TXN_DIR"/*; do
+    [ -e "$transaction" ] || [ -L "$transaction" ] || continue
+    if [ ! -d "$transaction" ] || [ -L "$transaction" ] || \
+       [ "$(file_mode "$transaction" 2>/dev/null || true)" != 700 ] || \
+       [ "$(file_owner_id "$transaction" 2>/dev/null || true)" != "$(id -u)" ]; then
+      warn "unsafe login transaction was preserved: $transaction"
+      rc=2
+      continue
+    fi
+    manifest="$transaction/manifest"
+    if [ ! -f "$manifest" ] || [ -L "$manifest" ] || \
+       [ "$(file_mode "$manifest" 2>/dev/null || true)" != 600 ] || \
+       [ "$(file_owner_id "$manifest" 2>/dev/null || true)" != "$(id -u)" ]; then
+      warn "login transaction without a secure manifest was preserved: $transaction"
+      rc=2
+      continue
+    fi
+    line=$(cat "$manifest")
+    state=$(field_value "$line" state 2>/dev/null || true)
+    profile=$(field_value "$line" profile 2>/dev/null || true)
+    owner=$(field_value "$line" pid 2>/dev/null || true)
+    case "$owner" in ''|*[!0-9]*) owner="" ;; esac
+    if ! is_profile_name "$profile" || [ -z "$owner" ] || \
+       [[ "${transaction##*/}" != "$profile".* ]]; then
+      warn "login transaction manifest is invalid and was preserved: $transaction"
+      rc=2
+      continue
+    fi
+    case "$state" in
+      collecting)
+        expected="state=collecting profile=$profile pid=$owner"
+        if [ "$line" != "$expected" ]; then
+          warn "collecting login transaction is ambiguous and was preserved: $transaction"
+          rc=2
+          continue
+        fi
+        rm -rf "$transaction" || { warn "could not clear collecting login transaction: $transaction"; rc=2; }
+        ;;
+      prepared|committed)
+        profile_existed=$(field_value "$line" profile_existed 2>/dev/null || true)
+        active=$(field_value "$line" active 2>/dev/null || true)
+        current_existed=$(field_value "$line" current_existed 2>/dev/null || true)
+        incoming_sha=$(field_value "$line" incoming_sha 2>/dev/null || true)
+        profile_backup_sha=$(field_value "$line" profile_backup_sha 2>/dev/null || true)
+        active_backup_sha=$(field_value "$line" active_backup_sha 2>/dev/null || true)
+        current_backup_sha=$(field_value "$line" current_backup_sha 2>/dev/null || true)
+        case "$profile_existed:$active:$current_existed" in
+          0:0:0|1:0:0|1:1:0|1:1:1) ;;
+          *) warn "login transaction flags are invalid and were preserved: $transaction"; rc=2; continue ;;
+        esac
+        valid_sha256 "$incoming_sha" || { warn "login transaction digest is invalid and was preserved: $transaction"; rc=2; continue; }
+        case "$profile_backup_sha" in none) [ "$profile_existed" -eq 0 ] || { rc=2; continue; } ;; *) valid_sha256 "$profile_backup_sha" || { rc=2; continue; } ;; esac
+        case "$active_backup_sha" in none) [ "$active" -eq 0 ] || { rc=2; continue; } ;; *) valid_sha256 "$active_backup_sha" || { rc=2; continue; } ;; esac
+        case "$current_backup_sha" in none) [ "$current_existed" -eq 0 ] || { rc=2; continue; } ;; *) valid_sha256 "$current_backup_sha" || { rc=2; continue; } ;; esac
+        expected="state=$state profile=$profile pid=$owner profile_existed=$profile_existed active=$active current_existed=$current_existed incoming_sha=$incoming_sha profile_backup_sha=$profile_backup_sha active_backup_sha=$active_backup_sha current_backup_sha=$current_backup_sha"
+        if [ "$line" != "$expected" ]; then
+          warn "login transaction manifest has unexpected data and was preserved: $transaction"
+          rc=2
+          continue
+        fi
+        if [ "$state" = committed ]; then
+          rm -rf "$transaction" || { warn "could not clear committed login transaction: $transaction"; rc=2; }
+        elif recover_prepared_login_transaction "$transaction" "$profile" "$profile_existed" "$active" \
+            "$current_existed" "$incoming_sha" "$profile_backup_sha" "$active_backup_sha" "$current_backup_sha"; then
+          rm -rf "$transaction" || { warn "could not clear recovered login transaction: $transaction"; rc=2; }
+        else
+          warn "prepared login recovery was ambiguous; transaction was preserved: $transaction"
+          rc=2
+        fi
+        ;;
+      *)
+        warn "login transaction state is invalid and was preserved: $transaction"
+        rc=2
+        ;;
+    esac
+  done
+  release_lock
+  return "$rc"
+}
+
+detect_active_profile() {
+  local auth_id saved profile file saved_id
+  validate_secure_auth_file "$AUTH_FILE" || return 1
+  auth_id=$(account_id "$AUTH_FILE") || return 1
+
+  saved=""
+  if [ -f "$CURRENT_FILE" ]; then
+    IFS= read -r saved <"$CURRENT_FILE" || true
+    if is_profile_name "$saved"; then
+        file=$(profile_path "$saved")
+        if validate_secure_auth_file "$file"; then
+          saved_id=$(account_id "$file") || saved_id=""
+          if [ "$auth_id" = "$saved_id" ]; then
+            printf '%s\n' "$saved"
+            return 0
+          fi
+        fi
+    fi
+  fi
+
+  for profile in $(list_profile_ids); do
+    file=$(profile_path "$profile")
+    if validate_secure_auth_file "$file"; then
+      saved_id=$(account_id "$file") || saved_id=""
+      if [ "$auth_id" = "$saved_id" ]; then
+        printf '%s\n' "$profile"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+save_active_profile() {
+  local active destination
+  active=$(detect_active_profile) || die "active auth does not match a saved profile; refusing to overwrite it"
+  destination=$(profile_path "$active")
+  atomic_copy "$AUTH_FILE" "$destination"
+  atomic_write_current "$active"
+  printf '%s\n' "$active"
+}
+
+node_preflight() {
+  local target="$1"
+  local target_file active active_fp target_fp
+  validate_profile_name "$target"
+  ensure_dirs
+  target_file=$(profile_path "$target")
+  validate_secure_auth_file "$target_file" || die "profile $target is missing, insecure, or invalid on $(hostname)"
+  active=$(detect_active_profile) || die "cannot identify the active profile on $(hostname)"
+  active_fp=$(fingerprint "$AUTH_FILE")
+  target_fp=$(fingerprint "$target_file")
+  printf 'version=%s active=%s active_fp=%s target_fp=%s\n' "$SCRIPT_VERSION" "$active" "$active_fp" "$target_fp"
+}
+
+node_switch() {
+  local target="$1"
+  local restart_clients="${2:-0}"
+  local target_file previous previous_file previous_expected previous_actual expected actual rollback_ok
+  validate_profile_name "$target"
+  case "$restart_clients" in 0|1) ;; *) die "node switch restart flag must be 0 or 1" ;; esac
+  acquire_lock
+  target_file=$(profile_path "$target")
+  validate_secure_auth_file "$target_file" || die "profile $target is missing, insecure, or invalid on $(hostname)"
+
+  previous=$(save_active_profile)
+  previous_file=$(profile_path "$previous")
+  previous_expected=$(fingerprint "$previous_file")
+  expected=$(fingerprint "$target_file")
+  atomic_copy "$target_file" "$AUTH_FILE"
+  atomic_write_current "$target"
+
+  validate_secure_auth_file "$AUTH_FILE" || die "installed auth failed security validation on $(hostname)"
+  actual=$(fingerprint "$AUTH_FILE")
+  [ "$expected" = "$actual" ] || die "account verification failed on $(hostname)"
+
+  # The controller stops clients before the distributed switch, but a remote
+  # Mac can reconnect in the gap before this node installs the new auth. Stop
+  # that generation after the atomic copy as well. Any later replacement will
+  # necessarily open the new credential.
+  if [ "$restart_clients" -eq 1 ] && [ "$previous" != "$target" ]; then
+    if ! node_stop_clients >/dev/null; then
+      rollback_ok=0
+      if atomic_copy "$previous_file" "$AUTH_FILE" && \
+         atomic_write_current "$previous" && \
+         validate_secure_auth_file "$AUTH_FILE"; then
+        previous_actual=$(fingerprint "$AUTH_FILE")
+        [ "$previous_expected" != "$previous_actual" ] || rollback_ok=1
+      fi
+      # Best effort after restoring the previous auth: a replacement created
+      # now can only load that restored credential.
+      node_stop_clients >/dev/null 2>&1 || true
+      [ "$rollback_ok" -eq 1 ] || \
+        die "could not stop Codex app-server clients and auth rollback is uncertain on $(hostname)"
+      die "could not stop Codex app-server clients; previous auth was restored on $(hostname)"
+    fi
+  fi
+
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'previous=%s active=%s fingerprint=%s\n' "$previous" "$target" "$actual"
+}
+
+node_initialize() {
+  local target="$1"
+  local target_file active expected actual
+  validate_profile_name "$target"
+  acquire_lock
+  target_file=$(profile_path "$target")
+  validate_secure_auth_file "$target_file" access-only || \
+    die "profile $target is missing, insecure, or not access-only on $(hostname)"
+
+  active=$(detect_active_profile 2>/dev/null || true)
+  if [ -z "$active" ] && [ -e "$AUTH_FILE" ]; then
+    die "existing active auth is not a recognized profile on $(hostname); refusing to overwrite it"
+  fi
+  if [ -n "$active" ] && [ "$active" != "$target" ]; then
+    save_active_profile >/dev/null
+  fi
+
+  expected=$(fingerprint "$target_file")
+  atomic_copy "$target_file" "$AUTH_FILE" || die "could not initialize active auth on $(hostname)"
+  atomic_write_current "$target" || die "could not initialize current profile marker on $(hostname)"
+  validate_secure_auth_file "$AUTH_FILE" access-only || die "initialized auth failed security validation on $(hostname)"
+  actual=$(fingerprint "$AUTH_FILE")
+  [ "$expected" = "$actual" ] || die "initialized account verification failed on $(hostname)"
+
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'active=%s fingerprint=%s state=initialized\n' "$target" "$actual"
+}
+
+node_verify() {
+  local target="$1"
+  local active profile_file expected actual
+  validate_profile_name "$target"
+  ensure_dirs
+  active=$(detect_active_profile) || die "cannot identify the active profile on $(hostname)"
+  [ "$active" = "$target" ] || die "expected profile $target but found $active on $(hostname)"
+  profile_file=$(profile_path "$target")
+  expected=$(fingerprint "$profile_file")
+  actual=$(fingerprint "$AUTH_FILE")
+  [ "$expected" = "$actual" ] || die "fingerprint mismatch on $(hostname)"
+  printf 'active=%s fingerprint=%s\n' "$active" "$actual"
+}
+
+node_status() {
+  local active fp mode auth_mode cli_state kind access_fp expires_at
+  ensure_dirs
+  if ! active=$(detect_active_profile); then
+    printf 'active=unknown fingerprint=unknown mode=unknown auth_mode=unknown cli=unknown credential=unknown access_fp=unknown expires_at=unknown\n'
+    return 1
+  fi
+  fp=$(fingerprint "$AUTH_FILE")
+  mode=$(file_mode "$AUTH_FILE")
+  auth_mode=$(jq -r '.auth_mode // "unknown"' "$AUTH_FILE")
+  kind=$(credential_kind "$AUTH_FILE" 2>/dev/null || printf 'invalid')
+  access_fp=$(token_fingerprint "$AUTH_FILE" 2>/dev/null || printf 'unknown')
+  expires_at=$(access_expiry "$AUTH_FILE" 2>/dev/null || printf 'unknown')
+  if command -v codex >/dev/null 2>&1; then
+    if codex login status >/dev/null 2>&1; then cli_state="logged-in"; else cli_state="logged-out"; fi
+  else
+    cli_state="not-installed"
+  fi
+  printf 'active=%s fingerprint=%s mode=%s auth_mode=%s cli=%s credential=%s access_fp=%s expires_at=%s\n' \
+    "$active" "$fp" "$mode" "$auth_mode" "$cli_state" "$kind" "$access_fp" "$expires_at"
+}
+
+node_inspect_access() {
+  local profile="$1"
+  local expected_access_fp="$2"
+  local profile_file active actual active_flag=0
+  validate_profile_name "$profile"
+  case "$expected_access_fp" in
+    ''|*[!0-9a-f]*) die "invalid access fingerprint" ;;
+  esac
+  profile_file=$(profile_path "$profile")
+  validate_secure_auth_file "$profile_file" access-only || die "profile $profile is not access-only on $(hostname)"
+  actual=$(token_fingerprint "$profile_file")
+  [ "$actual" = "$expected_access_fp" ] || die "profile $profile has a different access generation on $(hostname)"
+  active=$(detect_active_profile 2>/dev/null || true)
+  if [ "$active" = "$profile" ]; then
+    active_flag=1
+    validate_secure_auth_file "$AUTH_FILE" access-only || die "active auth is not access-only on $(hostname)"
+    actual=$(token_fingerprint "$AUTH_FILE")
+    [ "$actual" = "$expected_access_fp" ] || die "active auth has a different access generation on $(hostname)"
+  fi
+  printf 'profile=%s active=%s access_fp=%s state=synced\n' "$profile" "$active_flag" "$expected_access_fp"
+}
+
+restore_node_access_backup() {
+  local profile_file="$1"
+  local backup_dir="$2"
+  local active_flag="$3"
+  local profile_existed="$4"
+  local rc=0
+  if [ "$profile_existed" -eq 1 ] && [ -f "$backup_dir/profile.auth.json" ]; then
+    if ! (atomic_copy "$backup_dir/profile.auth.json" "$profile_file"); then
+      warn "could not restore access profile from $backup_dir"
+      rc=1
+    elif ! cmp -s "$backup_dir/profile.auth.json" "$profile_file"; then
+      warn "restored access profile does not match $backup_dir"
+      rc=1
+    fi
+  elif [ "$profile_existed" -eq 0 ]; then
+    if ! rm -f "$profile_file" || [ -e "$profile_file" ] || [ -L "$profile_file" ]; then
+      warn "could not remove newly created access profile"
+      rc=1
+    fi
+  else
+    warn "access profile rollback backup is missing at $backup_dir"
+    rc=1
+  fi
+  if [ "$active_flag" -eq 1 ] && [ -f "$backup_dir/active.auth.json" ]; then
+    if ! (atomic_copy "$backup_dir/active.auth.json" "$AUTH_FILE"); then
+      warn "could not restore active auth from $backup_dir"
+      rc=1
+    elif ! cmp -s "$backup_dir/active.auth.json" "$AUTH_FILE"; then
+      warn "restored active auth does not match $backup_dir"
+      rc=1
+    fi
+  elif [ "$active_flag" -eq 1 ]; then
+    warn "active auth rollback backup is missing at $backup_dir"
+    rc=1
+  fi
+  return "$rc"
+}
+
+rollback_node_access_or_die() {
+  local profile_file="$1"
+  local backup_dir="$2"
+  local active_flag="$3"
+  local profile_existed="$4"
+  local incoming="$5"
+  local reason="$6"
+  rm -f "$incoming" || warn "could not remove staged access credentials"
+  if restore_node_access_backup "$profile_file" "$backup_dir" "$active_flag" "$profile_existed"; then
+    rm -rf "$backup_dir" || warn "could not remove completed access rollback backup at $backup_dir"
+    die "$reason"
+  fi
+  die "$reason; rollback failed; backup preserved at $backup_dir"
+}
+
+node_install_access() {
+  local profile="$1"
+  local expected_account_fp="$2"
+  local expected_access_fp="$3"
+  local incoming profile_file backup_dir active active_flag=0 changed=1 actual profile_existed=0
+  validate_profile_name "$profile"
+  case "$expected_account_fp" in ''|*[!0-9a-f]*) die "invalid account fingerprint" ;; esac
+  case "$expected_access_fp" in ''|*[!0-9a-f]*) die "invalid access fingerprint" ;; esac
+
+  acquire_lock
+  incoming=$(mktemp "$PROFILE_DIR/.incoming.$profile.XXXXXX")
+  if ! cat >"$incoming" || ! chmod 600 "$incoming"; then
+    rm -f "$incoming"
+    die "could not receive access credentials on $(hostname)"
+  fi
+  validate_secure_auth_file "$incoming" access-only || {
+    rm -f "$incoming"
+    die "received credentials are not valid access-only auth"
+  }
+  actual=$(fingerprint "$incoming")
+  [ "$actual" = "$expected_account_fp" ] || {
+    rm -f "$incoming"
+    die "received account fingerprint mismatch"
+  }
+  actual=$(token_fingerprint "$incoming")
+  [ "$actual" = "$expected_access_fp" ] || {
+    rm -f "$incoming"
+    die "received access fingerprint mismatch"
+  }
+
+  profile_file=$(profile_path "$profile")
+  if [ -e "$profile_file" ]; then
+    validate_secure_auth_file "$profile_file" || {
+      rm -f "$incoming"
+      die "existing profile $profile is invalid on $(hostname)"
+    }
+    profile_existed=1
+  fi
+  active=$(detect_active_profile 2>/dev/null || true)
+  [ "$active" != "$profile" ] || active_flag=1
+  if [ "$profile_existed" -eq 1 ] && [ "$(token_fingerprint "$profile_file")" = "$expected_access_fp" ]; then
+    if [ "$active_flag" -eq 0 ] || { validate_secure_auth_file "$AUTH_FILE" access-only && [ "$(token_fingerprint "$AUTH_FILE")" = "$expected_access_fp" ]; }; then
+      changed=0
+    fi
+  fi
+
+  backup_dir=$(mktemp -d "$STATE_ROOT/.install-access.$profile.XXXXXX")
+  chmod 700 "$backup_dir"
+  if [ "$profile_existed" -eq 1 ]; then
+    atomic_copy "$profile_file" "$backup_dir/profile.auth.json" || {
+      rm -f "$incoming"
+      rm -rf "$backup_dir"
+      die "could not back up profile $profile"
+    }
+  fi
+  if [ "$active_flag" -eq 1 ]; then
+    atomic_copy "$AUTH_FILE" "$backup_dir/active.auth.json" || {
+      rm -f "$incoming"
+      rm -rf "$backup_dir"
+      die "could not back up active auth"
+    }
+  fi
+
+  if ! atomic_copy "$incoming" "$profile_file"; then
+    rollback_node_access_or_die "$profile_file" "$backup_dir" "$active_flag" "$profile_existed" \
+      "$incoming" "could not install profile $profile"
+  fi
+  if [ "$active_flag" -eq 1 ]; then
+    if ! atomic_copy "$incoming" "$AUTH_FILE" || ! atomic_write_current "$profile"; then
+      rollback_node_access_or_die "$profile_file" "$backup_dir" "$active_flag" "$profile_existed" \
+        "$incoming" "could not install active auth"
+    fi
+  fi
+
+  rm -f "$incoming"
+  if ! node_inspect_access "$profile" "$expected_access_fp" >/dev/null; then
+    rollback_node_access_or_die "$profile_file" "$backup_dir" "$active_flag" "$profile_existed" \
+      "$incoming" "installed access credentials failed verification"
+  fi
+  if [ "$changed" -eq 1 ] && [ "$active_flag" -eq 1 ]; then
+    if ! node_stop_clients >/dev/null; then
+      rollback_node_access_or_die "$profile_file" "$backup_dir" "$active_flag" "$profile_existed" \
+        "$incoming" "credentials changed but clients could not be stopped on $(hostname)"
+    fi
+  fi
+  rm -rf "$backup_dir"
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'profile=%s active=%s changed=%s access_fp=%s state=synced\n' \
+    "$profile" "$active_flag" "$changed" "$expected_access_fp"
+}
+
+pid_is_codex_app_server() {
+  local pid="$1"
+  local command_line
+  case "$pid" in ''|0|*[!0-9]*) return 1 ;; esac
+  [ "$pid" -ne "$$" ] || return 1
+  command_line=$(ps -p "$pid" -o args= 2>/dev/null) || return 1
+  printf '%s\n' "$command_line" | grep -Eq -- "$CODEX_APP_SERVER_PATTERN"
+}
+
+codex_app_server_pids() {
+  local pid
+  {
+    pgrep -u "$(id -u)" -f "$CODEX_APP_SERVER_PATTERN" 2>/dev/null || true
+  } | while IFS= read -r pid; do
+    case "$pid" in ''|0|*[!0-9]*) continue ;; esac
+    if pid_is_codex_app_server "$pid"; then
+      printf '%s\n' "$pid"
+    fi
+  done | sort -nu
+}
+
+signal_codex_app_server_pids() {
+  local signal="$1"
+  local pids="$2"
+  local pid
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    # Revalidate immediately before signaling so PID reuse cannot target an
+    # unrelated Codex CLI (or any other process).
+    if pid_is_codex_app_server "$pid"; then
+      kill -"$signal" "$pid" >/dev/null 2>&1 || true
+    fi
+  done <<<"$pids"
+}
+
+live_captured_codex_app_server_pids() {
+  local captured="$1"
+  local pid
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    if pid_is_codex_app_server "$pid"; then
+      printf '%s\n' "$pid"
+    fi
+  done <<<"$captured" | sort -nu
+}
+
+node_stop_clients() {
+  local initial current count forced_count attempts
+  initial=$(codex_app_server_pids)
+  count=$(printf '%s\n' "$initial" | sed '/^$/d' | wc -l | tr -d ' ')
+  if [ "$count" -eq 0 ]; then
+    printf 'stopped_processes=0 forced_processes=0\n'
+    return 0
+  fi
+
+  # Freeze the target generation before sending any signal. This covers a
+  # Linux node wrapper and its standalone child without signaling a duplicate
+  # PID, while leaving a newly reconnected generation alone. Ordinary `codex`
+  # CLI commands do not match CODEX_APP_SERVER_PATTERN.
+  signal_codex_app_server_pids TERM "$initial"
+  attempts=0
+  while [ "$attempts" -lt 20 ]; do
+    sleep 0.25
+    current=$(live_captured_codex_app_server_pids "$initial")
+    if [ -z "$current" ]; then
+      printf 'stopped_processes=%s forced_processes=0\n' "$count"
+      return 0
+    fi
+    attempts=$((attempts + 1))
+  done
+
+  forced_count=$(printf '%s\n' "$current" | sed '/^$/d' | wc -l | tr -d ' ')
+  signal_codex_app_server_pids KILL "$current"
+  attempts=0
+  while [ "$attempts" -lt 20 ]; do
+    sleep 0.10
+    current=$(live_captured_codex_app_server_pids "$current")
+    [ -n "$current" ] || {
+      printf 'stopped_processes=%s forced_processes=%s\n' "$count" "$forced_count"
+      return 0
+    }
+    attempts=$((attempts + 1))
+  done
+
+  warn "Codex app-server processes are still running on $(hostname)"
+  return 1
+}
+
+has_refresh_transaction() {
+  local profile="$1"
+  local transaction
+  for transaction in "$REFRESH_TXN_DIR/$profile."*; do
+    [ ! -d "$transaction" ] || return 0
+  done
+  return 1
+}
+
+node_profile_map() {
+  local first second active first_fp second_fp first_access second_access
+  ensure_dirs
+  first=$(profile_path 1)
+  second=$(profile_path 2)
+  validate_secure_auth_file "$first" || die "profile 1 is missing, insecure, or invalid on $(hostname)"
+  validate_secure_auth_file "$second" || die "profile 2 is missing, insecure, or invalid on $(hostname)"
+  active=$(detect_active_profile) || die "cannot identify the active profile on $(hostname)"
+  first_fp=$(fingerprint "$first")
+  second_fp=$(fingerprint "$second")
+  first_access=$(token_fingerprint "$first")
+  second_access=$(token_fingerprint "$second")
+  printf 'version=%s active=%s profile1_fp=%s profile1_access=%s profile2_fp=%s profile2_access=%s\n' \
+    "$SCRIPT_VERSION" "$active" "$first_fp" "$first_access" "$second_fp" "$second_access"
+}
+
+restore_profile_swap_backup() {
+  local first="$1"
+  local second="$2"
+  local backup="$3"
+  local rc=0
+  validate_secure_auth_file "$backup/1.auth.json" || return 1
+  validate_secure_auth_file "$backup/2.auth.json" || return 1
+  atomic_copy "$backup/1.auth.json" "$first" || { warn "could not restore profile 1 after swap failure"; rc=1; }
+  atomic_copy "$backup/2.auth.json" "$second" || { warn "could not restore profile 2 after swap failure"; rc=1; }
+  if [ -f "$backup/current" ]; then
+    atomic_copy "$backup/current" "$CURRENT_FILE" || { warn "could not restore current marker after swap failure"; rc=1; }
+  else
+    rm -f "$CURRENT_FILE" || rc=1
+  fi
+  [ "$rc" -eq 0 ] || return 1
+  cmp -s "$backup/1.auth.json" "$first" || return 1
+  cmp -s "$backup/2.auth.json" "$second" || return 1
+  if [ -f "$backup/current" ]; then
+    cmp -s "$backup/current" "$CURRENT_FILE" || return 1
+  else
+    [ ! -e "$CURRENT_FILE" ] || return 1
+  fi
+}
+
+write_profile_swap_manifest() {
+  local directory="$1"
+  local state="$2"
+  local temporary
+  temporary=$(mktemp "$directory/.manifest.XXXXXX") || return 1
+  if ! printf 'state=%s\npid=%s\n' "$state" "$$" >"$temporary" || \
+     ! chmod 600 "$temporary" || ! mv -f "$temporary" "$directory/manifest"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+
+profile_swap_owner_running() {
+  local owner="$1"
+  local command
+  case "$owner" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$owner" >/dev/null 2>&1 || return 1
+  command=$(ps -p "$owner" -o command= 2>/dev/null || true)
+  case "$command" in *gpt-switch*) return 0 ;; *) return 1 ;; esac
+}
+
+recover_profile_swap_transactions() {
+  local journal manifest state owner first second building
+  first=$(profile_path 1)
+  second=$(profile_path 2)
+  for building in "$STATE_ROOT/.swap-building."*; do
+    [ -e "$building" ] || continue
+    [ -d "$building" ] && [ ! -L "$building" ] || die "invalid profile swap building directory: $building"
+    manifest="$building/manifest"
+    if [ ! -f "$manifest" ] || [ -L "$manifest" ]; then
+      local modified now
+      if modified=$(stat -c '%Y' "$building" 2>/dev/null) || modified=$(stat -f '%m' "$building" 2>/dev/null); then
+        now=$(date +%s)
+        if [ $((now - modified)) -ge 300 ]; then
+          rm -rf "$building" || die "could not clear stale incomplete swap building directory"
+        fi
+      fi
+      continue
+    fi
+    state=$(sed -n 's/^state=//p' "$manifest" | head -n 1)
+    owner=$(sed -n 's/^pid=//p' "$manifest" | head -n 1)
+    profile_swap_owner_running "$owner" && continue
+    case "$state" in
+      building|prepared) ;;
+      *) die "profile swap building journal has an invalid state" ;;
+    esac
+    rm -rf "$building" || die "could not clear stale profile swap building directory"
+  done
+  for journal in "$STATE_ROOT/.swap-profiles."*; do
+    [ -e "$journal" ] || continue
+    [ -d "$journal" ] && [ ! -L "$journal" ] || die "invalid profile swap journal: $journal"
+    manifest="$journal/manifest"
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || die "profile swap journal has no valid manifest"
+    state=$(sed -n 's/^state=//p' "$manifest" | head -n 1)
+    owner=$(sed -n 's/^pid=//p' "$manifest" | head -n 1)
+    profile_swap_owner_running "$owner" && continue
+    case "$state" in
+      prepared)
+        validate_secure_auth_file "$journal/1.auth.json" || die "profile swap recovery backup 1 is invalid"
+        validate_secure_auth_file "$journal/2.auth.json" || die "profile swap recovery backup 2 is invalid"
+        restore_profile_swap_backup "$first" "$second" "$journal" || \
+          die "could not restore interrupted profile swap; journal was preserved"
+        ;;
+      committed) ;;
+      *) die "profile swap journal has an invalid state" ;;
+    esac
+    rm -rf "$journal" || die "could not clear recovered profile swap journal"
+  done
+}
+
+rollback_profile_swap_in_progress() {
+  [ "$SWAP_ROLLBACK_NEEDED" -eq 1 ] || return 0
+  warn "profile swap did not complete; restoring the previous slots"
+  if restore_profile_swap_backup "$SWAP_FIRST_FILE" "$SWAP_SECOND_FILE" "$SWAP_BACKUP_DIR"; then
+    rm -rf "$SWAP_BACKUP_DIR"
+  else
+    warn "profile swap recovery failed; the journal was preserved at $SWAP_BACKUP_DIR"
+  fi
+  SWAP_ROLLBACK_NEEDED=0
+  SWAP_BACKUP_DIR=""
+  SWAP_FIRST_FILE=""
+  SWAP_SECOND_FILE=""
+}
+
+node_swap_profiles() {
+  local first second active next_active first_fp second_fp building backup suffix actual
+  acquire_lock
+  first=$(profile_path 1)
+  second=$(profile_path 2)
+  validate_secure_auth_file "$first" || die "profile 1 is missing, insecure, or invalid on $(hostname)"
+  validate_secure_auth_file "$second" || die "profile 2 is missing, insecure, or invalid on $(hostname)"
+  active=$(detect_active_profile) || die "cannot identify the active profile on $(hostname)"
+  first_fp=$(fingerprint "$first")
+  second_fp=$(fingerprint "$second")
+  case "$active" in 1) next_active=2 ;; 2) next_active=1 ;; *) die "invalid active profile" ;; esac
+
+  building=$(mktemp -d "$STATE_ROOT/.swap-building.XXXXXX") || die "could not create profile swap backup"
+  chmod 700 "$building"
+  write_profile_swap_manifest "$building" building || { rm -rf "$building"; die "could not initialize profile swap journal"; }
+  atomic_copy "$first" "$building/1.auth.json" || { rm -rf "$building"; die "could not back up profile 1"; }
+  atomic_copy "$second" "$building/2.auth.json" || { rm -rf "$building"; die "could not back up profile 2"; }
+  if [ -e "$CURRENT_FILE" ]; then
+    [ ! -L "$CURRENT_FILE" ] && [ -f "$CURRENT_FILE" ] || { rm -rf "$building"; die "current profile marker is insecure"; }
+    atomic_copy "$CURRENT_FILE" "$building/current" || { rm -rf "$building"; die "could not back up current marker"; }
+  fi
+  write_profile_swap_manifest "$building" prepared || { rm -rf "$building"; die "could not prepare profile swap journal"; }
+  suffix=${building##*.swap-building.}
+  backup="$STATE_ROOT/.swap-profiles.$suffix"
+  mv "$building" "$backup" || { rm -rf "$building"; die "could not activate profile swap journal"; }
+  SWAP_BACKUP_DIR="$backup"
+  SWAP_FIRST_FILE="$first"
+  SWAP_SECOND_FILE="$second"
+  SWAP_ROLLBACK_NEEDED=1
+
+  if ! atomic_copy "$backup/2.auth.json" "$first" || \
+     ! atomic_copy "$backup/1.auth.json" "$second" || \
+     ! atomic_write_current "$next_active"; then
+    rollback_profile_swap_in_progress
+    die "could not exchange profile slots on $(hostname)"
+  fi
+
+  actual=$(detect_active_profile 2>/dev/null || true)
+  if [ "$actual" != "$next_active" ] || \
+     [ "$(fingerprint "$first" 2>/dev/null || true)" != "$second_fp" ] || \
+     [ "$(fingerprint "$second" 2>/dev/null || true)" != "$first_fp" ]; then
+    rollback_profile_swap_in_progress
+    die "profile slot verification failed on $(hostname)"
+  fi
+
+  write_profile_swap_manifest "$backup" committed || {
+    rollback_profile_swap_in_progress
+    die "could not commit profile swap journal on $(hostname)"
+  }
+  SWAP_ROLLBACK_NEEDED=0
+  SWAP_BACKUP_DIR=""
+  SWAP_FIRST_FILE=""
+  SWAP_SECOND_FILE=""
+  rm -rf "$backup" || warn "committed profile swap journal will be cleaned up later"
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'previous_active=%s active=%s profile1_fp=%s profile2_fp=%s state=swapped\n' \
+    "$active" "$next_active" "$second_fp" "$first_fp"
+}
+
+validate_operation_id() {
+  case "$1" in ''|*[!0-9a-zA-Z_-]*) die "invalid operation id" ;; esac
+}
+
+logout_transaction_path() {
+  printf '%s/%s\n' "$LOGOUT_TXN_DIR" "$1"
+}
+
+controller_logout_intent_path() {
+  printf '%s/%s.intent\n' "$CONTROLLER_TXN_DIR" "$1"
+}
+
+write_controller_logout_intent() {
+  local operation="$1"
+  local state="$2"
+  local profile="$3"
+  local fallback="$4"
+  local target_fp="$5"
+  local target_access="$6"
+  local fallback_fp="$7"
+  local fallback_access="$8"
+  local destination temporary
+  validate_operation_id "$operation"
+  case "$state" in staging|committing) ;; *) die "invalid controller logout intent state" ;; esac
+  destination=$(controller_logout_intent_path "$operation")
+  [ ! -L "$destination" ] || die "refusing symlinked controller logout intent"
+  temporary=$(mktemp "$CONTROLLER_TXN_DIR/.logout-intent.XXXXXX") || return 1
+  if ! printf 'state=%s profile=%s fallback=%s target_fp=%s target_access=%s fallback_fp=%s fallback_access=%s\n' \
+      "$state" "$profile" "$fallback" "$target_fp" "$target_access" "$fallback_fp" "$fallback_access" >"$temporary" || \
+     ! chmod 600 "$temporary" || ! mv -f "$temporary" "$destination"; then
+    rm -f "$temporary"
+    return 1
+  fi
+}
+
+remove_controller_logout_intent() {
+  local operation="$1"
+  local destination
+  destination=$(controller_logout_intent_path "$operation")
+  rm -f "$destination" || return 1
+  [ ! -e "$destination" ]
+}
+
+node_logout_preflight() {
+  local profile="$1"
+  local fallback="$2"
+  local profile_file fallback_file active
+  validate_profile_name "$profile"
+  validate_profile_name "$fallback"
+  [ "$profile" != "$fallback" ] || die "logout fallback must be the other profile"
+  ensure_dirs
+  profile_file=$(profile_path "$profile")
+  fallback_file=$(profile_path "$fallback")
+  validate_secure_auth_file "$profile_file" || die "profile $profile is missing, insecure, or invalid on $(hostname)"
+  validate_secure_auth_file "$fallback_file" || die "fallback profile $fallback is missing, insecure, or invalid on $(hostname)"
+  active=$(detect_active_profile) || die "cannot identify the active profile on $(hostname)"
+  ! has_refresh_transaction "$profile" || die "profile $profile has an unfinished refresh transaction on $(hostname)"
+  printf 'version=%s active=%s target_fp=%s target_access=%s fallback_fp=%s fallback_access=%s\n' \
+    "$SCRIPT_VERSION" "$active" "$(fingerprint "$profile_file")" "$(token_fingerprint "$profile_file")" \
+    "$(fingerprint "$fallback_file")" "$(token_fingerprint "$fallback_file")"
+}
+
+restore_logout_backup() {
+  local transaction="$1"
+  local profile_file="$2"
+  local backup="$transaction/profile.auth.json"
+  validate_secure_auth_file "$backup" || return 1
+  atomic_copy "$backup" "$profile_file" || return 1
+  validate_secure_auth_file "$profile_file" || return 1
+  cmp -s "$backup" "$profile_file"
+}
+
+node_logout_stage() {
+  local operation="$1"
+  local profile="$2"
+  local fallback="$3"
+  local transaction profile_file active
+  validate_operation_id "$operation"
+  validate_profile_name "$profile"
+  validate_profile_name "$fallback"
+  [ "$profile" != "$fallback" ] || die "logout fallback must be the other profile"
+  acquire_lock
+  profile_file=$(profile_path "$profile")
+  validate_secure_auth_file "$profile_file" || die "profile $profile cannot be staged for logout on $(hostname)"
+  validate_secure_auth_file "$(profile_path "$fallback")" || die "fallback profile $fallback is invalid on $(hostname)"
+  active=$(detect_active_profile) || die "cannot identify the active profile on $(hostname)"
+  [ "$active" = "$fallback" ] || die "profile $fallback must be active before logging out profile $profile on $(hostname)"
+  transaction=$(logout_transaction_path "$operation")
+  [ ! -e "$transaction" ] || die "logout operation already exists on $(hostname)"
+  mkdir "$transaction" || die "could not create logout transaction on $(hostname)"
+  chmod 700 "$transaction"
+  atomic_copy "$profile_file" "$transaction/profile.auth.json" || { rm -rf "$transaction"; die "could not back up logout profile"; }
+  if ! printf 'profile=%s fallback=%s account=%s\n' "$profile" "$fallback" "$(fingerprint "$profile_file")" >"$transaction/manifest" || \
+     ! chmod 600 "$transaction/manifest" || ! rm -f "$profile_file"; then
+    if restore_logout_backup "$transaction" "$profile_file"; then
+      rm -rf "$transaction"
+    else
+      warn "logout restore failed; backup preserved at $transaction"
+    fi
+    die "could not stage profile logout on $(hostname)"
+  fi
+  if [ "${GPT_SWITCH_TEST_LOGOUT_STAGE_FAIL_AFTER_REMOVE:-0}" = "1" ] || \
+     [ -e "$profile_file" ] || [ "$(detect_active_profile 2>/dev/null || true)" != "$fallback" ]; then
+    if restore_logout_backup "$transaction" "$profile_file"; then
+      rm -rf "$transaction"
+    else
+      warn "logout restore failed; backup preserved at $transaction"
+    fi
+    die "logout validation failed on $(hostname)"
+  fi
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'operation=%s profile=%s fallback=%s state=staged\n' "$operation" "$profile" "$fallback"
+}
+
+node_logout_restore() {
+  local operation="$1"
+  local profile="$2"
+  local transaction profile_file
+  validate_operation_id "$operation"
+  validate_profile_name "$profile"
+  acquire_lock
+  transaction=$(logout_transaction_path "$operation")
+  profile_file=$(profile_path "$profile")
+  if [ -d "$transaction" ] && [ -f "$transaction/profile.auth.json" ]; then
+    restore_logout_backup "$transaction" "$profile_file" || \
+      die "could not restore logged-out profile on $(hostname); backup was preserved"
+    rm -rf "$transaction" || die "restored profile but could not clear logout transaction on $(hostname)"
+  fi
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'operation=%s profile=%s state=restored\n' "$operation" "$profile"
+}
+
+node_logout_verify() {
+  local operation="$1"
+  local profile="$2"
+  local fallback="$3"
+  validate_operation_id "$operation"
+  validate_profile_name "$profile"
+  validate_profile_name "$fallback"
+  ensure_dirs
+  [ ! -e "$(profile_path "$profile")" ] || die "profile $profile still exists on $(hostname)"
+  [ "$(detect_active_profile 2>/dev/null || true)" = "$fallback" ] || die "fallback profile $fallback is not active on $(hostname)"
+  printf 'operation=%s profile=%s fallback=%s state=logged-out\n' "$operation" "$profile" "$fallback"
+}
+
+node_logout_commit() {
+  local operation="$1"
+  local profile="$2"
+  local fallback="$3"
+  local transaction item
+  validate_operation_id "$operation"
+  validate_profile_name "$profile"
+  validate_profile_name "$fallback"
+  acquire_lock
+  node_logout_verify "$operation" "$profile" "$fallback" >/dev/null
+  transaction=$(logout_transaction_path "$operation")
+  rm -rf "$transaction" || die "could not clear logout transaction on $(hostname)"
+  [ ! -e "$transaction" ] || die "logout transaction still exists on $(hostname)"
+  for item in "$PENDING_DIR/$profile."*; do [ ! -e "$item" ] || rm -f -- "$item"; done
+  for item in "$REFRESH_TXN_DIR/$profile."*; do [ ! -e "$item" ] || rm -rf -- "$item"; done
+  release_lock
+  trap - EXIT HUP INT TERM
+  printf 'operation=%s profile=%s fallback=%s state=committed\n' "$operation" "$profile" "$fallback"
+}
+
+validate_askpass_helper() {
+  [ -f "$ASKPASS_HELPER" ] && [ ! -L "$ASKPASS_HELPER" ] || die "askpass helper is unsafe"
+  [ "$(file_owner_id "$ASKPASS_HELPER")" = "$(id -u)" ] || die "askpass helper owner is unsafe"
+  [ "$(file_mode "$ASKPASS_HELPER")" = 700 ] || die "askpass helper permissions are unsafe"
+  [ -x "$ASKPASS_HELPER" ] || die "askpass helper is unavailable"
+}
+
+remote_ssh() {
+  local index="$1"
+  shift
+  local target="${REMOTE_TARGETS[$index]}"
+  local port="${REMOTE_PORTS[$index]}"
+  local authentication="${REMOTE_AUTH_KINDS[$index]}"
+  local identity="${REMOTE_IDENTITIES[$index]}"
+  local certificate="${REMOTE_CERTIFICATES[$index]}"
+  local has_passphrase="${REMOTE_HAS_PASSPHRASES[$index]}"
+  local credential_id="${REMOTE_CREDENTIAL_IDS[$index]}"
+  local options=(
+    -p "$port"
+    -o ConnectTimeout=8
+    -o StrictHostKeyChecking=yes
+    -o UpdateHostKeys=no
+    -o ClearAllForwardings=yes
+    -o ForwardAgent=no
+    -o ForwardX11=no
+    -o RequestTTY=no
+    -o ServerAliveInterval=5
+    -o ServerAliveCountMax=2
+  )
+  case "$authentication" in
+    openSSHConfig)
+      options+=( -o BatchMode=yes )
+      ;;
+    privateKey)
+      [ -n "$identity" ] || die "private key is missing for ${REMOTE_LABELS[$index]}"
+      [ -f "$identity" ] && [ ! -L "$identity" ] || die "private key is unsafe for ${REMOTE_LABELS[$index]}"
+      [ "$(file_owner_id "$identity")" = "$(id -u)" ] || die "private key owner is unsafe for ${REMOTE_LABELS[$index]}"
+      case "$(file_mode "$identity")" in 400|600) ;; *) die "private key permissions are unsafe for ${REMOTE_LABELS[$index]}" ;; esac
+      options+=( -F /dev/null -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -i "$identity" )
+      if [ -n "$certificate" ]; then
+        [ -f "$certificate" ] && [ ! -L "$certificate" ] || die "SSH certificate is unsafe for ${REMOTE_LABELS[$index]}"
+        [ "$(file_owner_id "$certificate")" = "$(id -u)" ] || die "SSH certificate owner is unsafe for ${REMOTE_LABELS[$index]}"
+        options+=( -o "CertificateFile=$certificate" )
+      fi
+      if [ "$has_passphrase" -eq 1 ]; then
+        validate_askpass_helper
+        env SSH_ASKPASS="$ASKPASS_HELPER" SSH_ASKPASS_REQUIRE=force DISPLAY=codex-syncbar \
+          CODEX_SYNCBAR_CREDENTIAL_ID="$credential_id" CODEX_SYNCBAR_DEVICE_ID="${REMOTE_LABELS[$index]}" \
+          CODEX_SYNCBAR_SECRET_KIND=passphrase \
+          "$SSH_BIN" "${options[@]}" -o BatchMode=no "$target" "$@"
+        return
+      fi
+      options+=( -o BatchMode=yes )
+      ;;
+    password)
+      validate_askpass_helper
+      options+=(
+        -F /dev/null
+        -o BatchMode=no
+        -o PubkeyAuthentication=no
+        -o PreferredAuthentications=password
+        -o KbdInteractiveAuthentication=no
+        -o NumberOfPasswordPrompts=1
+      )
+      env SSH_ASKPASS="$ASKPASS_HELPER" SSH_ASKPASS_REQUIRE=force DISPLAY=codex-syncbar \
+        CODEX_SYNCBAR_CREDENTIAL_ID="$credential_id" CODEX_SYNCBAR_DEVICE_ID="${REMOTE_LABELS[$index]}" \
+        CODEX_SYNCBAR_SECRET_KIND=password \
+        "$SSH_BIN" "${options[@]}" "$target" "$@"
+      return
+      ;;
+  esac
+  "$SSH_BIN" "${options[@]}" "$target" "$@"
+}
+
+remote_install_helpers() {
+  local index="$1"
+  local source_helper="$0"
+  local payload_dir archive command owner
+
+  [ -f "$source_helper" ] && [ ! -L "$source_helper" ] || die "controller helper source is unsafe"
+  owner=$(file_owner_id "$source_helper")
+  [ "$owner" = "$(id -u)" ] || [ "$owner" = 0 ] || die "controller helper source owner is unsafe"
+  case "$(file_mode "$source_helper")" in 500|700|755) ;; *) die "controller helper source permissions are unsafe" ;; esac
+  validate_askpass_helper
+  require_usage_helper
+  command -v tar >/dev/null 2>&1 || die "tar is required to bootstrap a device"
+
+  ensure_dirs
+  payload_dir=$(mktemp -d "$STATE_ROOT/.bootstrap-payload.XXXXXX") || die "could not prepare bootstrap payload"
+  chmod 700 "$payload_dir"
+  archive=$(mktemp "$STATE_ROOT/.bootstrap-payload.XXXXXX.tar") || {
+    rm -rf "$payload_dir"
+    die "could not prepare bootstrap archive"
+  }
+  chmod 600 "$archive"
+  if ! cp "$source_helper" "$payload_dir/gpt-switch" || \
+     ! cp "$ASKPASS_HELPER" "$payload_dir/codex-syncbar-askpass" || \
+     ! cp "$USAGE_HELPER" "$payload_dir/usage-summary.mjs" || \
+     ! chmod 755 "$payload_dir/gpt-switch" || \
+     ! chmod 700 "$payload_dir/codex-syncbar-askpass" || \
+     ! chmod 755 "$payload_dir/usage-summary.mjs" || \
+     ! tar -cf "$archive" -C "$payload_dir" gpt-switch codex-syncbar-askpass usage-summary.mjs; then
+    rm -f "$archive"
+    rm -rf "$payload_dir"
+    die "could not build bootstrap payload"
+  fi
+
+  command='set -eu
+umask 077
+state="$HOME/.local/share/gpt-switch"
+bin="$HOME/.local/bin"
+lib="$HOME/.local/lib/gpt-switch"
+mkdir -p "$state" "$bin" "$lib"
+chmod 700 "$state" "$bin" "$lib"
+stage=$(mktemp -d "$state/.bootstrap.XXXXXX")
+helper="$bin/gpt-switch"
+askpass="$lib/codex-syncbar-askpass"
+usage="$lib/usage-summary.mjs"
+helper_new=""
+askpass_new=""
+usage_new=""
+helper_installed=0
+askpass_installed=0
+usage_installed=0
+helper_existed=0
+askpass_existed=0
+usage_existed=0
+committed=0
+rollback_failed=0
+mode_of() {
+  stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"
+}
+
+owner_of() {
+  stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"
+}
+restore_one() {
+  destination="$1"
+  backup="$2"
+  existed="$3"
+  mode="$4"
+  if [ "$existed" -eq 1 ]; then
+    rollback=$(mktemp "$(dirname "$destination")/.bootstrap-rollback.XXXXXX")
+    cp "$backup" "$rollback"
+    chmod "$mode" "$rollback"
+    mv -f "$rollback" "$destination"
+  else
+    rm -f "$destination"
+  fi
+}
+cleanup_bootstrap() {
+  rc=$?
+  trap - EXIT HUP INT TERM
+  if [ "$committed" -ne 1 ]; then
+    if [ "$usage_installed" -eq 1 ]; then
+      restore_one "$usage" "$stage/usage.backup" "$usage_existed" "${usage_mode:-755}" || rollback_failed=1
+    fi
+    if [ "$askpass_installed" -eq 1 ]; then
+      restore_one "$askpass" "$stage/askpass.backup" "$askpass_existed" "${askpass_mode:-700}" || rollback_failed=1
+    fi
+    if [ "$helper_installed" -eq 1 ]; then
+      restore_one "$helper" "$stage/helper.backup" "$helper_existed" "${helper_mode:-755}" || rollback_failed=1
+    fi
+  fi
+  [ -z "$helper_new" ] || rm -f "$helper_new"
+  [ -z "$askpass_new" ] || rm -f "$askpass_new"
+  [ -z "$usage_new" ] || rm -f "$usage_new"
+  if [ "$rollback_failed" -eq 0 ]; then
+    rm -rf "$stage"
+  else
+    printf "bootstrap rollback failed; backups preserved at %s\n" "$stage" >&2
+  fi
+  exit "$rc"
+}
+trap cleanup_bootstrap EXIT HUP INT TERM
+tar -xf - -C "$stage"
+[ -f "$stage/gpt-switch" ] && [ ! -L "$stage/gpt-switch" ]
+[ -f "$stage/codex-syncbar-askpass" ] && [ ! -L "$stage/codex-syncbar-askpass" ]
+[ -f "$stage/usage-summary.mjs" ] && [ ! -L "$stage/usage-summary.mjs" ]
+if [ -e "$helper" ]; then
+  [ -f "$helper" ] && [ ! -L "$helper" ]
+  [ "$(owner_of "$helper")" = "$(id -u)" ]
+  helper_mode=$(mode_of "$helper")
+  cp "$helper" "$stage/helper.backup"
+  helper_existed=1
+fi
+if [ -e "$askpass" ]; then
+  [ -f "$askpass" ] && [ ! -L "$askpass" ]
+  [ "$(owner_of "$askpass")" = "$(id -u)" ]
+  askpass_mode=$(mode_of "$askpass")
+  cp "$askpass" "$stage/askpass.backup"
+  askpass_existed=1
+fi
+if [ -e "$usage" ]; then
+  [ -f "$usage" ] && [ ! -L "$usage" ]
+  [ "$(owner_of "$usage")" = "$(id -u)" ]
+  usage_mode=$(mode_of "$usage")
+  cp "$usage" "$stage/usage.backup"
+  usage_existed=1
+fi
+helper_new=$(mktemp "$bin/.gpt-switch.XXXXXX")
+askpass_new=$(mktemp "$lib/.codex-syncbar-askpass.XXXXXX")
+usage_new=$(mktemp "$lib/.usage-summary.XXXXXX.mjs")
+cp "$stage/gpt-switch" "$helper_new"
+cp "$stage/codex-syncbar-askpass" "$askpass_new"
+cp "$stage/usage-summary.mjs" "$usage_new"
+chmod 755 "$helper_new"
+chmod 700 "$askpass_new"
+chmod 755 "$usage_new"
+[ "$(owner_of "$helper_new")" = "$(id -u)" ]
+[ "$(owner_of "$askpass_new")" = "$(id -u)" ]
+[ "$(owner_of "$usage_new")" = "$(id -u)" ]
+[ "$(mode_of "$helper_new")" = 755 ]
+[ "$(mode_of "$askpass_new")" = 700 ]
+[ "$(mode_of "$usage_new")" = 755 ]
+mv -f "$helper_new" "$helper"
+helper_new=""
+helper_installed=1
+mv -f "$askpass_new" "$askpass"
+askpass_new=""
+askpass_installed=1
+mv -f "$usage_new" "$usage"
+usage_new=""
+usage_installed=1
+[ -f "$helper" ] && [ ! -L "$helper" ] && [ "$(mode_of "$helper")" = 755 ]
+[ -f "$askpass" ] && [ ! -L "$askpass" ] && [ "$(mode_of "$askpass")" = 700 ]
+[ -f "$usage" ] && [ ! -L "$usage" ] && [ "$(mode_of "$usage")" = 755 ]
+committed=1
+rm -rf "$stage"
+trap - EXIT HUP INT TERM
+printf "bootstrap=installed\n"'
+
+  if ! remote_ssh "$index" "$command" <"$archive"; then
+    rm -f "$archive"
+    rm -rf "$payload_dir"
+    return 1
+  fi
+  rm -f "$archive"
+  rm -rf "$payload_dir"
+}
+
+restore_remote_bootstrap_snapshot() {
+  local index="$1"
+  local snapshot="$2"
+  local command
+  [ -f "$snapshot" ] && [ ! -L "$snapshot" ] || return 1
+  command='set -eu
+umask 077
+export LC_ALL=C
+stage=$(mktemp -d "$HOME/.codex-syncbar-restore.XXXXXX")
+archive="$stage/snapshot.tar"
+entries="$stage/entries"
+verbose="$stage/verbose"
+new="$stage/new"
+old="$stage/old"
+committed=0
+rollback_failed=0
+old_helper=0
+old_askpass=0
+old_usage=0
+old_state=0
+old_auth=0
+new_helper=0
+new_askpass=0
+new_usage=0
+new_state=0
+new_auth=0
+helper="$HOME/.local/bin/gpt-switch"
+askpass="$HOME/.local/lib/gpt-switch/codex-syncbar-askpass"
+usage="$HOME/.local/lib/gpt-switch/usage-summary.mjs"
+state="$HOME/.local/share/gpt-switch"
+auth="$HOME/.codex/auth.json"
+
+path_exists() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+restore_old() {
+  destination="$1"
+  backup="$2"
+  if ! mv "$backup" "$destination"; then
+    rollback_failed=1
+  fi
+}
+
+cleanup_restore() {
+  rc=$?
+  trap - EXIT HUP INT TERM
+  set +e
+  if [ "$committed" -ne 1 ]; then
+    [ "$new_auth" -eq 0 ] || rm -rf "$auth" || rollback_failed=1
+    [ "$new_state" -eq 0 ] || rm -rf "$state" || rollback_failed=1
+    [ "$new_askpass" -eq 0 ] || rm -rf "$askpass" || rollback_failed=1
+    [ "$new_usage" -eq 0 ] || rm -rf "$usage" || rollback_failed=1
+    [ "$new_helper" -eq 0 ] || rm -rf "$helper" || rollback_failed=1
+    [ "$old_helper" -eq 0 ] || restore_old "$helper" "$old/helper"
+    [ "$old_askpass" -eq 0 ] || restore_old "$askpass" "$old/askpass"
+    [ "$old_usage" -eq 0 ] || restore_old "$usage" "$old/usage"
+    [ "$old_state" -eq 0 ] || restore_old "$state" "$old/state"
+    [ "$old_auth" -eq 0 ] || restore_old "$auth" "$old/auth"
+  fi
+  if [ "$rollback_failed" -eq 0 ]; then
+    rm -rf "$stage"
+  else
+    printf "bootstrap snapshot restore rollback failed; staged data preserved at %s\n" "$stage" >&2
+    rc=1
+  fi
+  exit "$rc"
+}
+trap cleanup_restore EXIT HUP INT TERM
+
+mkdir -p "$new" "$old"
+cat >"$archive"
+tar -tf "$archive" >"$entries"
+tar -tvf "$archive" >"$verbose"
+
+while IFS= read -r entry || [ -n "$entry" ]; do
+  case "$entry" in
+    ""|/*|*..*|*//*|./*|*/./*|*[!A-Za-z0-9._/-]*) exit 1 ;;
+  esac
+  case "$entry" in
+    .local/bin/gpt-switch|.local/lib/gpt-switch/codex-syncbar-askpass|\
+    .local/lib/gpt-switch/usage-summary.mjs|\
+    .local/share/gpt-switch|.local/share/gpt-switch/*|.codex/auth.json) ;;
+    *) exit 1 ;;
+  esac
+done <"$entries"
+
+while IFS= read -r listing || [ -n "$listing" ]; do
+  [ -n "$listing" ] || exit 1
+  first=${listing%"${listing#?}"}
+  case "$first" in d|-) ;; *) exit 1 ;; esac
+done <"$verbose"
+
+[ "$(wc -l <"$entries" | tr -d " ")" = "$(wc -l <"$verbose" | tr -d " ")" ]
+[ -z "$(sort "$entries" | uniq -d)" ]
+tar -xpf "$archive" -C "$new"
+[ ! -e "$new/.local/bin/gpt-switch" ] || { [ -f "$new/.local/bin/gpt-switch" ] && [ ! -L "$new/.local/bin/gpt-switch" ]; }
+[ ! -e "$new/.local/lib/gpt-switch/codex-syncbar-askpass" ] || { [ -f "$new/.local/lib/gpt-switch/codex-syncbar-askpass" ] && [ ! -L "$new/.local/lib/gpt-switch/codex-syncbar-askpass" ]; }
+[ ! -e "$new/.local/lib/gpt-switch/usage-summary.mjs" ] || { [ -f "$new/.local/lib/gpt-switch/usage-summary.mjs" ] && [ ! -L "$new/.local/lib/gpt-switch/usage-summary.mjs" ]; }
+[ ! -e "$new/.local/share/gpt-switch" ] || { [ -d "$new/.local/share/gpt-switch" ] && [ ! -L "$new/.local/share/gpt-switch" ]; }
+[ ! -e "$new/.codex/auth.json" ] || { [ -f "$new/.codex/auth.json" ] && [ ! -L "$new/.codex/auth.json" ]; }
+[ -z "$(find "$new" ! -type d ! -type f -print -quit)" ]
+
+ensure_parent() {
+  parent="$1"
+  if path_exists "$parent"; then
+    [ -d "$parent" ] && [ ! -L "$parent" ]
+  else
+    mkdir "$parent"
+  fi
+}
+ensure_parent "$HOME/.local"
+ensure_parent "$HOME/.local/bin"
+ensure_parent "$HOME/.local/lib"
+ensure_parent "$HOME/.local/lib/gpt-switch"
+ensure_parent "$HOME/.local/share"
+ensure_parent "$HOME/.codex"
+
+if path_exists "$helper"; then mv "$helper" "$old/helper"; old_helper=1; fi
+if path_exists "$askpass"; then mv "$askpass" "$old/askpass"; old_askpass=1; fi
+if path_exists "$usage"; then mv "$usage" "$old/usage"; old_usage=1; fi
+if path_exists "$state"; then mv "$state" "$old/state"; old_state=1; fi
+if path_exists "$auth"; then mv "$auth" "$old/auth"; old_auth=1; fi
+
+if path_exists "$new/.local/bin/gpt-switch"; then mv "$new/.local/bin/gpt-switch" "$helper"; new_helper=1; fi
+if path_exists "$new/.local/lib/gpt-switch/codex-syncbar-askpass"; then mv "$new/.local/lib/gpt-switch/codex-syncbar-askpass" "$askpass"; new_askpass=1; fi
+if path_exists "$new/.local/lib/gpt-switch/usage-summary.mjs"; then mv "$new/.local/lib/gpt-switch/usage-summary.mjs" "$usage"; new_usage=1; fi
+if path_exists "$new/.local/share/gpt-switch"; then mv "$new/.local/share/gpt-switch" "$state"; new_state=1; fi
+if path_exists "$new/.codex/auth.json"; then mv "$new/.codex/auth.json" "$auth"; new_auth=1; fi
+
+[ "$new_helper" -eq 0 ] || { [ -f "$helper" ] && [ ! -L "$helper" ]; }
+[ "$new_askpass" -eq 0 ] || { [ -f "$askpass" ] && [ ! -L "$askpass" ]; }
+[ "$new_usage" -eq 0 ] || { [ -f "$usage" ] && [ ! -L "$usage" ]; }
+[ "$new_state" -eq 0 ] || { [ -d "$state" ] && [ ! -L "$state" ]; }
+[ "$new_auth" -eq 0 ] || { [ -f "$auth" ] && [ ! -L "$auth" ]; }
+committed=1
+rm -rf "$stage"
+trap - EXIT HUP INT TERM'
+  remote_ssh "$index" "$command" <"$snapshot"
+}
+
+prepare_remote_bootstrap_snapshot() {
+  local index="$1"
+  local wanted="$2"
+  local snapshot temporary command entries verbose entry listing first valid endpoint_fp candidate
+  endpoint_fp=$(remote_endpoint_fingerprint "$index") || \
+    die "could not bind bootstrap recovery to its SSH endpoint"
+  valid_sha256 "$endpoint_fp" || die "invalid SSH endpoint fingerprint"
+  snapshot="$STATE_ROOT/.bootstrap-remote-backup.$wanted.$endpoint_fp.tar"
+
+  # A recovery archive may only ever be sent back to the exact endpoint that
+  # created it. An archive from an older/unbound format or a changed host is
+  # preserved for manual recovery and never uploaded to the new destination.
+  for candidate in \
+    "$STATE_ROOT"/.bootstrap-remote-backup."$wanted".*.tar \
+    "$STATE_ROOT/.bootstrap-remote-backup.$wanted.tar"; do
+    if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then continue; fi
+    [ "$candidate" = "$snapshot" ] || \
+      die "bootstrap recovery archive belongs to a different or unbound SSH endpoint; preserved at $candidate"
+  done
+
+  if [ -e "$snapshot" ] || [ -L "$snapshot" ]; then
+    [ -f "$snapshot" ] && [ ! -L "$snapshot" ] && [ "$(file_mode "$snapshot")" = 600 ] || \
+      die "existing bootstrap recovery archive is unsafe: $snapshot"
+    if restore_remote_bootstrap_snapshot "$index" "$snapshot"; then
+      rm -f "$snapshot"
+    else
+      die "previous bootstrap recovery is still required; archive preserved at $snapshot"
+    fi
+  fi
+
+  temporary=$(mktemp "$STATE_ROOT/.bootstrap-remote-backup.$wanted.XXXXXX") || \
+    die "could not prepare remote bootstrap recovery"
+  chmod 600 "$temporary"
+  command='set -eu
+cd "$HOME"
+set --
+for path in .local/bin/gpt-switch .local/lib/gpt-switch/codex-syncbar-askpass .local/lib/gpt-switch/usage-summary.mjs .local/share/gpt-switch .codex/auth.json; do
+  if [ -e "$path" ] || [ -L "$path" ]; then set -- "$@" "$path"; fi
+done
+if [ "$#" -eq 0 ]; then
+  COPYFILE_DISABLE=1 tar -cf - -T /dev/null
+else
+  COPYFILE_DISABLE=1 tar -cf - "$@"
+fi'
+  if ! remote_ssh "$index" "$command" >"$temporary"; then
+    rm -f "$temporary"
+    die "could not snapshot the remote device before bootstrap"
+  fi
+  entries="$temporary.entries"
+  verbose="$temporary.verbose"
+  if ! tar -tf "$temporary" >"$entries" || ! tar -tvf "$temporary" >"$verbose"; then
+    rm -f "$temporary" "$entries" "$verbose"
+    die "remote bootstrap recovery archive is unreadable"
+  fi
+  valid=1
+  while IFS= read -r entry || [ -n "$entry" ]; do
+    case "$entry" in
+      ''|/*|*..*|*//*|./*|*/./*|*[!A-Za-z0-9._/-]*) valid=0; break ;;
+    esac
+    case "$entry" in
+      .local/bin/gpt-switch|.local/lib/gpt-switch/codex-syncbar-askpass|\
+      .local/share/gpt-switch|.local/share/gpt-switch/*|.codex/auth.json) ;;
+      *) valid=0; break ;;
+    esac
+  done <"$entries"
+  if [ "$valid" -eq 1 ]; then
+    while IFS= read -r listing || [ -n "$listing" ]; do
+      [ -n "$listing" ] || { valid=0; break; }
+      first=${listing%"${listing#?}"}
+      case "$first" in d|-) ;; *) valid=0; break ;; esac
+    done <"$verbose"
+  fi
+  if [ "$valid" -eq 1 ] && \
+     { [ "$(wc -l <"$entries" | tr -d ' ')" != "$(wc -l <"$verbose" | tr -d ' ')" ] || \
+       [ -n "$(sort "$entries" | uniq -d)" ]; }; then
+    valid=0
+  fi
+  rm -f "$entries" "$verbose"
+  if [ "$valid" -ne 1 ]; then
+    rm -f "$temporary"
+    die "remote bootstrap recovery archive contains unsafe paths or file types"
+  fi
+  mv -f "$temporary" "$snapshot"
+  chmod 600 "$snapshot"
+  BOOTSTRAP_REMOTE_INDEX="$index"
+  BOOTSTRAP_REMOTE_SNAPSHOT="$snapshot"
+  BOOTSTRAP_ROLLBACK_NEEDED=1
+}
+
+rollback_remote_bootstrap_in_progress() {
+  [ "$BOOTSTRAP_ROLLBACK_NEEDED" -eq 1 ] || return 0
+  warn "device bootstrap did not complete; restoring its previous helper and account state"
+  if restore_remote_bootstrap_snapshot "$BOOTSTRAP_REMOTE_INDEX" "$BOOTSTRAP_REMOTE_SNAPSHOT"; then
+    rm -f "$BOOTSTRAP_REMOTE_SNAPSHOT"
+    BOOTSTRAP_ROLLBACK_NEEDED=0
+    BOOTSTRAP_REMOTE_INDEX=-1
+    BOOTSTRAP_REMOTE_SNAPSHOT=""
+    return 0
+  fi
+  warn "bootstrap rollback failed; recovery archive preserved at $BOOTSTRAP_REMOTE_SNAPSHOT"
+  return 1
+}
+
+commit_remote_bootstrap_snapshot() {
+  [ "$BOOTSTRAP_ROLLBACK_NEEDED" -eq 1 ] || return 0
+  rm -f "$BOOTSTRAP_REMOTE_SNAPSHOT" || return 1
+  BOOTSTRAP_ROLLBACK_NEEDED=0
+  BOOTSTRAP_REMOTE_INDEX=-1
+  BOOTSTRAP_REMOTE_SNAPSHOT=""
+}
+
+remote_node() {
+  local index="$1"
+  local action="$2"
+  local argument="${3:-}"
+  local command="$REMOTE_BIN __node $action"
+  if [ -n "$argument" ]; then
+    command="$command $argument"
+  fi
+  remote_ssh "$index" "$command"
+}
+
+remote_node_file() {
+  local index="$1"
+  local source="$2"
+  local action="$3"
+  shift 3
+  local command="$REMOTE_BIN __node $action"
+  local argument
+  for argument in "$@"; do
+    case "$argument" in
+      ''|*[!0-9a-zA-Z_-]*) die "unsafe internal remote argument" ;;
+    esac
+    command="$command $argument"
+  done
+  remote_ssh "$index" "$command" <"$source"
+}
+
+remote_node_args() {
+  local index="$1"
+  local action="$2"
+  shift 2
+  local command="$REMOTE_BIN __node $action"
+  local argument
+  for argument in "$@"; do
+    case "$argument" in
+      ''|*[!0-9a-zA-Z_-]*) die "unsafe internal remote argument" ;;
+    esac
+    command="$command $argument"
+  done
+  remote_ssh "$index" "$command"
+}
+
+field_value() {
+  local line="$1"
+  local wanted="$2"
+  local field
+  for field in $line; do
+    case "$field" in
+      "$wanted"=*) printf '%s\n' "${field#*=}"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+rollback_switches() {
+  local local_previous="$1"
+  local local_changed="$2"
+  local remote_count="$3"
+  local restart_apps="$4"
+  shift 4
+  local remote_previous=("$@")
+  local index
+
+  warn "switch failed; rolling back changed nodes"
+  if [ "$local_changed" -eq 1 ]; then
+    "$0" __node switch "$local_previous" "$restart_apps" >/dev/null || warn "local rollback failed"
+  fi
+  index=$((remote_count - 1))
+  while [ "$index" -ge 0 ]; do
+    remote_node "$index" switch "${remote_previous[$index]}" "$restart_apps" >/dev/null || warn "rollback failed on ${REMOTE_LABELS[$index]}"
+    index=$((index - 1))
+  done
+}
+
+require_refresh_helper() {
+  local mode
+  command -v "$NODE_BIN" >/dev/null 2>&1 || die "Node.js is required for credential refresh"
+  [ -f "$REFRESH_HELPER" ] || die "refresh helper is missing: $REFRESH_HELPER"
+  [ ! -L "$REFRESH_HELPER" ] || die "refusing symlinked refresh helper: $REFRESH_HELPER"
+  [ "$(file_owner_id "$REFRESH_HELPER")" = "$(id -u)" ] || die "refresh helper has the wrong owner"
+  mode=$(file_mode "$REFRESH_HELPER")
+  case "$mode" in 500|700) ;; *) die "refresh helper must have mode 500 or 700" ;; esac
+}
+
+helper_inspect() {
+  local file="$1"
+  local kind="${2:-either}"
+  "$NODE_BIN" "$REFRESH_HELPER" inspect "$file" "$kind"
+}
+
+metadata_field() {
+  local metadata="$1"
+  local field="$2"
+  printf '%s' "$metadata" | jq -er --arg field "$field" '.[$field] | select(. != null)'
+}
+
+pending_path() {
+  printf '%s/%s.%s\n' "$PENDING_DIR" "$1" "$2"
+}
+
+mark_pending() {
+  local profile="$1"
+  local label="$2"
+  local access_fp="$3"
+  local destination temporary
+  destination=$(pending_path "$profile" "$label")
+  temporary=$(mktemp "$PENDING_DIR/.pending.XXXXXX")
+  if ! printf 'profile=%s node=%s access_fp=%s updated_at=%s\n' \
+    "$profile" "$label" "$access_fp" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  chmod 600 "$temporary"
+  mv -f "$temporary" "$destination"
+}
+
+clear_pending() {
+  rm -f "$(pending_path "$1" "$2")"
+}
+
+profile_has_pending() {
+  local profile="$1"
+  local label
+  for label in "${REMOTE_LABELS[@]}"; do
+    [ ! -f "$(pending_path "$profile" "$label")" ] || return 0
+  done
+  return 1
+}
+
+ensure_refresh_apps_stopped() {
+  [ "$REFRESH_APPS_STOPPED" -eq 0 ] || return 0
+  [ "$REFRESH_RESTART_APPS" -eq 1 ] || die "active-profile refresh requires stopping desktop clients"
+  running_inside_desktop_app && die "run credential refresh outside the ChatGPT/Codex desktop app"
+  REFRESH_APP_STATE=$(stop_local_apps) || die "could not stop local desktop clients"
+  REFRESH_APPS_STOPPED=1
+}
+
+finish_refresh_apps() {
+  if [ "$REFRESH_APPS_STOPPED" -eq 1 ]; then
+    start_local_apps "$REFRESH_APP_STATE"
+    REFRESH_APPS_STOPPED=0
+    REFRESH_APP_STATE="none"
+  fi
+}
+
+reconcile_active_full_profile() {
+  local profile="$1"
+  local profile_file active canonical live canonical_account live_account
+  local canonical_access live_access canonical_refresh live_refresh canonical_time live_time
+  profile_file=$(profile_path "$profile")
+  active=$(detect_active_profile 2>/dev/null || true)
+  [ "$active" = "$profile" ] || return 0
+  validate_secure_auth_file "$profile_file" full || die "MacBook profile $profile is not full auth"
+  validate_secure_auth_file "$AUTH_FILE" full || die "active MacBook auth is not full auth"
+
+  canonical=$(helper_inspect "$profile_file" full) || die "could not inspect profile $profile"
+  live=$(helper_inspect "$AUTH_FILE" full) || die "could not inspect active auth"
+  canonical_account=$(metadata_field "$canonical" accountFingerprint)
+  live_account=$(metadata_field "$live" accountFingerprint)
+  [ "$canonical_account" = "$live_account" ] || die "active auth account does not match profile $profile"
+  canonical_access=$(metadata_field "$canonical" accessFingerprint)
+  live_access=$(metadata_field "$live" accessFingerprint)
+  canonical_refresh=$(metadata_field "$canonical" refreshFingerprint)
+  live_refresh=$(metadata_field "$live" refreshFingerprint)
+  if [ "$canonical_access" = "$live_access" ] && [ "$canonical_refresh" = "$live_refresh" ]; then
+    return 0
+  fi
+
+  ensure_refresh_apps_stopped
+  canonical=$(helper_inspect "$profile_file" full) || die "could not re-read profile $profile"
+  live=$(helper_inspect "$AUTH_FILE" full) || die "could not re-read active auth"
+  canonical_time=$(metadata_field "$canonical" lastRefreshEpoch 2>/dev/null || metadata_field "$canonical" expiresAt)
+  live_time=$(metadata_field "$live" lastRefreshEpoch 2>/dev/null || metadata_field "$live" expiresAt)
+  if [ "$live_time" -gt "$canonical_time" ]; then
+    atomic_copy "$AUTH_FILE" "$profile_file" || die "could not capture newer active credentials"
+  else
+    atomic_copy "$profile_file" "$AUTH_FILE" || die "could not reconcile active credentials"
+  fi
+}
+
+promote_refreshed_auth() {
+  local profile="$1"
+  local staged="$2"
+  local profile_file active staged_meta current_meta staged_account current_account
+  profile_file=$(profile_path "$profile")
+  validate_secure_auth_file "$staged" full || return 1
+  staged_meta=$(helper_inspect "$staged" full) || return 1
+  current_meta=$(helper_inspect "$profile_file" full) || return 1
+  staged_account=$(metadata_field "$staged_meta" accountFingerprint) || return 1
+  current_account=$(metadata_field "$current_meta" accountFingerprint) || return 1
+  [ "$staged_account" = "$current_account" ] || return 1
+  [ "$(metadata_field "$staged_meta" remainingSeconds)" -gt 0 ] || return 1
+
+  active=$(detect_active_profile 2>/dev/null || true)
+  if [ "$active" = "$profile" ]; then
+    ensure_refresh_apps_stopped
+  fi
+  atomic_copy "$staged" "$profile_file" || return 1
+  if [ "$active" = "$profile" ]; then
+    atomic_copy "$profile_file" "$AUTH_FILE" || return 1
+    atomic_write_current "$profile" || return 1
+  fi
+}
+
+recover_refresh_transaction() {
+  local profile="$1"
+  local transaction staged before staged_meta before_meta changed current_meta
+  local staged_account current_account staged_time current_time
+  for transaction in "$REFRESH_TXN_DIR/$profile."*; do
+    [ -d "$transaction" ] || continue
+    staged="$transaction/codex/auth.json"
+    before="$transaction/before.json"
+    if ! validate_secure_auth_file "$staged" full || [ ! -s "$before" ]; then
+      rm -rf "$transaction"
+      continue
+    fi
+    staged_meta=$(helper_inspect "$staged" full 2>/dev/null || true)
+    before_meta=$(cat "$before" 2>/dev/null || true)
+    [ -n "$staged_meta" ] && [ -n "$before_meta" ] || continue
+    changed=0
+    if [ "$(metadata_field "$staged_meta" accessFingerprint 2>/dev/null || true)" != "$(metadata_field "$before_meta" accessFingerprint 2>/dev/null || true)" ] || \
+       [ "$(metadata_field "$staged_meta" refreshFingerprint 2>/dev/null || true)" != "$(metadata_field "$before_meta" refreshFingerprint 2>/dev/null || true)" ]; then
+      changed=1
+    fi
+    if [ "$changed" -eq 0 ]; then
+      rm -rf "$transaction"
+      continue
+    fi
+
+    current_meta=$(helper_inspect "$(profile_path "$profile")" full 2>/dev/null || true)
+    [ -n "$current_meta" ] || continue
+    staged_account=$(metadata_field "$staged_meta" accountFingerprint 2>/dev/null || true)
+    current_account=$(metadata_field "$current_meta" accountFingerprint 2>/dev/null || true)
+    staged_time=$(metadata_field "$staged_meta" lastRefreshEpoch 2>/dev/null || metadata_field "$staged_meta" expiresAt 2>/dev/null || printf '0')
+    current_time=$(metadata_field "$current_meta" lastRefreshEpoch 2>/dev/null || metadata_field "$current_meta" expiresAt 2>/dev/null || printf '0')
+    if [ "$staged_account" = "$current_account" ] && [ "$staged_time" -ge "$current_time" ]; then
+      if promote_refreshed_auth "$profile" "$staged"; then
+        rm -rf "$transaction"
+      fi
+    elif [ "$staged_account" = "$current_account" ]; then
+      rm -rf "$transaction"
+    fi
+  done
+}
+
+refresh_profile_canonical() {
+  local profile="$1"
+  local profile_file transaction before_result staged_meta before_meta
+  profile_file=$(profile_path "$profile")
+  validate_secure_auth_file "$profile_file" full || return 1
+  transaction=$(mktemp -d "$REFRESH_TXN_DIR/$profile.XXXXXX") || return 1
+  chmod 700 "$transaction"
+  mkdir -m 700 "$transaction/codex"
+  atomic_copy "$profile_file" "$transaction/codex/auth.json" || {
+    rm -rf "$transaction"
+    return 1
+  }
+  before_result=$(helper_inspect "$transaction/codex/auth.json" full) || {
+    rm -rf "$transaction"
+    return 1
+  }
+  if ! printf '%s\n' "$before_result" >"$transaction/before.json" || ! chmod 600 "$transaction/before.json"; then
+    rm -rf "$transaction"
+    return 1
+  fi
+  if ! "$NODE_BIN" "$REFRESH_HELPER" refresh "$transaction/codex" >"$transaction/result.json"; then
+    staged_meta=$(helper_inspect "$transaction/codex/auth.json" full 2>/dev/null || true)
+    before_meta=$(cat "$transaction/before.json" 2>/dev/null || true)
+    if [ -z "$staged_meta" ] || \
+       { [ "$(metadata_field "$staged_meta" accessFingerprint 2>/dev/null || true)" = "$(metadata_field "$before_meta" accessFingerprint 2>/dev/null || true)" ] && \
+         [ "$(metadata_field "$staged_meta" refreshFingerprint 2>/dev/null || true)" = "$(metadata_field "$before_meta" refreshFingerprint 2>/dev/null || true)" ]; }; then
+      rm -rf "$transaction"
+    fi
+    return 1
+  fi
+  chmod 600 "$transaction/result.json"
+  if ! promote_refreshed_auth "$profile" "$transaction/codex/auth.json"; then
+    return 1
+  fi
+  rm -rf "$transaction"
+}
+
+SYNC_SYNCED_COUNT=0
+SYNC_PENDING_COUNT=0
+
+sync_profile_access() {
+  local profile="$1"
+  local profile_file temporary metadata account_fp access_fp index label
+  SYNC_SYNCED_COUNT=0
+  SYNC_PENDING_COUNT=${#REMOTE_TARGETS[@]}
+  profile_file=$(profile_path "$profile")
+  validate_secure_auth_file "$profile_file" full || return 1
+  metadata=$(helper_inspect "$profile_file" full) || return 1
+  account_fp=$(metadata_field "$metadata" accountFingerprint) || return 1
+  access_fp=$(metadata_field "$metadata" accessFingerprint) || return 1
+  temporary=$(mktemp "$STATE_ROOT/.access-only.$profile.XXXXXX") || return 1
+  chmod 600 "$temporary"
+  if ! "$NODE_BIN" "$REFRESH_HELPER" sanitize "$profile_file" "$temporary" >/dev/null; then
+    rm -f "$temporary"
+    return 1
+  fi
+  validate_secure_auth_file "$temporary" access-only || {
+    rm -f "$temporary"
+    return 1
+  }
+
+  SYNC_SYNCED_COUNT=0
+  SYNC_PENDING_COUNT=0
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    label="${REMOTE_LABELS[$index]}"
+    if remote_node_file "$index" "$temporary" install-access "$profile" "$account_fp" "$access_fp" >/dev/null 2>&1 || \
+       { remote_node_args "$index" stop-clients >/dev/null 2>&1 && \
+         remote_node_args "$index" inspect-access "$profile" "$access_fp" >/dev/null 2>&1; }; then
+      SYNC_SYNCED_COUNT=$((SYNC_SYNCED_COUNT + 1))
+      clear_pending "$profile" "$label"
+    else
+      mark_pending "$profile" "$label" "$access_fp" || true
+      SYNC_PENDING_COUNT=$((SYNC_PENDING_COUNT + 1))
+    fi
+    index=$((index + 1))
+  done
+  rm -f "$temporary"
+  [ "$SYNC_PENDING_COUNT" -eq 0 ]
+}
+
+controller_import_login() {
+  local profile="$1"
+  local replace_account="$2"
+  local incoming transaction building suffix profile_file active="" active_flag=0
+  local incoming_meta existing_meta incoming_account existing_account
+  local other_profile other_file other_meta other_account
+  local incoming_access actual_meta actual_account actual_access remaining label
+  local incoming_sha profile_backup_sha="none" active_backup_sha="none" current_backup_sha="none"
+
+  validate_profile_name "$profile"
+  case "$replace_account" in 0|1) ;; *) die "invalid account replacement flag" ;; esac
+  require_refresh_helper
+  acquire_controller_lock
+  controller_recover_login_transactions >/dev/null || die "an interrupted login import must be recovered before importing another login"
+  controller_recover_logout_intents >/dev/null || die "an interrupted logout operation must be recovered before importing a login"
+  acquire_lock
+
+  building=$(mktemp -d "$STATE_ROOT/.login-building.$profile.XXXXXX") || die "could not create login transaction"
+  chmod 700 "$building"
+  write_login_transaction_manifest "$building" collecting "$profile" || {
+    rm -rf "$building"
+    die "could not initialize durable login transaction"
+  }
+  suffix=${building##*.login-building.$profile.}
+  transaction="$LOGIN_TXN_DIR/$profile.$suffix"
+  if ! mv "$building" "$transaction"; then
+    rm -rf "$building"
+    die "could not activate durable login transaction"
+  fi
+  LOGIN_BACKUP_DIR="$transaction"
+  incoming="$transaction/incoming.auth.json"
+  if ! cat >"$incoming" || ! chmod 600 "$incoming"; then
+    rm -rf "$transaction"
+    die "could not receive login credentials"
+  fi
+  validate_secure_auth_file "$incoming" full || {
+    rm -rf "$transaction"
+    die "received login credentials are not valid full Codex auth"
+  }
+  incoming_meta=$(helper_inspect "$incoming" full) || {
+    rm -rf "$transaction"
+    die "received login credentials failed token inspection"
+  }
+  remaining=$(metadata_field "$incoming_meta" remainingSeconds) || {
+    rm -rf "$transaction"
+    die "received login credentials have no expiry metadata"
+  }
+  [ "$remaining" -gt 0 ] || {
+    rm -rf "$transaction"
+    die "received login credentials are already expired"
+  }
+  incoming_account=$(metadata_field "$incoming_meta" accountFingerprint) || die "could not identify logged-in account"
+  incoming_access=$(metadata_field "$incoming_meta" accessFingerprint) || die "could not identify logged-in access token"
+
+  for other_profile in $(list_profile_ids); do
+    [ "$other_profile" != "$profile" ] || continue
+    other_file=$(profile_path "$other_profile")
+    if [ -e "$other_file" ]; then
+      validate_secure_auth_file "$other_file" full || die "existing profile $other_profile is insecure or invalid"
+      other_meta=$(helper_inspect "$other_file" full) || die "could not inspect existing profile $other_profile"
+      other_account=$(metadata_field "$other_meta" accountFingerprint) || die "could not identify existing profile $other_profile"
+      if [ "$other_account" = "$incoming_account" ]; then
+        die "logged-in account is already assigned to profile $other_profile; choose a different account"
+      fi
+    fi
+  done
+
+  profile_file=$(profile_path "$profile")
+  LOGIN_PROFILE_EXISTED=0
+  LOGIN_CURRENT_EXISTED=0
+  if [ -e "$profile_file" ]; then
+    validate_secure_auth_file "$profile_file" full || die "existing profile $profile is insecure or invalid"
+    existing_meta=$(helper_inspect "$profile_file" full) || die "could not inspect existing profile $profile"
+    existing_account=$(metadata_field "$existing_meta" accountFingerprint) || die "could not identify existing profile $profile"
+    if [ "$existing_account" != "$incoming_account" ] && [ "$replace_account" -ne 1 ]; then
+      die "logged-in account does not match profile $profile; explicit replacement is required"
+    fi
+    atomic_copy "$profile_file" "$transaction/profile.auth.json" || die "could not back up profile $profile"
+    LOGIN_PROFILE_EXISTED=1
+    profile_backup_sha=$(sha256_file "$transaction/profile.auth.json") || die "could not inspect profile backup"
+  fi
+
+  if [ -e "$AUTH_FILE" ]; then
+    active=$(detect_active_profile) || die "cannot identify the active Mac profile before login import"
+  fi
+  if [ "$active" = "$profile" ]; then
+    active_flag=1
+    validate_secure_auth_file "$AUTH_FILE" full || die "active Mac auth is insecure or invalid"
+    atomic_copy "$AUTH_FILE" "$transaction/active.auth.json" || die "could not back up active Mac auth"
+    active_backup_sha=$(sha256_file "$transaction/active.auth.json") || die "could not inspect active auth backup"
+    if [ -e "$CURRENT_FILE" ]; then
+      [ ! -L "$CURRENT_FILE" ] && [ -f "$CURRENT_FILE" ] || die "current profile marker is insecure"
+      atomic_copy "$CURRENT_FILE" "$transaction/current" || die "could not back up current profile marker"
+      LOGIN_CURRENT_EXISTED=1
+      current_backup_sha=$(sha256_file "$transaction/current") || die "could not inspect current marker backup"
+    else
+      LOGIN_CURRENT_EXISTED=0
+    fi
+  fi
+
+  incoming_sha=$(sha256_file "$incoming") || die "could not inspect incoming login credentials"
+  LOGIN_PROFILE_FILE="$profile_file"
+  LOGIN_ACTIVE_FLAG="$active_flag"
+  LOGIN_ROLLBACK_NEEDED=1
+  write_login_transaction_manifest "$transaction" prepared "$profile" "$LOGIN_PROFILE_EXISTED" \
+    "$LOGIN_ACTIVE_FLAG" "$LOGIN_CURRENT_EXISTED" "$incoming_sha" "$profile_backup_sha" \
+    "$active_backup_sha" "$current_backup_sha" || die "could not prepare durable login transaction"
+
+  atomic_copy "$incoming" "$profile_file" || die "could not install logged-in profile $profile"
+  if [ "$active_flag" -eq 1 ]; then
+    atomic_copy "$incoming" "$AUTH_FILE" || die "could not install active Mac auth"
+    atomic_write_current "$profile" || die "could not update the current profile marker"
+  fi
+
+  validate_secure_auth_file "$profile_file" full || die "installed profile failed security validation"
+  actual_meta=$(helper_inspect "$profile_file" full) || die "installed profile failed token inspection"
+  actual_account=$(metadata_field "$actual_meta" accountFingerprint) || die "installed profile has no account fingerprint"
+  actual_access=$(metadata_field "$actual_meta" accessFingerprint) || die "installed profile has no access fingerprint"
+  [ "$actual_account" = "$incoming_account" ] || die "installed profile account verification failed"
+  [ "$actual_access" = "$incoming_access" ] || die "installed profile access verification failed"
+  if [ "$active_flag" -eq 1 ]; then
+    validate_secure_auth_file "$AUTH_FILE" full || die "installed active auth failed security validation"
+    [ "$(fingerprint "$AUTH_FILE")" = "$(fingerprint "$profile_file")" ] || die "active account verification failed"
+    [ "$(token_fingerprint "$AUTH_FILE")" = "$incoming_access" ] || die "active access verification failed"
+  fi
+
+  for label in "${REMOTE_LABELS[@]}"; do
+    mark_pending "$profile" "$label" "$incoming_access" || warn "could not mark $label for login sync"
+  done
+  write_login_transaction_manifest "$transaction" committed "$profile" "$LOGIN_PROFILE_EXISTED" \
+    "$LOGIN_ACTIVE_FLAG" "$LOGIN_CURRENT_EXISTED" "$incoming_sha" "$profile_backup_sha" \
+    "$active_backup_sha" "$current_backup_sha" || die "could not commit durable login transaction"
+  LOGIN_ROLLBACK_NEEDED=0
+  rm -rf "$transaction"
+  LOGIN_BACKUP_DIR=""
+  release_lock
+  release_controller_lock
+  trap - EXIT HUP INT TERM
+  printf 'profile=%s active=%s account=%s access_fp=%s state=imported\n' \
+    "$profile" "$active_flag" "$incoming_account" "$incoming_access"
+}
+
+controller_refresh_profile() {
+  local profile="$1"
+  local mode="$2"
+  local threshold="$3"
+  local profile_file metadata remaining expires_at action="noop" result="ok" active should_sync=0
+  validate_profile_name "$profile"
+  SYNC_SYNCED_COUNT=0
+  SYNC_PENDING_COUNT=0
+  profile_file=$(profile_path "$profile")
+  if [ ! -e "$profile_file" ]; then
+    for label in "${REMOTE_LABELS[@]}"; do clear_pending "$profile" "$label"; done
+    SYNC_SYNCED_COUNT=0
+    SYNC_PENDING_COUNT=0
+    printf 'profile=%s action=missing expires_at=unknown remaining_seconds=unknown local=ok synced=0 pending=0 result=ok\n' "$profile"
+    return 0
+  fi
+  validate_secure_auth_file "$profile_file" full || {
+    SYNC_SYNCED_COUNT=0
+    SYNC_PENDING_COUNT=${#REMOTE_TARGETS[@]}
+    printf 'profile=%s action=none expires_at=unknown remaining_seconds=unknown local=failed synced=0 pending=%s result=failed\n' \
+      "$profile" "$SYNC_PENDING_COUNT"
+    return 1
+  }
+
+  recover_refresh_transaction "$profile"
+  reconcile_active_full_profile "$profile"
+  metadata=$(helper_inspect "$profile_file" full) || return 1
+  remaining=$(metadata_field "$metadata" remainingSeconds) || return 1
+  expires_at=$(metadata_field "$metadata" expiresAt) || return 1
+
+  if [ "$mode" = force ] || { [ "$mode" = if-needed ] && [ "$remaining" -le "$threshold" ]; }; then
+    active=$(detect_active_profile 2>/dev/null || true)
+    [ "$active" != "$profile" ] || ensure_refresh_apps_stopped
+    if ! refresh_profile_canonical "$profile"; then
+      SYNC_SYNCED_COUNT=0
+      SYNC_PENDING_COUNT=${#REMOTE_TARGETS[@]}
+      printf 'profile=%s action=refresh-failed expires_at=%s remaining_seconds=%s local=failed synced=0 pending=%s result=failed\n' \
+        "$profile" "$expires_at" "$remaining" "$SYNC_PENDING_COUNT"
+      return 1
+    fi
+    action="refreshed"
+    metadata=$(helper_inspect "$profile_file" full) || return 1
+    remaining=$(metadata_field "$metadata" remainingSeconds) || return 1
+    expires_at=$(metadata_field "$metadata" expiresAt) || return 1
+  fi
+
+  if [ "$mode" = sync ]; then
+    action="synced"
+    should_sync=1
+  elif [ "$action" = refreshed ] || profile_has_pending "$profile"; then
+    should_sync=1
+  fi
+
+  if [ "$should_sync" -eq 1 ]; then
+    if ! sync_profile_access "$profile"; then
+      result="partial"
+    fi
+  else
+    SYNC_SYNCED_COUNT=0
+    SYNC_PENDING_COUNT=0
+  fi
+  printf 'profile=%s action=%s expires_at=%s remaining_seconds=%s local=ok synced=%s pending=%s result=%s\n' \
+    "$profile" "$action" "$expires_at" "$remaining" "$SYNC_SYNCED_COUNT" "$SYNC_PENDING_COUNT" "$result"
+  [ "$result" = ok ] || return 2
+}
+
+controller_refresh_command() {
+  local selector="$1"
+  local mode="$2"
+  local threshold="$3"
+  local restart_apps="$4"
+  local profile rc=0 profile_rc refreshed=0 pending=0
+  [ "$selector" = all ] || validate_profile_name "$selector"
+  case "$threshold" in ''|*[!0-9]*) die "threshold must be a non-negative integer" ;; esac
+  require_refresh_helper
+  REFRESH_RESTART_APPS="$restart_apps"
+  acquire_controller_lock
+  controller_recover_logout_intents >/dev/null || warn "an interrupted logout operation remains pending"
+  controller_cleanup_logout_backups >/dev/null || warn "some completed logout backups remain pending"
+  acquire_lock
+
+  for profile in $(list_profile_ids); do
+    [ "$selector" = all ] || [ "$selector" = "$profile" ] || continue
+    if controller_refresh_profile "$profile" "$mode" "$threshold"; then
+      profile_rc=0
+    else
+      profile_rc=$?
+    fi
+    if [ "$profile_rc" -eq 1 ]; then
+      rc=1
+    elif [ "$profile_rc" -eq 2 ] && [ "$rc" -eq 0 ]; then
+      rc=2
+    fi
+    [ "$profile_rc" -eq 0 ] || pending=$((pending + SYNC_PENDING_COUNT))
+    [ "$mode" != force ] || [ "$profile_rc" -ne 0 ] || refreshed=$((refreshed + 1))
+  done
+
+  finish_refresh_apps
+  release_lock
+  release_controller_lock
+  trap - EXIT HUP INT TERM
+  case "$rc" in
+    0) printf 'overall=ok pending=0\n' ;;
+    2) printf 'overall=partial pending=%s\n' "$pending" ;;
+    *) printf 'overall=failed pending=%s\n' "$pending" ;;
+  esac
+  return "$rc"
+}
+
+controller_switch() {
+  local target="$1"
+  local restart_apps="$2"
+  local local_line local_previous local_target_fp line target_fp version index
+  local switched_remote=0
+  local local_changed=0
+  local remote_previous=()
+  local expected_fp=""
+  local app_state="none"
+
+  validate_profile_name "$target"
+  controller_recover_logout_intents >/dev/null || die "an interrupted logout operation must be recovered before switching"
+  printf 'Preflight for profile %s...\n' "$target"
+
+  local_line=$("$0" __node preflight "$target") || die "local preflight failed"
+  version=$(field_value "$local_line" version) || die "could not parse local helper version"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "local helper version mismatch"
+  local_previous=$(field_value "$local_line" active) || die "could not parse local preflight"
+  local_target_fp=$(field_value "$local_line" target_fp) || die "could not parse local target fingerprint"
+  expected_fp="$local_target_fp"
+
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    line=$(remote_node "$index" preflight "$target") || die "preflight failed on ${REMOTE_LABELS[$index]}"
+    version=$(field_value "$line" version) || die "could not parse ${REMOTE_LABELS[$index]} helper version"
+    [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on ${REMOTE_LABELS[$index]}"
+    remote_previous[$index]=$(field_value "$line" active) || die "could not parse ${REMOTE_LABELS[$index]} preflight"
+    target_fp=$(field_value "$line" target_fp) || die "could not parse ${REMOTE_LABELS[$index]} fingerprint"
+    [ "$target_fp" = "$expected_fp" ] || die "profile $target identifies a different account on ${REMOTE_LABELS[$index]}"
+    index=$((index + 1))
+  done
+
+  if [ "$restart_apps" -eq 1 ]; then
+    running_inside_desktop_app && die "run the switch from Terminal.app; restarting the app would terminate this command"
+    if ! app_state=$(stop_local_apps); then
+      die "could not stop the local desktop app cleanly; no credentials were changed"
+    fi
+    index=0
+    while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+      if ! remote_node "$index" stop-clients >/dev/null; then
+        start_local_apps "$app_state"
+        die "could not stop clients on ${REMOTE_LABELS[$index]}"
+      fi
+      index=$((index + 1))
+    done
+  fi
+
+  printf 'Switching SSH devices...\n'
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if ! remote_node "$index" switch "$target" "$restart_apps" >/dev/null; then
+      if remote_node "$index" verify "$target" >/dev/null 2>&1; then
+        switched_remote=$((switched_remote + 1))
+      else
+        if ! remote_node "$index" switch "${remote_previous[$index]}" "$restart_apps" >/dev/null 2>&1; then
+          warn "state on ${REMOTE_LABELS[$index]} is uncertain; run '$PROGRAM_NAME status' when it is reachable"
+        fi
+        rollback_switches "$local_previous" "$local_changed" "$switched_remote" "$restart_apps" "${remote_previous[@]}"
+        [ "$restart_apps" -eq 0 ] || start_local_apps "$app_state"
+        die "switch failed on ${REMOTE_LABELS[$index]}"
+      fi
+    else
+      switched_remote=$((switched_remote + 1))
+    fi
+    index=$((index + 1))
+  done
+
+  printf 'Switching MacBook...\n'
+  if ! "$0" __node switch "$target" "$restart_apps" >/dev/null; then
+    if "$0" __node verify "$target" >/dev/null 2>&1; then
+      local_changed=1
+    else
+      if ! "$0" __node switch "$local_previous" "$restart_apps" >/dev/null 2>&1; then
+        warn "local state is uncertain; run '$PROGRAM_NAME status'"
+      fi
+      rollback_switches "$local_previous" "$local_changed" "$switched_remote" "$restart_apps" "${remote_previous[@]}"
+      [ "$restart_apps" -eq 0 ] || start_local_apps "$app_state"
+      die "local switch failed"
+    fi
+  else
+    local_changed=1
+  fi
+
+  printf 'Verifying all nodes...\n'
+  if ! "$0" __node verify "$target" >/dev/null; then
+    rollback_switches "$local_previous" "$local_changed" "$switched_remote" "$restart_apps" "${remote_previous[@]}"
+    [ "$restart_apps" -eq 0 ] || start_local_apps "$app_state"
+    die "local verification failed"
+  fi
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if ! remote_node "$index" verify "$target" >/dev/null; then
+      rollback_switches "$local_previous" "$local_changed" "$switched_remote" "$restart_apps" "${remote_previous[@]}"
+      [ "$restart_apps" -eq 0 ] || start_local_apps "$app_state"
+      die "verification failed on ${REMOTE_LABELS[$index]}"
+    fi
+    index=$((index + 1))
+  done
+
+  printf 'All %s configured nodes now use profile %s (%s).\n' "$((1 + ${#REMOTE_TARGETS[@]}))" "$target" "$expected_fp"
+
+  if [ "$restart_apps" -eq 1 ]; then
+    start_local_apps "$app_state"
+  else
+    printf 'Existing app processes were not restarted; they may keep the previous account in memory.\n'
+  fi
+}
+
+profile_map_matches() {
+  local line="$1"
+  local first_fp="$2"
+  local first_access="$3"
+  local second_fp="$4"
+  local second_access="$5"
+  [ "$(field_value "$line" profile1_fp 2>/dev/null || true)" = "$first_fp" ] && \
+    [ "$(field_value "$line" profile1_access 2>/dev/null || true)" = "$first_access" ] && \
+    [ "$(field_value "$line" profile2_fp 2>/dev/null || true)" = "$second_fp" ] && \
+    [ "$(field_value "$line" profile2_access 2>/dev/null || true)" = "$second_access" ]
+}
+
+rollback_profile_swaps() {
+  local local_changed="$1"
+  local remote_count="$2"
+  local index
+  warn "profile swap failed; restoring previous slot labels"
+  if [ "$local_changed" -eq 1 ]; then
+    "$0" __node swap-profiles >/dev/null 2>&1 || warn "local profile swap rollback failed"
+  fi
+  index=$((remote_count - 1))
+  while [ "$index" -ge 0 ]; do
+    remote_node "$index" swap-profiles >/dev/null 2>&1 || warn "profile swap rollback failed on ${REMOTE_LABELS[$index]}"
+    index=$((index - 1))
+  done
+}
+
+controller_swap_profiles() {
+  local local_line line version index
+  local first_fp first_access second_fp second_access
+  local swapped_remote=0 local_changed=0
+
+  controller_recover_logout_intents >/dev/null || die "an interrupted logout operation must be recovered before swapping profiles"
+
+  profile_has_pending 1 && die "profile 1 still has pending authentication synchronization"
+  profile_has_pending 2 && die "profile 2 still has pending authentication synchronization"
+  has_refresh_transaction 1 && die "profile 1 has an unfinished refresh transaction"
+  has_refresh_transaction 2 && die "profile 2 has an unfinished refresh transaction"
+
+  printf 'Checking profile maps on all configured nodes...\n'
+  local_line=$("$0" __node profile-map) || die "could not read the local profile map"
+  version=$(field_value "$local_line" version) || die "could not parse local helper version"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "local helper version mismatch"
+  first_fp=$(field_value "$local_line" profile1_fp) || die "could not identify local profile 1"
+  first_access=$(field_value "$local_line" profile1_access) || die "could not identify local profile 1 access"
+  second_fp=$(field_value "$local_line" profile2_fp) || die "could not identify local profile 2"
+  second_access=$(field_value "$local_line" profile2_access) || die "could not identify local profile 2 access"
+  [ "$first_fp" != "$second_fp" ] || die "the two profile slots identify the same account"
+
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    line=$(remote_node "$index" profile-map) || die "profile map preflight failed on ${REMOTE_LABELS[$index]}"
+    version=$(field_value "$line" version) || die "could not parse ${REMOTE_LABELS[$index]} helper version"
+    [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on ${REMOTE_LABELS[$index]}"
+    profile_map_matches "$line" "$first_fp" "$first_access" "$second_fp" "$second_access" || \
+      die "profile map differs on ${REMOTE_LABELS[$index]}"
+    index=$((index + 1))
+  done
+
+  printf 'Exchanging profile slots on SSH devices...\n'
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if ! remote_node "$index" swap-profiles >/dev/null; then
+      line=$(remote_node "$index" profile-map 2>/dev/null || true)
+      if profile_map_matches "$line" "$second_fp" "$second_access" "$first_fp" "$first_access"; then
+        swapped_remote=$((swapped_remote + 1))
+      else
+        rollback_profile_swaps "$local_changed" "$swapped_remote"
+        die "profile swap failed on ${REMOTE_LABELS[$index]}"
+      fi
+    else
+      swapped_remote=$((swapped_remote + 1))
+    fi
+    index=$((index + 1))
+  done
+
+  printf 'Exchanging profile slots on MacBook...\n'
+  if ! "$0" __node swap-profiles >/dev/null; then
+    line=$("$0" __node profile-map 2>/dev/null || true)
+    if profile_map_matches "$line" "$second_fp" "$second_access" "$first_fp" "$first_access"; then
+      local_changed=1
+    else
+      rollback_profile_swaps "$local_changed" "$swapped_remote"
+      die "local profile swap failed"
+    fi
+  else
+    local_changed=1
+  fi
+
+  line=$("$0" __node profile-map) || {
+    rollback_profile_swaps "$local_changed" "$swapped_remote"
+    die "local profile swap verification failed"
+  }
+  if ! profile_map_matches "$line" "$second_fp" "$second_access" "$first_fp" "$first_access"; then
+    rollback_profile_swaps "$local_changed" "$swapped_remote"
+    die "local profile map verification failed"
+  fi
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    line=$(remote_node "$index" profile-map 2>/dev/null || true)
+    if ! profile_map_matches "$line" "$second_fp" "$second_access" "$first_fp" "$first_access"; then
+      rollback_profile_swaps "$local_changed" "$swapped_remote"
+      die "profile swap verification failed on ${REMOTE_LABELS[$index]}"
+    fi
+    index=$((index + 1))
+  done
+
+  printf 'profile1=%s profile2=%s state=swapped\n' "$second_fp" "$first_fp"
+}
+
+validate_account_fingerprint() {
+  local value="$1"
+  [ "${#value}" -eq 12 ] || die "account fingerprint must contain 12 hexadecimal characters"
+  case "$value" in *[!0-9a-f]*) die "account fingerprint must contain 12 hexadecimal characters" ;; esac
+}
+
+profile_map_orientation() {
+  local line="$1"
+  local first="$2"
+  local second="$3"
+  local actual_first actual_second
+  actual_first=$(field_value "$line" profile1_fp 2>/dev/null || true)
+  actual_second=$(field_value "$line" profile2_fp 2>/dev/null || true)
+  if [ "$actual_first" = "$first" ] && [ "$actual_second" = "$second" ]; then
+    printf 'original\n'
+  elif [ "$actual_first" = "$second" ] && [ "$actual_second" = "$first" ]; then
+    printf 'swapped\n'
+  else
+    printf 'unknown\n'
+    return 1
+  fi
+}
+
+controller_reconcile_profile_swap() {
+  local first="$1"
+  local second="$2"
+  local local_line target line orientation index version
+  local orientations=()
+  validate_account_fingerprint "$first"
+  validate_account_fingerprint "$second"
+  [ "$first" != "$second" ] || die "profile fingerprints must be distinct"
+  controller_recover_logout_intents >/dev/null || die "an interrupted logout operation must be recovered before reconciling profiles"
+
+  local_line=$("$0" __node profile-map) || die "could not read the local profile map for recovery"
+  target=$(profile_map_orientation "$local_line" "$first" "$second") || \
+    die "local profile map does not match the recovery journal"
+  version=$(field_value "$local_line" version) || die "could not parse local helper version"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "local helper version mismatch"
+
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    line=$(remote_node "$index" profile-map) || die "profile recovery preflight failed on ${REMOTE_LABELS[$index]}"
+    version=$(field_value "$line" version) || die "could not parse ${REMOTE_LABELS[$index]} helper version"
+    [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on ${REMOTE_LABELS[$index]}"
+    orientations[$index]=$(profile_map_orientation "$line" "$first" "$second") || \
+      die "profile map on ${REMOTE_LABELS[$index]} does not match the recovery journal"
+    index=$((index + 1))
+  done
+
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if [ "${orientations[$index]}" != "$target" ]; then
+      remote_node "$index" swap-profiles >/dev/null || \
+        die "could not reconcile profile slots on ${REMOTE_LABELS[$index]}"
+      line=$(remote_node "$index" profile-map) || die "could not verify profile recovery on ${REMOTE_LABELS[$index]}"
+      [ "$(profile_map_orientation "$line" "$first" "$second" 2>/dev/null || true)" = "$target" ] || \
+        die "profile recovery verification failed on ${REMOTE_LABELS[$index]}"
+    fi
+    index=$((index + 1))
+  done
+  printf 'profile_recovery=%s state=consistent\n' "$target"
+}
+
+logout_preflight_matches() {
+  local line="$1"
+  local target_fp="$2"
+  local target_access="$3"
+  local fallback_fp="$4"
+  local fallback_access="$5"
+  [ "$(field_value "$line" target_fp 2>/dev/null || true)" = "$target_fp" ] && \
+    [ "$(field_value "$line" target_access 2>/dev/null || true)" = "$target_access" ] && \
+    [ "$(field_value "$line" fallback_fp 2>/dev/null || true)" = "$fallback_fp" ] && \
+    [ "$(field_value "$line" fallback_access 2>/dev/null || true)" = "$fallback_access" ]
+}
+
+logout_recovery_identity_matches() {
+  local line="$1"
+  local target_fp="$2"
+  local fallback_fp="$3"
+  [ "$(field_value "$line" target_fp 2>/dev/null || true)" = "$target_fp" ] && \
+    [ "$(field_value "$line" fallback_fp 2>/dev/null || true)" = "$fallback_fp" ]
+}
+
+controller_recover_logout_intents() {
+  local intent operation line state profile fallback target_fp target_access fallback_fp fallback_access
+  local index failed rc=0 local_line
+  ensure_dirs
+  for intent in "$CONTROLLER_TXN_DIR/logout_"*.intent; do
+    [ -e "$intent" ] || continue
+    if [ ! -f "$intent" ] || [ -L "$intent" ]; then
+      warn "invalid controller logout intent: $intent"
+      rc=2
+      continue
+    fi
+    operation=${intent##*/}
+    operation=${operation%.intent}
+    case "$operation" in ''|*[!0-9a-zA-Z_-]*) warn "invalid controller logout operation"; rc=2; continue ;; esac
+    line=$(cat "$intent")
+    state=$(field_value "$line" state 2>/dev/null || true)
+    profile=$(field_value "$line" profile 2>/dev/null || true)
+    fallback=$(field_value "$line" fallback 2>/dev/null || true)
+    target_fp=$(field_value "$line" target_fp 2>/dev/null || true)
+    target_access=$(field_value "$line" target_access 2>/dev/null || true)
+    fallback_fp=$(field_value "$line" fallback_fp 2>/dev/null || true)
+    fallback_access=$(field_value "$line" fallback_access 2>/dev/null || true)
+    if ! valid_profile_pair "$profile" "$fallback"; then
+      warn "invalid controller logout intent manifest"
+      rc=2
+      continue
+    fi
+
+    case "$state" in
+      staging)
+        failed=0
+        "$0" __node logout-restore "$operation" "$profile" >/dev/null 2>&1 || failed=1
+        index=0
+        while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+          remote_node_args "$index" logout-restore "$operation" "$profile" >/dev/null 2>&1 || failed=1
+          index=$((index + 1))
+        done
+        if [ "$failed" -eq 0 ]; then
+          local_line=$("$0" __node logout-preflight "$profile" "$fallback" 2>/dev/null || true)
+          logout_recovery_identity_matches "$local_line" "$target_fp" "$fallback_fp" || failed=1
+          index=0
+          while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+            line=$(remote_node_args "$index" logout-preflight "$profile" "$fallback" 2>/dev/null || true)
+            logout_recovery_identity_matches "$line" "$target_fp" "$fallback_fp" || failed=1
+            index=$((index + 1))
+          done
+        fi
+        if [ "$failed" -eq 0 ]; then
+          remove_controller_logout_intent "$operation" || failed=1
+        fi
+        ;;
+      committing)
+        failed=0
+        "$0" __node logout-verify "$operation" "$profile" "$fallback" >/dev/null 2>&1 || failed=1
+        index=0
+        while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+          remote_node_args "$index" logout-verify "$operation" "$profile" "$fallback" >/dev/null 2>&1 || failed=1
+          index=$((index + 1))
+        done
+        if [ "$failed" -eq 0 ]; then
+          index=0
+          while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+            remote_node_args "$index" logout-commit "$operation" "$profile" "$fallback" >/dev/null 2>&1 || failed=1
+            index=$((index + 1))
+          done
+          if [ "$failed" -eq 0 ]; then
+            "$0" __node logout-commit "$operation" "$profile" "$fallback" >/dev/null 2>&1 || failed=1
+          fi
+        fi
+        if [ "$failed" -eq 0 ]; then
+          remove_controller_logout_intent "$operation" || failed=1
+        fi
+        ;;
+      *) failed=1; warn "invalid controller logout intent state" ;;
+    esac
+    if [ "$failed" -ne 0 ]; then
+      warn "controller logout recovery remains pending for $operation"
+      rc=2
+    fi
+  done
+  return "$rc"
+}
+
+rollback_logout_stages() {
+  local operation="$1"
+  local profile="$2"
+  local local_staged="$3"
+  local remote_count="$4"
+  local index rc=0
+  warn "logout did not complete; restoring the selected profile slot"
+  if [ "$local_staged" -eq 1 ]; then
+    "$0" __node logout-restore "$operation" "$profile" >/dev/null 2>&1 || { warn "local logout rollback failed"; rc=1; }
+  fi
+  index=$((remote_count - 1))
+  while [ "$index" -ge 0 ]; do
+    remote_node_args "$index" logout-restore "$operation" "$profile" >/dev/null 2>&1 || \
+      { warn "logout rollback failed on ${REMOTE_LABELS[$index]}"; rc=1; }
+    index=$((index - 1))
+  done
+  return "$rc"
+}
+
+abort_logout_stages() {
+  local operation="$1"
+  local profile="$2"
+  local local_staged="$3"
+  local remote_count="$4"
+  if rollback_logout_stages "$operation" "$profile" "$local_staged" "$remote_count"; then
+    remove_controller_logout_intent "$operation" || warn "could not clear recovered controller logout intent"
+  else
+    warn "controller logout intent was preserved for automatic recovery"
+  fi
+}
+
+controller_logout_profile() {
+  local profile="$1"
+  local fallback="${2:-}" local_line line version index operation candidate
+  local target_fp target_access fallback_fp fallback_access
+  local staged_remote=0 local_staged=0 commit_failed=0
+  validate_profile_name "$profile"
+  if [ -z "$fallback" ]; then
+    for candidate in $(list_profile_ids); do
+      [ "$candidate" != "$profile" ] || continue
+      if validate_secure_auth_file "$(profile_path "$candidate")"; then
+        fallback="$candidate"
+        break
+      fi
+    done
+  fi
+  valid_profile_pair "$profile" "$fallback" || die "logout requires a different authenticated fallback profile"
+  controller_recover_logout_intents >/dev/null || die "an earlier logout operation still requires recovery"
+
+  printf 'Checking logout safety on all configured nodes...\n'
+  local_line=$("$0" __node logout-preflight "$profile" "$fallback") || die "local logout preflight failed"
+  version=$(field_value "$local_line" version) || die "could not parse local helper version"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "local helper version mismatch"
+  target_fp=$(field_value "$local_line" target_fp) || die "could not identify the selected profile"
+  target_access=$(field_value "$local_line" target_access) || die "could not identify the selected profile access"
+  fallback_fp=$(field_value "$local_line" fallback_fp) || die "could not identify the fallback profile"
+  fallback_access=$(field_value "$local_line" fallback_access) || die "could not identify the fallback profile access"
+
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    line=$(remote_node_args "$index" logout-preflight "$profile" "$fallback") || die "logout preflight failed on ${REMOTE_LABELS[$index]}"
+    version=$(field_value "$line" version) || die "could not parse ${REMOTE_LABELS[$index]} helper version"
+    [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on ${REMOTE_LABELS[$index]}"
+    logout_preflight_matches "$line" "$target_fp" "$target_access" "$fallback_fp" "$fallback_access" || \
+      die "profile credentials differ on ${REMOTE_LABELS[$index]}"
+    index=$((index + 1))
+  done
+
+  printf 'Moving all devices to fallback profile %s...\n' "$fallback"
+  controller_switch "$fallback" 1
+  operation="logout_${profile}_$(date -u +%Y%m%dT%H%M%SZ)_$$"
+  write_controller_logout_intent "$operation" staging "$profile" "$fallback" \
+    "$target_fp" "$target_access" "$fallback_fp" "$fallback_access" || \
+    die "could not create durable controller logout intent"
+
+  printf 'Removing profile %s from SSH devices...\n' "$profile"
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if ! remote_node_args "$index" logout-stage "$operation" "$profile" "$fallback" >/dev/null; then
+      if remote_node_args "$index" logout-verify "$operation" "$profile" "$fallback" >/dev/null 2>&1; then
+        staged_remote=$((staged_remote + 1))
+      else
+        abort_logout_stages "$operation" "$profile" "$local_staged" "$((index + 1))"
+        die "logout failed on ${REMOTE_LABELS[$index]}"
+      fi
+    else
+      staged_remote=$((staged_remote + 1))
+    fi
+    index=$((index + 1))
+  done
+
+  if ! "$0" __node logout-stage "$operation" "$profile" "$fallback" >/dev/null; then
+    if "$0" __node logout-verify "$operation" "$profile" "$fallback" >/dev/null 2>&1; then
+      local_staged=1
+    else
+      abort_logout_stages "$operation" "$profile" 1 "$staged_remote"
+      die "local logout failed"
+    fi
+  else
+    local_staged=1
+  fi
+
+  if ! "$0" __node logout-verify "$operation" "$profile" "$fallback" >/dev/null; then
+    abort_logout_stages "$operation" "$profile" "$local_staged" "$staged_remote"
+    die "local logout verification failed"
+  fi
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if ! remote_node_args "$index" logout-verify "$operation" "$profile" "$fallback" >/dev/null; then
+      abort_logout_stages "$operation" "$profile" "$local_staged" "$staged_remote"
+      die "logout verification failed on ${REMOTE_LABELS[$index]}"
+    fi
+    index=$((index + 1))
+  done
+
+  if ! write_controller_logout_intent "$operation" committing "$profile" "$fallback" \
+      "$target_fp" "$target_access" "$fallback_fp" "$fallback_access"; then
+    abort_logout_stages "$operation" "$profile" "$local_staged" "$staged_remote"
+    die "could not commit durable controller logout intent"
+  fi
+
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    remote_node_args "$index" logout-commit "$operation" "$profile" "$fallback" >/dev/null 2>&1 || \
+      { warn "logout cleanup pending on ${REMOTE_LABELS[$index]}"; commit_failed=1; }
+    index=$((index + 1))
+  done
+  if [ "$commit_failed" -eq 0 ]; then
+    "$0" __node logout-commit "$operation" "$profile" "$fallback" >/dev/null || commit_failed=1
+  fi
+  if [ "$commit_failed" -eq 1 ]; then
+    printf 'operation=%s profile=%s fallback=%s state=partial-cleanup\n' "$operation" "$profile" "$fallback"
+    return 2
+  fi
+  remove_controller_logout_intent "$operation" || {
+    printf 'operation=%s profile=%s fallback=%s state=partial-cleanup\n' "$operation" "$profile" "$fallback"
+    return 2
+  }
+  printf 'profile=%s fallback=%s account=%s state=logged-out\n' "$profile" "$fallback" "$target_fp"
+}
+
+controller_cleanup_logout_backups() {
+  local transaction manifest operation profile fallback index
+  local rc=0 found=0 cleaned=0 verified commit_failed
+  ensure_dirs
+  controller_recover_logout_intents >/dev/null || rc=2
+  for transaction in "$LOGOUT_TXN_DIR/logout_"*; do
+    [ -e "$transaction" ] || continue
+    found=$((found + 1))
+    if [ ! -d "$transaction" ] || [ -L "$transaction" ]; then
+      warn "invalid local logout transaction: $transaction"
+      rc=2
+      continue
+    fi
+    operation=${transaction##*/}
+    case "$operation" in ''|*[!0-9a-zA-Z_-]*) warn "invalid logout operation id"; rc=2; continue ;; esac
+    manifest="$transaction/manifest"
+    profile=$(sed -n 's/^profile=\([^ ]*\).*/\1/p' "$manifest" 2>/dev/null | head -n 1)
+    fallback=$(sed -n 's/.*fallback=\([^ ]*\).*/\1/p' "$manifest" 2>/dev/null | head -n 1)
+    if ! valid_profile_pair "$profile" "$fallback"; then
+      warn "invalid logout cleanup manifest"
+      rc=2
+      continue
+    fi
+
+    verified=1
+    "$0" __node logout-verify "$operation" "$profile" "$fallback" >/dev/null 2>&1 || verified=0
+    index=0
+    while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+      remote_node_args "$index" logout-verify "$operation" "$profile" "$fallback" >/dev/null 2>&1 || verified=0
+      index=$((index + 1))
+    done
+    if [ "$verified" -ne 1 ]; then
+      warn "logout cleanup $operation is not globally verified; preserving every available backup"
+      rc=2
+      continue
+    fi
+
+    commit_failed=0
+    index=0
+    while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+      remote_node_args "$index" logout-commit "$operation" "$profile" "$fallback" >/dev/null 2>&1 || commit_failed=1
+      index=$((index + 1))
+    done
+    if [ "$commit_failed" -eq 0 ]; then
+      "$0" __node logout-commit "$operation" "$profile" "$fallback" >/dev/null 2>&1 || commit_failed=1
+    fi
+    if [ "$commit_failed" -eq 0 ]; then
+      cleaned=$((cleaned + 1))
+    else
+      warn "logout cleanup $operation remains pending"
+      rc=2
+    fi
+  done
+  printf 'logout_cleanup=%s found=%s cleaned=%s\n' "$([ "$rc" -eq 0 ] && printf ok || printf partial)" "$found" "$cleaned"
+  return "$rc"
+}
+
+print_status_line() {
+  local label="$1"
+  local line="$2"
+  local active fp mode auth_mode cli credential access_fp expires_at
+  active=$(field_value "$line" active 2>/dev/null || printf 'unknown')
+  fp=$(field_value "$line" fingerprint 2>/dev/null || printf 'unknown')
+  mode=$(field_value "$line" mode 2>/dev/null || printf 'unknown')
+  auth_mode=$(field_value "$line" auth_mode 2>/dev/null || printf 'unknown')
+  cli=$(field_value "$line" cli 2>/dev/null || printf 'unknown')
+  credential=$(field_value "$line" credential 2>/dev/null || printf 'unknown')
+  access_fp=$(field_value "$line" access_fp 2>/dev/null || printf 'unknown')
+  expires_at=$(field_value "$line" expires_at 2>/dev/null || printf 'unknown')
+  printf '%-9s %-8s %-12s %-6s %-10s %-13s %-12s %-12s %s\n' \
+    "$label" "$active" "$fp" "$mode" "$auth_mode" "$cli" "$credential" "$access_fp" "$expires_at"
+}
+
+controller_status() {
+  local line index
+  printf '%-9s %-8s %-12s %-6s %-10s %-13s %-12s %-12s %s\n' \
+    "NODE" "PROFILE" "ACCOUNT" "MODE" "AUTH" "CLI" "CREDENTIAL" "ACCESS" "EXPIRES"
+  printf '%-9s %-8s %-12s %-6s %-10s %-13s %-12s %-12s %s\n' \
+    "---------" "--------" "------------" "------" "----------" "-------------" "------------" "------------" "------------"
+  if line=$("$0" __node status 2>/dev/null); then
+    print_status_line "macbook" "$line"
+  else
+    print_status_line "macbook" "active=error fingerprint=error mode=error auth_mode=error cli=error credential=error access_fp=error expires_at=error"
+  fi
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if line=$(remote_node "$index" status 2>/dev/null); then
+      print_status_line "${REMOTE_LABELS[$index]}" "$line"
+    else
+      print_status_line "${REMOTE_LABELS[$index]}" "active=unreachable fingerprint=unknown mode=unknown auth_mode=unknown cli=unknown credential=unknown access_fp=unknown expires_at=unknown"
+    fi
+    index=$((index + 1))
+  done
+}
+
+print_status_json_line() {
+  local id="$1"
+  local display_name="$2"
+  local line="$3"
+  local reachable="$4"
+  local active fp auth_mode cli credential access_fp expires_at profile_json=null
+  active=$(field_value "$line" active 2>/dev/null || printf 'unknown')
+  fp=$(field_value "$line" fingerprint 2>/dev/null || printf 'unknown')
+  auth_mode=$(field_value "$line" auth_mode 2>/dev/null || printf 'unknown')
+  cli=$(field_value "$line" cli 2>/dev/null || printf 'unknown')
+  credential=$(field_value "$line" credential 2>/dev/null || printf 'unknown')
+  access_fp=$(field_value "$line" access_fp 2>/dev/null || printf 'unknown')
+  expires_at=$(field_value "$line" expires_at 2>/dev/null || printf 'unknown')
+  is_profile_name "$active" && profile_json="$active"
+  jq -cn \
+    --arg id "$id" --arg displayName "$display_name" --argjson profileID "$profile_json" \
+    --arg accountFingerprint "$fp" --arg authMode "$auth_mode" --arg cliState "$cli" \
+    --arg credential "$credential" --arg accessFingerprint "$access_fp" --arg expiresAt "$expires_at" \
+    --argjson isReachable "$reachable" \
+    '{id:$id,displayName:$displayName,profileID:$profileID,
+      accountFingerprint:(if $accountFingerprint == "unknown" then null else $accountFingerprint end),
+      authMode:(if $authMode == "unknown" then null else $authMode end),
+      cliState:(if $cliState == "unknown" then null else $cliState end),
+      credential:$credential,accessFingerprint:$accessFingerprint,expiresAt:$expiresAt,
+      isReachable:$isReachable}'
+}
+
+controller_status_json() {
+  local line index
+  if line=$("$0" __node status 2>/dev/null); then
+    print_status_json_line macbook "이 MacBook" "$line" true
+  else
+    print_status_json_line macbook "이 MacBook" "active=error" false
+  fi
+  index=0
+  while [ "$index" -lt "${#REMOTE_TARGETS[@]}" ]; do
+    if line=$(remote_node "$index" status 2>/dev/null); then
+      print_status_json_line "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" "$line" true
+    else
+      print_status_json_line "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" "active=unreachable" false
+    fi
+    index=$((index + 1))
+  done
+}
+
+print_usage_summary_json() {
+  local id="$1" display="$2" reachable="$3" summary="${4:-}" error="${5:-}"
+  if [ "$reachable" = true ]; then
+    printf '%s\n' "$summary" | jq -ce --arg id "$id" --arg displayName "$display" \
+      '{id:$id,displayName:$displayName,isReachable:true,summary:.}'
+  else
+    jq -cn --arg id "$id" --arg displayName "$display" --arg error "$error" \
+      '{id:$id,displayName:$displayName,isReachable:false,summary:null,error:$error}'
+  fi
+}
+
+controller_usage_summary() {
+  local summary index=0 version error
+  if summary=$("$0" __node usage-summary 2>&1); then
+    print_usage_summary_json "macbook" "이 MacBook" true "$summary"
+  else
+    print_usage_summary_json "macbook" "이 MacBook" false "" "$summary"
+  fi
+
+  while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
+    version=$(remote_node "$index" version 2>/dev/null || true)
+    if [ "$version" != "$SCRIPT_VERSION" ]; then
+      remote_install_helpers "$index" >/dev/null 2>&1 || true
+    fi
+    if summary=$(remote_node "$index" usage-summary 2>&1); then
+      print_usage_summary_json "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" true "$summary"
+    else
+      error=${summary:-"사용량 수집기에 연결하지 못했습니다."}
+      print_usage_summary_json "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" false "" "$error"
+    fi
+    index=$((index + 1))
+  done
+}
+
+controller_accounts_json() {
+  local first=1 profile
+  if [ -f "$CONFIG_FILE" ] && [ ! -L "$CONFIG_FILE" ]; then
+    jq -c '[.accounts[] | {id:.id,email:.email}]' "$CONFIG_FILE"
+    return
+  fi
+  printf '['
+  for profile in $(list_profile_ids); do
+    [ "$first" -eq 1 ] || printf ','
+    jq -cn --argjson id "$profile" --arg email "계정 $profile" '{id:$id,email:$email}'
+    first=0
+  done
+  printf ']\n'
+}
+
+controller_test_device() {
+  local wanted="$1" index=0 result
+  case "$wanted" in ''|*[!a-z0-9-]*|-*) die "invalid device id" ;; esac
+  while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
+    if [ "${REMOTE_LABELS[$index]}" = "$wanted" ]; then
+      result=$(remote_node "$index" version) || die "SSH connection failed for $wanted"
+      [ "$result" = "$SCRIPT_VERSION" ] || die "helper version mismatch on $wanted: $result"
+      printf 'device=%s result=ok version=%s\n' "$wanted" "$result"
+      return
+    fi
+    index=$((index + 1))
+  done
+  die "device not found: $wanted"
+}
+
+controller_bootstrap_device() {
+  local wanted="$1" index=0 found=-1 version active profile profile_file temporary metadata account_fp access_fp enrolled=0
+  case "$wanted" in ''|*[!a-z0-9-]*|-*) die "invalid device id" ;; esac
+  while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
+    if [ "${REMOTE_LABELS[$index]}" = "$wanted" ]; then found=$index; break; fi
+    index=$((index + 1))
+  done
+  [ "$found" -ge 0 ] || die "device not found: $wanted"
+  index=$found
+  require_refresh_helper
+  active=$(detect_active_profile) || die "cannot identify the active Mac profile"
+
+  prepare_remote_bootstrap_snapshot "$index" "$wanted"
+  remote_install_helpers "$index" >/dev/null || die "helper installation failed for $wanted"
+  version=$(remote_node "$index" version) || die "installed helper is unreachable on $wanted"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on $wanted: $version"
+
+  for profile in $(list_profile_ids); do
+    profile_file=$(profile_path "$profile")
+    [ -e "$profile_file" ] || die "MacBook profile $profile is missing; refusing partial device enrollment"
+    validate_secure_auth_file "$profile_file" full || die "MacBook profile $profile is insecure or is not full auth"
+    metadata=$(helper_inspect "$profile_file" full) || die "could not inspect MacBook profile $profile"
+    account_fp=$(metadata_field "$metadata" accountFingerprint) || die "could not identify MacBook profile $profile"
+    access_fp=$(metadata_field "$metadata" accessFingerprint) || die "could not identify access token for profile $profile"
+    temporary=$(mktemp "$STATE_ROOT/.bootstrap-access.$profile.XXXXXX") || die "could not prepare profile $profile for bootstrap"
+    chmod 600 "$temporary"
+    if ! "$NODE_BIN" "$REFRESH_HELPER" sanitize "$profile_file" "$temporary" >/dev/null || \
+       ! validate_secure_auth_file "$temporary" access-only; then
+      rm -f "$temporary"
+      die "could not sanitize profile $profile for bootstrap"
+    fi
+    if ! remote_node_file "$index" "$temporary" install-access "$profile" "$account_fp" "$access_fp" >/dev/null; then
+      rm -f "$temporary"
+      die "could not install profile $profile on $wanted"
+    fi
+    rm -f "$temporary"
+    enrolled=$((enrolled + 1))
+  done
+
+  [ "$enrolled" -gt 0 ] || die "no local account credentials are available for bootstrap"
+  remote_node "$index" initialize "$active" >/dev/null || die "could not initialize profile $active on $wanted"
+  remote_node "$index" verify "$active" >/dev/null || die "profile $active verification failed on $wanted"
+  commit_remote_bootstrap_snapshot || die "could not finalize remote bootstrap recovery archive"
+  printf 'device=%s result=ok active=%s profiles=%s version=%s\n' \
+    "$wanted" "$active" "$enrolled" "$version"
+}
+
+application_running() {
+  local name="$1"
+  osascript -e "application \"$name\" is running" 2>/dev/null | grep -qx 'true'
+}
+
+running_inside_desktop_app() {
+  local pid command parent iterations=0
+  pid="$PPID"
+  while [ "$pid" -gt 1 ] 2>/dev/null && [ "$iterations" -lt 20 ]; do
+    command=$(ps -o command= -p "$pid" 2>/dev/null || true)
+    case "$command" in
+      *'/Applications/ChatGPT.app/'*|*'/Applications/Codex.app/'*) return 0 ;;
+    esac
+    parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)
+    case "$parent" in
+      ''|*[!0-9]*) break ;;
+    esac
+    pid="$parent"
+    iterations=$((iterations + 1))
+  done
+  return 1
+}
+
+wait_for_app_exit() {
+  local name="$1"
+  local attempts=0
+  while application_running "$name"; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 30 ] || return 1
+    sleep 0.5
+  done
+}
+
+stop_local_apps() {
+  local chatgpt_running=0
+  local codex_running=0
+  local state="none"
+
+  if application_running "ChatGPT"; then chatgpt_running=1; fi
+  if application_running "Codex"; then codex_running=1; fi
+
+  if [ "$chatgpt_running" -eq 1 ]; then
+    state="chatgpt"
+    osascript -e 'tell application "ChatGPT" to quit' >/dev/null 2>&1 || return 1
+  fi
+  if [ "$codex_running" -eq 1 ]; then
+    if [ "$state" = "none" ]; then state="codex"; else state="$state,codex"; fi
+    osascript -e 'tell application "Codex" to quit' >/dev/null 2>&1 || return 1
+  fi
+
+  [ "$chatgpt_running" -eq 0 ] || wait_for_app_exit "ChatGPT" || return 1
+  [ "$codex_running" -eq 0 ] || wait_for_app_exit "Codex" || return 1
+  printf '%s\n' "$state"
+}
+
+start_local_apps() {
+  local state="$1"
+  case ",$state," in
+    *,chatgpt,*) open -a ChatGPT >/dev/null 2>&1 || warn "could not reopen ChatGPT" ;;
+  esac
+  case ",$state," in
+    *,codex,*) open -a Codex >/dev/null 2>&1 || warn "could not reopen Codex" ;;
+  esac
+}
+
+node_main() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    preflight) [ "$#" -eq 1 ] || die "node preflight requires a profile"; node_preflight "$1" ;;
+    switch)
+      [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die "node switch requires a profile and optional restart flag"
+      node_switch "$@"
+      ;;
+    verify) [ "$#" -eq 1 ] || die "node verify requires a profile"; node_verify "$1" ;;
+    status) [ "$#" -eq 0 ] || die "node status takes no arguments"; node_status ;;
+    stop-clients) [ "$#" -eq 0 ] || die "node stop-clients takes no arguments"; node_stop_clients ;;
+    profile-map) [ "$#" -eq 0 ] || die "node profile-map takes no arguments"; node_profile_map ;;
+    swap-profiles) [ "$#" -eq 0 ] || die "node swap-profiles takes no arguments"; node_swap_profiles ;;
+    initialize) [ "$#" -eq 1 ] || die "node initialize requires a profile"; node_initialize "$1" ;;
+    logout-preflight) [ "$#" -eq 2 ] || die "node logout-preflight requires profile and fallback"; node_logout_preflight "$1" "$2" ;;
+    logout-stage) [ "$#" -eq 3 ] || die "node logout-stage requires operation, profile, and fallback"; node_logout_stage "$1" "$2" "$3" ;;
+    logout-restore) [ "$#" -eq 2 ] || die "node logout-restore requires operation and profile"; node_logout_restore "$1" "$2" ;;
+    logout-verify) [ "$#" -eq 3 ] || die "node logout-verify requires operation, profile, and fallback"; node_logout_verify "$1" "$2" "$3" ;;
+    logout-commit) [ "$#" -eq 3 ] || die "node logout-commit requires operation, profile, and fallback"; node_logout_commit "$1" "$2" "$3" ;;
+    install-access) [ "$#" -eq 3 ] || die "node install-access requires profile, account fingerprint, and access fingerprint"; node_install_access "$1" "$2" "$3" ;;
+    inspect-access) [ "$#" -eq 2 ] || die "node inspect-access requires profile and access fingerprint"; node_inspect_access "$1" "$2" ;;
+    usage-summary) [ "$#" -eq 0 ] || die "node usage-summary takes no arguments"; node_usage_summary ;;
+    version) [ "$#" -eq 0 ] || die "node version takes no arguments"; printf '%s\n' "$SCRIPT_VERSION" ;;
+    *) die "unknown internal action: $action" ;;
+  esac
+}
+
+ensure_no_device_activation_transaction() {
+  local first_entry entry base
+  if [ ! -e "$DEVICE_ACTIVATION_TXN_DIR" ] && [ ! -L "$DEVICE_ACTIVATION_TXN_DIR" ]; then
+    return 0
+  fi
+  [ -d "$DEVICE_ACTIVATION_TXN_DIR" ] && [ ! -L "$DEVICE_ACTIVATION_TXN_DIR" ] && \
+    [ "$(file_owner_id "$DEVICE_ACTIVATION_TXN_DIR")" = "$(id -u)" ] && \
+    [ "$(file_mode "$DEVICE_ACTIVATION_TXN_DIR")" = 700 ] || \
+    die "unsafe device activation transaction directory"
+
+  # A crash before the app's final intent rename can leave its exact UUID
+  # staging name. The config is still disabled at that point, and this helper
+  # owns the cross-process controller gate, so an owner-controlled regular
+  # temp can be removed safely. Every other hidden entry remains fail-closed.
+  for entry in "$DEVICE_ACTIVATION_TXN_DIR"/.*; do
+    base=${entry##*/}
+    case "$base" in .|..) continue ;; esac
+    if [[ "$base" =~ ^\.[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\.tmp$ ]]; then
+      [ -f "$entry" ] && [ ! -L "$entry" ] && \
+        [ "$(file_owner_id "$entry")" = "$(id -u)" ] || \
+        die "unsafe device activation staging file"
+      rm -f "$entry" || die "could not remove stale device activation staging file"
+    fi
+  done
+  first_entry=$(find "$DEVICE_ACTIVATION_TXN_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) || \
+    die "could not inspect device activation transactions"
+  [ -z "$first_entry" ] || \
+    die "device activation verification is in progress; retry after it completes"
+}
+
+main() {
+  local command="${1:-help}"
+  local profile fallback="" restart_apps=1 selector="all" threshold="$DEFAULT_REFRESH_THRESHOLD" refresh_mode="" replace_account=0 rc=0
+  local login_recovery="ok" logout_recovery="ok"
+
+  if [ "$command" = "__node" ]; then
+    shift
+    node_main "$@"
+    return
+  fi
+
+  if [ "$command" = version ] || [ "$command" = --version ]; then
+    [ "$#" -eq 1 ] || die "$command takes no arguments"
+    printf '%s\n' "$SCRIPT_VERSION"
+    return
+  fi
+
+  case "$command" in
+    accounts-json|help|-h|--help) ;;
+    *) acquire_controller_lock ;;
+  esac
+
+  case "$command" in
+    test-device|bootstrap-device)
+      if [ "$#" -eq 2 ]; then load_configuration "$2"; else load_configuration; fi
+      ;;
+    *) load_configuration ;;
+  esac
+
+  # A prepared login import may already have published canonical auth. No
+  # public command may inspect or mutate node state until that durable local
+  # transaction has been deterministically recovered. import-login and
+  # recover-controller run the same recovery in their own transaction flow.
+  case "$command" in
+    accounts-json|help|-h|--help|import-login|recover-controller) ;;
+    *) controller_recover_login_transactions >/dev/null || \
+         die "an interrupted login import must be recovered before another controller operation" ;;
+  esac
+
+  # The app briefly publishes an enabled SSH node before its post-enable
+  # status verification. During that durable activation intent, read-only
+  # status and recovery are allowed but every other controller mutation is
+  # blocked, including commands launched by a second app process.
+  case "$command" in
+    accounts-json|help|-h|--help|status|status-json|usage-summary|recover-controller) ;;
+    *) ensure_no_device_activation_transaction ;;
+  esac
+
+  if is_profile_name "$command"; then
+    profile="$command"
+    shift
+    command="__direct-switch"
+  fi
+
+  case "$command" in
+    __direct-switch) ;;
+    switch)
+      [ "$#" -ge 2 ] || die "switch requires a profile"
+      profile="$2"
+      validate_profile_name "$profile"
+      shift 2
+      ;;
+    status)
+      [ "$#" -eq 1 ] || die "status takes no arguments"
+      controller_status
+      return
+      ;;
+    status-json)
+      [ "$#" -eq 1 ] || die "status-json takes no arguments"
+      controller_status_json
+      return
+      ;;
+    usage-summary)
+      [ "$#" -eq 1 ] || die "usage-summary takes no arguments"
+      controller_usage_summary
+      return
+      ;;
+    accounts-json)
+      [ "$#" -eq 1 ] || die "accounts-json takes no arguments"
+      controller_accounts_json
+      return
+      ;;
+    test-device)
+      [ "$#" -eq 2 ] || die "test-device requires a device id"
+      controller_test_device "$2"
+      return
+      ;;
+    bootstrap-device)
+      [ "$#" -eq 2 ] || die "bootstrap-device requires a device id"
+      acquire_controller_lock
+      controller_bootstrap_device "$2"
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return
+      ;;
+    recover-controller)
+      [ "$#" -eq 1 ] || die "recover-controller takes no arguments"
+      if ! controller_recover_login_transactions; then login_recovery="pending"; rc=2; fi
+      if ! controller_recover_logout_intents; then logout_recovery="pending"; rc=2; fi
+      printf 'login_recovery=%s logout_recovery=%s overall=%s\n' \
+        "$login_recovery" "$logout_recovery" "$([ "$rc" -eq 0 ] && printf ok || printf pending)"
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return "$rc"
+      ;;
+    reconcile-profile-swap)
+      [ "$#" -eq 3 ] || die "reconcile-profile-swap requires the two original account fingerprints"
+      acquire_controller_lock
+      controller_reconcile_profile_swap "$2" "$3"
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return
+      ;;
+    logout)
+      [ "$#" -ge 2 ] || die "logout requires a profile"
+      profile="$2"
+      validate_profile_name "$profile"
+      shift 2
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --fallback)
+            [ "$#" -ge 2 ] || die "--fallback requires a profile"
+            fallback="$2"
+            validate_profile_name "$fallback"
+            shift 2
+            ;;
+          *) die "unknown option: $1" ;;
+        esac
+      done
+      acquire_controller_lock
+      if controller_logout_profile "$profile" "$fallback"; then rc=0; else rc=$?; fi
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return "$rc"
+      ;;
+    cleanup-logouts)
+      [ "$#" -eq 1 ] || die "cleanup-logouts takes no arguments"
+      acquire_controller_lock
+      if controller_cleanup_logout_backups; then rc=0; else rc=$?; fi
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return "$rc"
+      ;;
+    import-login)
+      [ "$#" -ge 2 ] || die "import-login requires a profile"
+      profile="$2"
+      validate_profile_name "$profile"
+      shift 2
+      replace_account=0
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --replace-account) replace_account=1 ;;
+          *) die "unknown option: $1" ;;
+        esac
+        shift
+      done
+      controller_import_login "$profile" "$replace_account"
+      return
+      ;;
+    refresh-if-needed|refresh|sync-access)
+      case "$command" in
+        refresh-if-needed) refresh_mode="if-needed" ;;
+        refresh) refresh_mode="force" ;;
+        sync-access) refresh_mode="sync" ;;
+      esac
+      shift
+      if [ "$#" -gt 0 ]; then
+        if [ "$1" = all ] || is_profile_name "$1"; then selector="$1"; shift; fi
+      fi
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --threshold-seconds)
+            [ "$#" -ge 2 ] || die "--threshold-seconds requires a value"
+            threshold="$2"
+            shift 2
+            ;;
+          --no-restart-app) restart_apps=0; shift ;;
+          --restart-app) restart_apps=1; shift ;;
+          *) die "unknown option: $1" ;;
+        esac
+      done
+      controller_refresh_command "$selector" "$refresh_mode" "$threshold" "$restart_apps"
+      return $?
+      ;;
+    help|-h|--help)
+      usage
+      return
+      ;;
+    *)
+      usage >&2
+      die "unknown command: $command"
+      ;;
+  esac
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --restart-app) restart_apps=1 ;;
+      --no-restart-app) restart_apps=0 ;;
+      *) die "unknown option: $1" ;;
+    esac
+    shift
+  done
+  acquire_controller_lock
+  controller_switch "$profile" "$restart_apps"
+  release_controller_lock
+  trap - EXIT HUP INT TERM
+}
+
+main "$@"

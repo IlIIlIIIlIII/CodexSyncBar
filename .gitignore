@@ -1,0 +1,6 @@
+DEPLOY.md
+.build/
+dist/
+tmp/
+.DS_Store
+*.zip
