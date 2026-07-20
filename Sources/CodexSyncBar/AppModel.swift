@@ -496,6 +496,7 @@ final class AppModel: ObservableObject {
             let refreshResult = try await switchService.refreshAuthIfNeeded(profileID: profileID)
             var partial = refreshResult.isPartial
             var changed = refreshResult.didRefresh
+            var deferred = refreshResult.didDefer
 
             let lastFullSync = UserDefaults.standard.object(forKey: fullSyncDefaultsKey) as? Date
             let fullSyncDue = lastFullSync.map { Date().timeIntervalSince($0) >= fullSyncInterval } ?? true
@@ -503,6 +504,7 @@ final class AppModel: ObservableObject {
                 let syncResult = try await switchService.syncAuth(profileID: profileID)
                 partial = partial || syncResult.isPartial
                 changed = changed || syncResult.didSync
+                deferred = deferred || syncResult.didDefer
                 if !syncResult.isPartial, profileID == nil {
                     UserDefaults.standard.set(Date(), forKey: fullSyncDefaultsKey)
                 }
@@ -514,6 +516,10 @@ final class AppModel: ObservableObject {
                 let warning = AppBanner(style: .warning, message: "중앙 인증은 안전하지만 일부 기기 동기화를 다시 시도할 예정입니다.")
                 banner = warning
                 authWarningBannerID = warning.id
+            } else if deferred {
+                authMaintenanceSummary = "Codex 사용 중 · 자동 갱신 대기"
+                if banner?.id == authWarningBannerID { banner = nil }
+                authWarningBannerID = nil
             } else {
                 authMaintenanceSummary = "인증 동기화 정상 · \(Date().formatted(date: .omitted, time: .shortened))"
                 if banner?.id == authWarningBannerID { banner = nil }

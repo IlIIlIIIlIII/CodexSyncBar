@@ -147,13 +147,15 @@ case "$action" in
     account=$(jq -er '.tokens.account_id' "$file")
     access=$(jq -er '.tokens.access_token' "$file")
     refresh=$(jq -er '.tokens.refresh_token' "$file")
+    remaining="${GPT_SWITCH_TEST_REMAINING_SECONDS:-2000000000}"
     jq -cn \
       --arg accountFingerprint "$(short_hash "$account")" \
       --arg accessFingerprint "$(short_hash "$access")" \
       --arg refreshFingerprint "$(short_hash "$refresh")" \
+      --argjson remainingSeconds "$remaining" \
       '{accountFingerprint:$accountFingerprint,accessFingerprint:$accessFingerprint,
         refreshFingerprint:$refreshFingerprint,expiresAt:4102444800,
-        remainingSeconds:2000000000,lastRefreshEpoch:1}'
+        remainingSeconds:$remainingSeconds,lastRefreshEpoch:1}'
     ;;
   sanitize)
     jq '.tokens.refresh_token = ""' "$1" >"$2"
@@ -179,6 +181,34 @@ common_env=(
   GPT_SWITCH_TEST_SSH_STDIN="$SSH_STDIN"
   GPT_SWITCH_TEST_CREDENTIAL_ID="$CREDENTIAL_ID"
 )
+
+FAKE_OSASCRIPT="$TMP/fake-osascript"
+OSASCRIPT_CALLS="$TMP/osascript-calls"
+cat >"$FAKE_OSASCRIPT" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GPT_SWITCH_TEST_OSASCRIPT_CALLS"
+printf 'true\n'
+SH
+chmod 700 "$FAKE_OSASCRIPT"
+
+set +e
+deferred_output=$(env "${common_env[@]}" \
+  GPT_SWITCH_OSASCRIPT_BIN="$FAKE_OSASCRIPT" \
+  GPT_SWITCH_TEST_OSASCRIPT_CALLS="$OSASCRIPT_CALLS" \
+  GPT_SWITCH_TEST_REMAINING_SECONDS=10 \
+  "$HELPER" refresh-if-needed 3 --threshold-seconds 100 --no-restart-app 2>&1)
+deferred_rc=$?
+set -e
+[ "$deferred_rc" -eq 0 ] || {
+  printf 'no-restart maintenance failed unexpectedly: %s\n' "$deferred_output" >&2
+  exit 1
+}
+printf '%s\n' "$deferred_output" | grep -F 'action=deferred-client-running' >/dev/null
+printf '%s\n' "$deferred_output" | grep -F 'overall=ok pending=0' >/dev/null
+if grep -F 'to quit' "$OSASCRIPT_CALLS" >/dev/null; then
+  printf 'automatic auth maintenance tried to quit a desktop client\n' >&2
+  exit 1
+fi
 
 status_json=$(env "${common_env[@]}" "$HELPER" status-json)
 printf '%s\n' "$status_json" | jq -e -s '

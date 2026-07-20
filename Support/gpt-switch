@@ -29,6 +29,9 @@ SSH_BIN="${GPT_SWITCH_SSH_BIN:-/usr/bin/ssh}"
 ASKPASS_HELPER="${GPT_SWITCH_ASKPASS_HELPER:-$HOME/.local/lib/gpt-switch/codex-syncbar-askpass}"
 USAGE_HELPER="${GPT_SWITCH_USAGE_HELPER:-$HOME/.local/lib/gpt-switch/usage-summary.mjs}"
 CODEX_APP_SERVER_PATTERN='^(([^[:space:]]*/)?[c]odex([.]js)?|([^[:space:]]*/)?node[[:space:]]+[^[:space:]]*/codex([.]js)?)([[:space:]]+-c[[:space:]]+[^[:space:]]+)*[[:space:]]+app-server[[:space:]]+(proxy([[:space:]]|$)|--listen[[:space:]]+unix://)'
+OSASCRIPT_BIN="${GPT_SWITCH_OSASCRIPT_BIN:-/usr/bin/osascript}"
+OPEN_BIN="${GPT_SWITCH_OPEN_BIN:-/usr/bin/open}"
+DESKTOP_APP_BUNDLE_IDS=("com.openai.codex" "com.openai.chat")
 
 REMOTE_LABELS=()
 REMOTE_DISPLAY_NAMES=()
@@ -51,6 +54,7 @@ PREPARED_LOCK_OWNER_FILE=""
 REFRESH_APPS_STOPPED=0
 REFRESH_APP_STATE="none"
 REFRESH_RESTART_APPS=1
+REFRESH_PROFILE_DEFERRED=0
 LOGIN_ROLLBACK_NEEDED=0
 LOGIN_BACKUP_DIR=""
 LOGIN_PROFILE_FILE=""
@@ -2674,6 +2678,15 @@ ensure_refresh_apps_stopped() {
   REFRESH_APPS_STOPPED=1
 }
 
+prepare_active_profile_maintenance() {
+  [ "$REFRESH_PROFILE_DEFERRED" -eq 0 ] || return 0
+  if [ "$REFRESH_RESTART_APPS" -eq 0 ] && desktop_clients_running; then
+    REFRESH_PROFILE_DEFERRED=1
+    return 0
+  fi
+  ensure_refresh_apps_stopped
+}
+
 finish_refresh_apps() {
   if [ "$REFRESH_APPS_STOPPED" -eq 1 ]; then
     start_local_apps "$REFRESH_APP_STATE"
@@ -2705,7 +2718,8 @@ reconcile_active_full_profile() {
     return 0
   fi
 
-  ensure_refresh_apps_stopped
+  prepare_active_profile_maintenance
+  [ "$REFRESH_PROFILE_DEFERRED" -eq 0 ] || return 0
   canonical=$(helper_inspect "$profile_file" full) || die "could not re-read profile $profile"
   live=$(helper_inspect "$AUTH_FILE" full) || die "could not re-read active auth"
   canonical_time=$(metadata_field "$canonical" lastRefreshEpoch 2>/dev/null || metadata_field "$canonical" expiresAt)
@@ -2732,7 +2746,8 @@ promote_refreshed_auth() {
 
   active=$(detect_active_profile 2>/dev/null || true)
   if [ "$active" = "$profile" ]; then
-    ensure_refresh_apps_stopped
+    prepare_active_profile_maintenance
+    [ "$REFRESH_PROFILE_DEFERRED" -eq 0 ] || return 1
   fi
   atomic_copy "$staged" "$profile_file" || return 1
   if [ "$active" = "$profile" ]; then
@@ -3011,6 +3026,7 @@ controller_refresh_profile() {
   local threshold="$3"
   local profile_file metadata remaining expires_at action="noop" result="ok" active should_sync=0
   validate_profile_name "$profile"
+  REFRESH_PROFILE_DEFERRED=0
   SYNC_SYNCED_COUNT=0
   SYNC_PENDING_COUNT=0
   profile_file=$(profile_path "$profile")
@@ -3035,9 +3051,20 @@ controller_refresh_profile() {
   remaining=$(metadata_field "$metadata" remainingSeconds) || return 1
   expires_at=$(metadata_field "$metadata" expiresAt) || return 1
 
+  if [ "$REFRESH_PROFILE_DEFERRED" -eq 1 ]; then
+    printf 'profile=%s action=deferred-client-running expires_at=%s remaining_seconds=%s local=ok synced=0 pending=0 result=ok\n' \
+      "$profile" "$expires_at" "$remaining"
+    return 0
+  fi
+
   if [ "$mode" = force ] || { [ "$mode" = if-needed ] && [ "$remaining" -le "$threshold" ]; }; then
     active=$(detect_active_profile 2>/dev/null || true)
-    [ "$active" != "$profile" ] || ensure_refresh_apps_stopped
+    [ "$active" != "$profile" ] || prepare_active_profile_maintenance
+    if [ "$REFRESH_PROFILE_DEFERRED" -eq 1 ]; then
+      printf 'profile=%s action=deferred-client-running expires_at=%s remaining_seconds=%s local=ok synced=0 pending=0 result=ok\n' \
+        "$profile" "$expires_at" "$remaining"
+      return 0
+    fi
     if ! refresh_profile_canonical "$profile"; then
       SYNC_SYNCED_COUNT=0
       SYNC_PENDING_COUNT=${#REMOTE_TARGETS[@]}
@@ -3891,8 +3918,16 @@ controller_bootstrap_device() {
 }
 
 application_running() {
-  local name="$1"
-  osascript -e "application \"$name\" is running" 2>/dev/null | grep -qx 'true'
+  local bundle_id="$1"
+  "$OSASCRIPT_BIN" -e "application id \"$bundle_id\" is running" 2>/dev/null | grep -qx 'true'
+}
+
+desktop_clients_running() {
+  local bundle_id
+  for bundle_id in "${DESKTOP_APP_BUNDLE_IDS[@]}"; do
+    application_running "$bundle_id" && return 0
+  done
+  return 1
 }
 
 running_inside_desktop_app() {
@@ -3914,9 +3949,9 @@ running_inside_desktop_app() {
 }
 
 wait_for_app_exit() {
-  local name="$1"
+  local bundle_id="$1"
   local attempts=0
-  while application_running "$name"; do
+  while application_running "$bundle_id"; do
     attempts=$((attempts + 1))
     [ "$attempts" -lt 30 ] || return 1
     sleep 0.5
@@ -3924,35 +3959,30 @@ wait_for_app_exit() {
 }
 
 stop_local_apps() {
-  local chatgpt_running=0
-  local codex_running=0
+  local bundle_id
   local state="none"
 
-  if application_running "ChatGPT"; then chatgpt_running=1; fi
-  if application_running "Codex"; then codex_running=1; fi
-
-  if [ "$chatgpt_running" -eq 1 ]; then
-    state="chatgpt"
-    osascript -e 'tell application "ChatGPT" to quit' >/dev/null 2>&1 || return 1
-  fi
-  if [ "$codex_running" -eq 1 ]; then
-    if [ "$state" = "none" ]; then state="codex"; else state="$state,codex"; fi
-    osascript -e 'tell application "Codex" to quit' >/dev/null 2>&1 || return 1
-  fi
-
-  [ "$chatgpt_running" -eq 0 ] || wait_for_app_exit "ChatGPT" || return 1
-  [ "$codex_running" -eq 0 ] || wait_for_app_exit "Codex" || return 1
+  for bundle_id in "${DESKTOP_APP_BUNDLE_IDS[@]}"; do
+    application_running "$bundle_id" || continue
+    if [ "$state" = "none" ]; then state="$bundle_id"; else state="$state,$bundle_id"; fi
+    "$OSASCRIPT_BIN" -e "tell application id \"$bundle_id\" to quit" >/dev/null 2>&1 || return 1
+  done
+  for bundle_id in "${DESKTOP_APP_BUNDLE_IDS[@]}"; do
+    case ",$state," in
+      *,$bundle_id,*) wait_for_app_exit "$bundle_id" || return 1 ;;
+    esac
+  done
   printf '%s\n' "$state"
 }
 
 start_local_apps() {
   local state="$1"
-  case ",$state," in
-    *,chatgpt,*) open -a ChatGPT >/dev/null 2>&1 || warn "could not reopen ChatGPT" ;;
-  esac
-  case ",$state," in
-    *,codex,*) open -a Codex >/dev/null 2>&1 || warn "could not reopen Codex" ;;
-  esac
+  local bundle_id
+  for bundle_id in "${DESKTOP_APP_BUNDLE_IDS[@]}"; do
+    case ",$state," in
+      *,$bundle_id,*) "$OPEN_BIN" -b "$bundle_id" >/dev/null 2>&1 || warn "could not reopen $bundle_id" ;;
+    esac
+  done
 }
 
 node_main() {

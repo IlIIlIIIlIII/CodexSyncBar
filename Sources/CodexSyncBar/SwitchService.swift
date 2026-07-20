@@ -8,6 +8,7 @@ struct ProcessResult: Sendable {
 struct AuthMaintenanceResult: Sendable, Equatable {
     let didRefresh: Bool
     let didSync: Bool
+    let didDefer: Bool
     let isPartial: Bool
     let output: String
 }
@@ -215,7 +216,9 @@ actor SwitchService {
     }
 
     func refreshAuthIfNeeded(profileID: Int? = nil) async throws -> AuthMaintenanceResult {
-        try await runAuthMaintenance(arguments: ["refresh-if-needed", profileID.map(String.init) ?? "all"])
+        try await runAuthMaintenance(arguments: [
+            "refresh-if-needed", profileID.map(String.init) ?? "all", "--no-restart-app",
+        ])
     }
 
     func forceRefreshAuth(
@@ -232,14 +235,19 @@ actor SwitchService {
             return AuthMaintenanceResult(
                 didRefresh: false,
                 didSync: false,
+                didDefer: false,
                 isPartial: false,
                 output: "profile=\(profileID) action=noop reason=credential-changed result=ok")
         }
-        return try await executeAuthMaintenance(arguments: ["refresh", String(profileID)])
+        return try await executeAuthMaintenance(arguments: [
+            "refresh", String(profileID), "--no-restart-app",
+        ])
     }
 
     func syncAuth(profileID: Int? = nil) async throws -> AuthMaintenanceResult {
-        try await runAuthMaintenance(arguments: ["sync-access", profileID.map(String.init) ?? "all"])
+        try await runAuthMaintenance(arguments: [
+            "sync-access", profileID.map(String.init) ?? "all", "--no-restart-app",
+        ])
     }
 
     func testDevice(id: String) async throws -> String {
@@ -445,6 +453,7 @@ actor SwitchService {
         return AuthMaintenanceResult(
             didRefresh: lowercased.contains("action=refreshed") || lowercased.contains("refreshed=true"),
             didSync: syncedCount > 0 || lowercased.contains("sync=ok") || lowercased.contains("action=synced"),
+            didDefer: lowercased.contains("action=deferred-client-running"),
             isPartial: exitStatus == 2 || lowercased.contains("result=partial"),
             output: output)
     }

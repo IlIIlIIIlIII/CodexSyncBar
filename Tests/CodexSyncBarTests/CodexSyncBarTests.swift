@@ -2409,6 +2409,17 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertTrue(changed.didSync)
     }
 
+    func testAuthMaintenanceParserReportsDeferredActiveClientWithoutAttention() {
+        let deferred = SwitchService.parseAuthMaintenance(
+            output: "profile=1 action=deferred-client-running synced=0 pending=0 result=ok",
+            exitStatus: 0)
+
+        XCTAssertTrue(deferred.didDefer)
+        XCTAssertFalse(deferred.didRefresh)
+        XCTAssertFalse(deferred.didSync)
+        XCTAssertFalse(deferred.isPartial)
+    }
+
     func testAuthStoreReadsCanonicalProfileInsteadOfActiveCopy() async throws {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexSyncBarTests-\(UUID().uuidString)", isDirectory: true)
@@ -2942,6 +2953,33 @@ final class CodexSyncBarTests: XCTestCase {
 
         XCTAssertEqual(statuses.map(\.name), ["macbook"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: overlapMarker.path))
+    }
+
+    func testInAppAuthMaintenanceNeverRequestsDesktopClientRestart() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexSyncBarNoDesktopRestart-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let executable = root.appendingPathComponent("gpt-switch")
+        let argumentsLog = root.appendingPathComponent("arguments.log")
+        let script = """
+        #!/bin/bash
+        printf '%s\n' "$*" >>"\(argumentsLog.path)"
+        printf 'profile=1 action=deferred-client-running synced=0 pending=0 result=ok\n'
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        let service = SwitchService(executable: executable)
+        _ = try await service.refreshAuthIfNeeded(profileID: 1)
+        _ = try await service.syncAuth(profileID: 1)
+        _ = try await service.forceRefreshAuth(profileID: 1)
+
+        let invocations = try String(contentsOf: argumentsLog, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        XCTAssertEqual(invocations.count, 3)
+        XCTAssertTrue(invocations.allSatisfy { $0.hasSuffix("--no-restart-app") }, invocations.joined(separator: "\n"))
     }
 
     func testControllerRecoveryClassifiesRecoverablePartialForAutomaticRetry() async throws {
