@@ -642,6 +642,10 @@ lock_open_gate_fd() {
 
   if [ -x /usr/bin/lockf ]; then
     /usr/bin/lockf -s -t 0 "$fd" && locked=1
+  elif [ -x /opt/homebrew/opt/util-linux/bin/flock ]; then
+    /opt/homebrew/opt/util-linux/bin/flock -n "$fd" && locked=1
+  elif [ -x /usr/local/opt/util-linux/bin/flock ]; then
+    /usr/local/opt/util-linux/bin/flock -n "$fd" && locked=1
   elif command -v flock >/dev/null 2>&1; then
     flock -n "$fd" && locked=1
   else

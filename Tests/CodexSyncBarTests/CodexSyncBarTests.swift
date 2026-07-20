@@ -637,8 +637,24 @@ final class CodexSyncBarTests: XCTestCase {
 
         try lock.withLock {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/lockf")
-            process.arguments = ["-s", "-t", "0", "-k", lock.gateURL.path, "/usr/bin/true"]
+            if FileManager.default.isExecutableFile(atPath: "/usr/bin/lockf") {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/lockf")
+                process.arguments = ["-s", "-t", "0", "-k", lock.gateURL.path, "/usr/bin/true"]
+            } else {
+                let candidates = [
+                    "/opt/homebrew/opt/util-linux/bin/flock",
+                    "/usr/local/opt/util-linux/bin/flock",
+                    "/opt/homebrew/bin/flock",
+                    "/usr/local/bin/flock",
+                ]
+                guard let flock = candidates.first(where: {
+                    FileManager.default.isExecutableFile(atPath: $0)
+                }) else {
+                    throw XCTSkip("lockf 또는 flock이 설치되어 있지 않습니다.")
+                }
+                process.executableURL = URL(fileURLWithPath: flock)
+                process.arguments = ["-n", lock.gateURL.path, "/usr/bin/true"]
+            }
             try process.run()
             process.waitUntilExit()
             XCTAssertNotEqual(process.terminationStatus, 0)
@@ -2488,8 +2504,8 @@ final class CodexSyncBarTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staleOwner.path)
         let output = Pipe()
         let process = Process()
-        process.executableURL = controller
-        process.arguments = ["import-login", "2", "--replace-account"]
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [controller.path, "import-login", "2", "--replace-account"]
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
         environment["GPT_SWITCH_STATE_ROOT"] = stateRoot.path
@@ -2557,8 +2573,8 @@ final class CodexSyncBarTests: XCTestCase {
             let process = Process()
             let output = Pipe()
             let inputPipe = input.map { _ in Pipe() }
-            process.executableURL = helper
-            process.arguments = arguments
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [helper.path] + arguments
             var environment = ProcessInfo.processInfo.environment
             environment["HOME"] = home.path
             environment["GPT_SWITCH_STATE_ROOT"] = stateRoot.path
@@ -2716,8 +2732,8 @@ final class CodexSyncBarTests: XCTestCase {
         let helper = packageRoot.appendingPathComponent("Support/gpt-switch")
         let process = Process()
         let output = Pipe()
-        process.executableURL = helper
-        process.arguments = ["--version"]
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [helper.path, "--version"]
         process.standardOutput = output
         process.standardError = output
 

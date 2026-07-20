@@ -193,6 +193,8 @@ enum TokenUsageFormatting {
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.groupingSeparator = ","
+        formatter.groupingSize = 3
+        formatter.secondaryGroupingSize = 3
         if number.doubleValue >= 100 {
             formatter.minimumFractionDigits = 0
             formatter.maximumFractionDigits = 0
