@@ -108,6 +108,35 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertFalse(model.isCollectingTokenUsage)
     }
 
+    @MainActor
+    func testTransientBannerDismissesAfterFocusLoss() {
+        let model = AppModel(readmeDemoFixture: .standard)
+
+        model.showTransientBanner(
+            style: .success,
+            message: "계정 별칭을 저장했습니다.",
+            dismissAfterNanoseconds: 60_000_000_000)
+        XCTAssertEqual(model.banner?.message, "계정 별칭을 저장했습니다.")
+
+        model.dismissTransientBannerAfterFocusLoss()
+
+        XCTAssertNil(model.banner)
+    }
+
+    @MainActor
+    func testTransientBannerFocusLossPreservesReplacementError() {
+        let model = AppModel(readmeDemoFixture: .standard)
+        model.showTransientBanner(
+            style: .success,
+            message: "저장했습니다.",
+            dismissAfterNanoseconds: 60_000_000_000)
+        model.banner = AppBanner(style: .error, message: "확인이 필요합니다.")
+
+        model.dismissTransientBannerAfterFocusLoss()
+
+        XCTAssertEqual(model.banner?.message, "확인이 필요합니다.")
+    }
+
     func testReadmeCaptureOutputRequiresExistingDirectoryAndRejectsSymlink() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-readme-output-\(UUID().uuidString)", isDirectory: true)

@@ -77,6 +77,7 @@ final class AppModel: ObservableObject {
     private var devicePollingTask: Task<Void, Never>?
     private var controllerReconciliationTask: Task<Void, Never>?
     private var bannerDismissTask: Task<Void, Never>?
+    private var transientBannerID: UUID?
     private var weeklyAnchorTasks: [Int: Task<Void, Never>] = [:]
     private var loginWindowController: LoginWindowController?
     private var loginProfileID: Int?
@@ -1208,19 +1209,29 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func showTransientBanner(
+    func showTransientBanner(
         style: BannerStyle,
         message: String,
         dismissAfterNanoseconds: UInt64 = 4_000_000_000)
     {
         let nextBanner = AppBanner(style: style, message: message)
         bannerDismissTask?.cancel()
+        transientBannerID = nextBanner.id
         banner = nextBanner
         bannerDismissTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: dismissAfterNanoseconds)
-            guard !Task.isCancelled, self?.banner?.id == nextBanner.id else { return }
-            withAnimation(.easeOut(duration: 0.18)) { self?.banner = nil }
+            guard !Task.isCancelled else { return }
+            self?.dismissTransientBannerAfterFocusLoss()
         }
+    }
+
+    func dismissTransientBannerAfterFocusLoss() {
+        bannerDismissTask?.cancel()
+        bannerDismissTask = nil
+        guard let transientBannerID else { return }
+        self.transientBannerID = nil
+        guard banner?.id == transientBannerID else { return }
+        withAnimation(.easeOut(duration: 0.18)) { banner = nil }
     }
 
     func bootstrapDevice(id: String) async {
