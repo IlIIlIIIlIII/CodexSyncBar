@@ -137,6 +137,35 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(model.banner?.message, "확인이 필요합니다.")
     }
 
+    func testAliasSuccessBannerUsesFocusDismissalLifecycle() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appModel = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/CodexSyncBar/AppModel.swift"),
+            encoding: .utf8)
+        let popover = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/CodexSyncBar/Views/PopoverView.swift"),
+            encoding: .utf8)
+        let settings = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/CodexSyncBar/Views/SettingsView.swift"),
+            encoding: .utf8)
+
+        XCTAssertNotNil(appModel.range(
+            of: #"showTransientBanner\(\s*style: \.success,\s*message: "계정 별칭을 저장했습니다\."\)"#,
+            options: .regularExpression))
+        XCTAssertNotNil(popover.range(
+            of: #"\.onDisappear\s*\{\s*model\.dismissTransientBannerAfterFocusLoss\(\)\s*\}"#,
+            options: .regularExpression))
+        XCTAssertNotNil(settings.range(
+            of: #"\.onDisappear\s*\{\s*model\.dismissTransientBannerAfterFocusLoss\(\)\s*\}"#,
+            options: .regularExpression))
+        XCTAssertNotNil(settings.range(
+            of: #"}\s*else\s*\{\s*model\.dismissTransientBannerAfterFocusLoss\(\)\s*\}"#,
+            options: .regularExpression))
+    }
+
     func testReadmeCaptureOutputRequiresExistingDirectoryAndRejectsSymlink() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-readme-output-\(UUID().uuidString)", isDirectory: true)
@@ -1853,7 +1882,8 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertFalse(popover.contains("설정…"))
         XCTAssertTrue(appModel.contains("showTransientBanner("))
         XCTAssertTrue(appModel.contains("dismissAfterNanoseconds: UInt64 = 4_000_000_000"))
-        XCTAssertTrue(appModel.contains("self?.banner?.id == nextBanner.id"))
+        XCTAssertTrue(appModel.contains("transientBannerID = nextBanner.id"))
+        XCTAssertTrue(appModel.contains("guard banner?.id == transientBannerID else { return }"))
         XCTAssertTrue(appModel.contains("SSH 연결과 helper 버전을 확인했습니다."))
     }
 

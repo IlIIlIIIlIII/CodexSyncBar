@@ -69,11 +69,18 @@ struct SettingsView: View {
         .accessibilityIdentifier("settings-root")
         .preferredColorScheme(.dark)
         .task { await model.start() }
+        .onDisappear {
+            model.dismissTransientBannerAfterFocusLoss()
+        }
         .onAppear {
             if !model.isReadmeDemo { model.refreshLaunchAtLoginState() }
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active, !model.isReadmeDemo { model.refreshLaunchAtLoginState() }
+            if phase == .active {
+                if !model.isReadmeDemo { model.refreshLaunchAtLoginState() }
+            } else {
+                model.dismissTransientBannerAfterFocusLoss()
+            }
         }
         .sheet(item: $deviceDraft) { draft in
             DeviceEditorView(model: model, initial: draft)

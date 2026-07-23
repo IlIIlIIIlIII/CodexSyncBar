@@ -826,7 +826,9 @@ final class AppModel: ObservableObject {
                 try configurationStore.updateAccountAlias(id: profileID, alias: alias)
             }
             _ = reloadConfiguration()
-            banner = AppBanner(style: .success, message: "계정 별칭을 저장했습니다.")
+            showTransientBanner(
+                style: .success,
+                message: "계정 별칭을 저장했습니다.")
         } catch {
             banner = AppBanner(style: .error, message: error.localizedDescription)
         }

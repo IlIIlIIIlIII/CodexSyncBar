@@ -126,6 +126,9 @@ struct PopoverView: View {
             lastReportedContentHeight = height
             onContentHeightChange(height)
         }
+        .onDisappear {
+            model.dismissTransientBannerAfterFocusLoss()
+        }
         .preferredColorScheme(.dark)
         .task { await model.start() }
     }
