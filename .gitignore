@@ -1,5 +1,6 @@
 DEPLOY.md
 .build/
+.worktrees/
 dist/
 tmp/
 .DS_Store
