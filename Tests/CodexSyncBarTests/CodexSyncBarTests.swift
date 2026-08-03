@@ -324,7 +324,7 @@ final class CodexSyncBarTests: XCTestCase {
         }
 
         let first = try collect()
-        XCTAssertEqual(first.schemaVersion, 4)
+        XCTAssertEqual(first.schemaVersion, 5)
         XCTAssertEqual(first.totalTokens, 160)
         XCTAssertEqual(first.buckets.count, 2)
         XCTAssertEqual(try collect().totalTokens, 160)
@@ -380,7 +380,7 @@ final class CodexSyncBarTests: XCTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, String(decoding: data, as: UTF8.self))
         let summary = try JSONDecoder().decode(DeviceTokenUsageSummary.self, from: data)
-        XCTAssertEqual(summary.schemaVersion, 4)
+        XCTAssertEqual(summary.schemaVersion, 5)
         XCTAssertEqual(summary.totalTokens, 100)
         XCTAssertEqual(summary.buckets.first?.serviceTier, "priority")
     }

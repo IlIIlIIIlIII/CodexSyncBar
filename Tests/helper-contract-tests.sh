@@ -26,6 +26,8 @@ cp "$HELPER_REPOSITORY_SOURCE" "$HELPER"
 cp "$ASKPASS_REPOSITORY_SOURCE" "$ASKPASS_SOURCE"
 chmod 700 "$HELPER" "$ASKPASS_SOURCE"
 
+node "$ROOT/Tests/usage-summary-tests.mjs"
+
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/.local/share/gpt-switch"
 CODEX="$HOME_DIR/.codex"

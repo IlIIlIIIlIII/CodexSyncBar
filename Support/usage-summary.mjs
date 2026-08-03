@@ -3,10 +3,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import crypto from "node:crypto";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const ROLLING_WINDOW_DAYS = 30;
 const ROLLING_WINDOW_MS = ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+const TOKEN_KEYS = [
+  "inputTokens",
+  "cachedInputTokens",
+  "cacheWriteInputTokens",
+  "outputTokens",
+  "reasoningOutputTokens",
+  "totalTokens",
+];
 const sessionsRoot = path.resolve(process.argv[2] ?? path.join(process.env.HOME ?? "", ".codex/sessions"));
 const cachePath = path.resolve(process.argv[3] ?? path.join(process.env.HOME ?? "", ".local/share/gpt-switch/usage-cache.json"));
 
@@ -37,7 +46,7 @@ function tokensFrom(value) {
 }
 
 function addTokens(target, value) {
-  for (const key of Object.keys(emptyTokens())) target[key] += value[key];
+  for (const key of TOKEN_KEYS) target[key] += value[key];
 }
 
 function deltaTokens(current, previous) {
@@ -52,7 +61,52 @@ function deltaTokens(current, previous) {
   return delta;
 }
 
-function emptyFileState(stat) {
+function tokenFingerprint(current, last) {
+  // Token events do not expose a stable ID. Hash every field from both counters;
+  // matching is still restricted to a child's direct-parent replay below.
+  const serialized = [...TOKEN_KEYS.map((key) => current[key]), ...TOKEN_KEYS.map((key) => last[key])].join(":");
+  return crypto.createHash("sha256").update(serialized).digest().subarray(0, 12).toString("base64url");
+}
+
+function normalizedMetadata(value) {
+  const payload = value && typeof value === "object" ? value : {};
+  return {
+    id: typeof payload.id === "string" && payload.id ? payload.id : null,
+    sessionId: typeof payload.session_id === "string" && payload.session_id ? payload.session_id : null,
+    forkedFromId: typeof payload.forked_from_id === "string" && payload.forked_from_id
+      ? payload.forked_from_id
+      : null,
+  };
+}
+
+async function readSessionMetadata(file) {
+  const handle = await fs.promises.open(file, "r");
+  const chunks = [];
+  let position = 0;
+  try {
+    while (position < 1024 * 1024) {
+      const buffer = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead <= 0) break;
+      const chunk = buffer.subarray(0, bytesRead);
+      const lineEnd = chunk.indexOf(0x0a);
+      chunks.push(lineEnd >= 0 ? chunk.subarray(0, lineEnd) : chunk);
+      if (lineEnd >= 0) break;
+      position += bytesRead;
+    }
+  } finally {
+    await handle.close();
+  }
+  try {
+    const event = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (event?.type === "session_meta") return normalizedMetadata(event.payload);
+  } catch {
+    // Sessions without valid leading metadata are aggregated independently.
+  }
+  return normalizedMetadata(null);
+}
+
+function emptyFileState(stat, metadata) {
   return {
     dev: String(stat.dev),
     ino: String(stat.ino),
@@ -63,19 +117,43 @@ function emptyFileState(stat) {
     serviceTier: "default",
     cumulative: emptyTokens(),
     hasCumulative: false,
+    metadata,
+    tokenFingerprints: [],
+    inheritance: {
+      active: Boolean(metadata.forkedFromId),
+      initialized: false,
+      candidates: [],
+    },
     buckets: {},
   };
 }
 
-function normalizeState(value, stat) {
+function normalizeState(value, stat, metadata) {
   if (!value || value.dev !== String(stat.dev) || value.ino !== String(stat.ino)
       || !Number.isSafeInteger(value.offset) || value.offset < 0 || value.offset > stat.size) {
-    return emptyFileState(stat);
+    return emptyFileState(stat, metadata);
   }
   value.model = typeof value.model === "string" && value.model ? value.model : "unknown";
   value.serviceTier = typeof value.serviceTier === "string" && value.serviceTier ? value.serviceTier : "default";
   value.cumulative = { ...emptyTokens(), ...(value.cumulative ?? {}) };
   value.hasCumulative = value.hasCumulative === true;
+  value.metadata = metadata;
+  value.tokenFingerprints = Array.isArray(value.tokenFingerprints)
+    ? value.tokenFingerprints.filter((item) => typeof item === "string")
+    : [];
+  if (!value.inheritance || typeof value.inheritance !== "object") {
+    value.inheritance = {
+      active: Boolean(metadata.forkedFromId),
+      initialized: false,
+      candidates: [],
+    };
+  }
+  value.inheritance.active = value.inheritance.active === true && Boolean(metadata.forkedFromId);
+  value.inheritance.initialized = value.inheritance.initialized === true;
+  value.inheritance.candidates = Array.isArray(value.inheritance.candidates)
+    ? value.inheritance.candidates.filter((candidate) =>
+      typeof candidate?.relative === "string" && Array.isArray(candidate.positions))
+    : [];
   value.buckets = value.buckets && typeof value.buckets === "object" ? value.buckets : {};
   return value;
 }
@@ -104,7 +182,49 @@ function bucketFor(state, eventTime) {
   return state.buckets[key];
 }
 
-function processEvent(state, event, fallbackTimeMs, cutoffMs) {
+function isInheritedToken(state, fingerprint, ancestors) {
+  if (!state.inheritance.active) return false;
+
+  // A resumed/forked log can begin at any point inside its parent's token
+  // history. Only suppress the initial contiguous match; the first mismatch
+  // permanently starts the child's own usage, even if later values coincide.
+  let candidates;
+  if (!state.inheritance.initialized) {
+    candidates = [];
+    for (const ancestor of ancestors) {
+      const positions = [];
+      const sequence = ancestor.state.tokenFingerprints ?? [];
+      for (let index = 0; index < sequence.length; index += 1) {
+        if (sequence[index] === fingerprint) positions.push(index + 1);
+      }
+      if (positions.length > 0) candidates.push({ relative: ancestor.relative, positions });
+    }
+    state.inheritance.initialized = true;
+  } else {
+    const states = new Map(ancestors.map((ancestor) => [ancestor.relative, ancestor.state]));
+    candidates = [];
+    for (const candidate of state.inheritance.candidates) {
+      const sequence = states.get(candidate.relative)?.tokenFingerprints ?? [];
+      const positions = candidate.positions
+        .filter((position) => position < sequence.length && sequence[position] === fingerprint)
+        .map((position) => position + 1);
+      if (positions.length > 0) candidates.push({ relative: candidate.relative, positions });
+    }
+  }
+
+  state.inheritance.candidates = candidates;
+  if (candidates.length > 0) return true;
+  state.inheritance.active = false;
+  return false;
+}
+
+function updateCumulativeBaseline(state, current) {
+  if (current.totalTokens <= 0) return;
+  state.cumulative = current;
+  state.hasCumulative = true;
+}
+
+function processEvent(state, event, fallbackTimeMs, cutoffMs, ancestors) {
   if (event?.type === "event_msg" && event.payload?.type === "thread_settings_applied") {
     const settings = event.payload.thread_settings;
     if (typeof settings?.model === "string" && settings.model) state.model = settings.model;
@@ -124,14 +244,14 @@ function processEvent(state, event, fallbackTimeMs, cutoffMs) {
 
   const current = tokensFrom(event.payload.info.total_token_usage);
   const last = tokensFrom(event.payload.info.last_token_usage);
+  const fingerprint = tokenFingerprint(current, last);
+  state.tokenFingerprints.push(fingerprint);
+  if (isInheritedToken(state, fingerprint, ancestors)) {
+    updateCumulativeBaseline(state, current);
+    return;
+  }
   if (state.model === "unknown") {
-    // Forked logs replay the parent's token events before their own settings.
-    // Keep the cumulative baseline, but never charge that inherited history
-    // to the new device session.
-    if (current.totalTokens > 0) {
-      state.cumulative = current;
-      state.hasCumulative = true;
-    }
+    updateCumulativeBaseline(state, current);
     return;
   }
   let increment;
@@ -162,14 +282,14 @@ function pruneBuckets(state, cutoffMs) {
   }
 }
 
-async function scanFile(file, previous, cutoffMs) {
+async function scanFile(file, previous, cutoffMs, metadata, ancestors) {
   const stat = await fs.promises.stat(file);
-  let state = normalizeState(previous, stat);
+  let state = normalizeState(previous, stat, metadata);
   if (state.offset === stat.size && state.mtimeMs === stat.mtimeMs) {
     pruneBuckets(state, cutoffMs);
     return state;
   }
-  if (state.offset === stat.size && state.mtimeMs !== stat.mtimeMs) state = emptyFileState(stat);
+  if (state.offset === stat.size && state.mtimeMs !== stat.mtimeMs) state = emptyFileState(stat, metadata);
 
   const stream = fs.createReadStream(file, { start: state.offset, encoding: "utf8" });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -179,7 +299,7 @@ async function scanFile(file, previous, cutoffMs) {
     if (!line.includes('"token_count"') && !line.includes('"turn_context"')
         && !line.includes('"thread_settings_applied"')) continue;
     try {
-      processEvent(state, JSON.parse(line), stat.mtimeMs, cutoffMs);
+      processEvent(state, JSON.parse(line), stat.mtimeMs, cutoffMs, ancestors);
     } catch {
       // A single malformed/incomplete event must not discard the rest of a session.
     }
@@ -211,6 +331,50 @@ async function sessionFiles(root) {
   return result.sort();
 }
 
+function registerUnique(mapping, id, relative) {
+  if (!id) return;
+  if (!mapping.has(id)) mapping.set(id, relative);
+  else if (mapping.get(id) !== relative) mapping.set(id, null);
+}
+
+function buildHierarchy(relatives, metadataByFile) {
+  const byId = new Map();
+  const bySessionId = new Map();
+  for (const relative of relatives) {
+    const metadata = metadataByFile.get(relative);
+    registerUnique(byId, metadata.id, relative);
+    registerUnique(bySessionId, metadata.sessionId, relative);
+  }
+
+  const parentByFile = new Map();
+  for (const relative of relatives) {
+    const forkedFromId = metadataByFile.get(relative).forkedFromId;
+    const parent = byId.get(forkedFromId) ?? bySessionId.get(forkedFromId) ?? null;
+    if (parent && parent !== relative) parentByFile.set(relative, parent);
+  }
+
+  const ordered = [];
+  const visited = new Set();
+  const visiting = new Set();
+  function visit(relative) {
+    if (visited.has(relative)) return;
+    if (visiting.has(relative)) return;
+    visiting.add(relative);
+    const parent = parentByFile.get(relative);
+    if (parent) visit(parent);
+    visiting.delete(relative);
+    visited.add(relative);
+    ordered.push(relative);
+  }
+  for (const relative of relatives) visit(relative);
+  return { ordered, parentByFile };
+}
+
+function parentStates(relative, parentByFile, states) {
+  const parent = parentByFile.get(relative);
+  return parent && states[parent] ? [{ relative: parent, state: states[parent] }] : [];
+}
+
 async function loadCache() {
   try {
     const parsed = JSON.parse(await fs.promises.readFile(cachePath, "utf8"));
@@ -234,13 +398,30 @@ async function main() {
   const cutoffMs = generatedAt.getTime() - ROLLING_WINDOW_MS;
   const cache = await loadCache();
   const files = await sessionFiles(sessionsRoot);
+  const relatives = files.map((file) => path.relative(sessionsRoot, file));
+  const filesByRelative = new Map(relatives.map((relative, index) => [relative, files[index]]));
+  const metadataByFile = new Map();
+  for (const relative of relatives) {
+    try {
+      metadataByFile.set(relative, await readSessionMetadata(filesByRelative.get(relative)));
+    } catch {
+      metadataByFile.set(relative, normalizedMetadata(null));
+    }
+  }
+  const hierarchy = buildHierarchy(relatives, metadataByFile);
   const active = new Set();
   const errors = [];
-  for (const file of files) {
-    const relative = path.relative(sessionsRoot, file);
+  for (const relative of hierarchy.ordered) {
+    const file = filesByRelative.get(relative);
     active.add(relative);
     try {
-      cache.files[relative] = await scanFile(file, cache.files[relative], cutoffMs);
+      cache.files[relative] = await scanFile(
+        file,
+        cache.files[relative],
+        cutoffMs,
+        metadataByFile.get(relative),
+        parentStates(relative, hierarchy.parentByFile, cache.files),
+      );
     } catch (error) {
       errors.push(`${relative}: ${error?.message ?? String(error)}`);
     }

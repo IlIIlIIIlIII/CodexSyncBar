@@ -212,7 +212,7 @@ struct ReadmeDemoFixture {
             displayName: displayName,
             isReachable: true,
             summary: DeviceTokenUsageSummary(
-                schemaVersion: 4,
+                schemaVersion: 5,
                 generatedAt: formatter.string(from: generatedAt),
                 scannedFiles: 12,
                 requests: bucket.requests,
