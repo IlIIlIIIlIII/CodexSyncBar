@@ -4,7 +4,8 @@ set +x
 set -euo pipefail
 
 PROGRAM_NAME="gpt-switch"
-SCRIPT_VERSION="2.1.2"
+SCRIPT_VERSION="2.1.3"
+USAGE_SCHEMA_VERSION=5
 STATE_ROOT="${GPT_SWITCH_STATE_ROOT:-$HOME/.local/share/gpt-switch}"
 CONFIG_FILE="${GPT_SWITCH_CONFIG_FILE:-$STATE_ROOT/config.json}"
 PROFILE_DIR="$STATE_ROOT/profiles"
@@ -3908,7 +3909,19 @@ controller_usage_summary() {
       remote_install_helpers "$index" >/dev/null 2>&1 || true
     fi
     if summary=$(remote_node "$index" usage-summary 2>&1); then
-      print_usage_summary_json "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" true "$summary"
+      if ! printf '%s\n' "$summary" | jq -e --argjson expected "$USAGE_SCHEMA_VERSION" \
+          '.schemaVersion == $expected' >/dev/null 2>&1; then
+        if remote_install_helpers "$index" >/dev/null 2>&1; then
+          summary=$(remote_node "$index" usage-summary 2>&1 || true)
+        fi
+      fi
+      if printf '%s\n' "$summary" | jq -e --argjson expected "$USAGE_SCHEMA_VERSION" \
+          '.schemaVersion == $expected' >/dev/null 2>&1; then
+        print_usage_summary_json "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" true "$summary"
+      else
+        print_usage_summary_json "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" false "" \
+          "usage summary schema mismatch"
+      fi
     else
       error=${summary:-"사용량 수집기에 연결하지 못했습니다."}
       print_usage_summary_json "${REMOTE_LABELS[$index]}" "${REMOTE_DISPLAY_NAMES[$index]}" false "" "$error"

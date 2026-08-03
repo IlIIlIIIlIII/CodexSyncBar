@@ -2938,7 +2938,7 @@ final class CodexSyncBarTests: XCTestCase {
         process.waitUntilExit()
 
         XCTAssertEqual(process.terminationStatus, 0)
-        XCTAssertEqual(String(decoding: data, as: UTF8.self), "2.1.2\n")
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "2.1.3\n")
     }
 
     func testControllerRecoveryClassifiesBusyForAutomaticRetry() async throws {

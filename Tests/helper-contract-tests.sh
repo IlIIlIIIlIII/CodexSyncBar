@@ -114,11 +114,11 @@ if [ -n "${GPT_SWITCH_TEST_LIVE_FALLBACK_TARGET:-}" ]; then
 fi
 case " $* " in
   *" __node status "*) printf 'active=3 fingerprint=abcdef123456 mode=600 auth_mode=chatgpt cli=logged-in credential=access-only access_fp=123456abcdef expires_at=4102444800\n' ;;
-  *" __node version "*) printf '2.1.2\n' ;;
+  *" __node version "*) printf '2.1.3\n' ;;
   *" __node initialize "*) printf 'active=3 fingerprint=abcdef123456 state=initialized\n' ;;
   *" __node verify "*) printf 'active=3 fingerprint=abcdef123456\n' ;;
   *".bootstrap."*) printf 'bootstrap=installed\n' ;;
-  *) printf 'version=2.1.2 active=3 active_fp=abcdef123456 target_fp=abcdef123456\n' ;;
+  *) printf 'version=2.1.3 active=3 active_fp=abcdef123456 target_fp=abcdef123456\n' ;;
 esac
 SH
 chmod 700 "$FAKE_SSH"
@@ -183,6 +183,55 @@ common_env=(
   GPT_SWITCH_TEST_SSH_STDIN="$SSH_STDIN"
   GPT_SWITCH_TEST_CREDENTIAL_ID="$CREDENTIAL_ID"
 )
+
+# A remote can report the current controller version while still carrying an
+# older usage helper. The controller must repair that schema mismatch before it
+# exposes the remote total to the app-wide aggregate.
+USAGE_CONFIG="$TMP/usage-config.json"
+jq -n '{schemaVersion:1,nextAccountID:4,accounts:[
+    {id:1,email:"one@example.com"},{id:2,email:"two@example.com"},{id:3,email:"three@example.com"}
+  ],devices:[{
+    id:"usage-node",displayName:"사용량 노드",host:"10.0.0.30",port:22,username:"usage",
+    authentication:"openSSHConfig",identityFile:null,certificateFile:null,
+    hasPassword:false,hasKeyPassphrase:false,enabled:true
+  }]}' >"$USAGE_CONFIG"
+chmod 600 "$USAGE_CONFIG"
+USAGE_REMOTE_STATE="$TMP/usage-remote-installed"
+USAGE_SSH="$TMP/usage-ssh"
+cat >"$USAGE_SSH" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+case " $* " in
+  *" __node version "*) printf '2.1.3\n' ;;
+  *" __node usage-summary "*)
+    if [ -f "$GPT_SWITCH_TEST_USAGE_REMOTE_STATE" ]; then
+      printf '%s\n' '{"schemaVersion":5,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":2,"inputTokens":18,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":20,"buckets":[],"errors":[]}'
+    else
+      printf '%s\n' '{"schemaVersion":4,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":99,"inputTokens":990,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":9,"reasoningOutputTokens":0,"totalTokens":999,"buckets":[],"errors":[]}'
+    fi
+    ;;
+  *".bootstrap."*)
+    cat >/dev/null
+    printf 'installed\n' >"$GPT_SWITCH_TEST_USAGE_REMOTE_STATE"
+    printf 'bootstrap=installed\n'
+    ;;
+  *) exit 2 ;;
+esac
+SH
+chmod 700 "$USAGE_SSH"
+mkdir -p "$CODEX/sessions"
+usage_output=$(env "${common_env[@]}" \
+  GPT_SWITCH_CONFIG_FILE="$USAGE_CONFIG" \
+  GPT_SWITCH_SSH_BIN="$USAGE_SSH" \
+  GPT_SWITCH_NODE_BIN="$(command -v node)" \
+  GPT_SWITCH_TEST_USAGE_REMOTE_STATE="$USAGE_REMOTE_STATE" \
+  "$HELPER" usage-summary)
+printf '%s\n' "$usage_output" | jq -e -s '
+  length == 2 and .[0].id == "macbook" and .[0].summary.schemaVersion == 5 and
+  .[1].id == "usage-node" and .[1].isReachable == true and
+  .[1].summary.schemaVersion == 5 and .[1].summary.totalTokens == 20
+' >/dev/null
+[ -f "$USAGE_REMOTE_STATE" ]
 
 FAKE_OSASCRIPT="$TMP/fake-osascript"
 OSASCRIPT_CALLS="$TMP/osascript-calls"
@@ -949,7 +998,7 @@ if grep -E 'password-value|passphrase-value' "$STATE/config.json" "$SSH_ARGS" >/
 fi
 
 version=$("$HELPER" --version)
-[ "$version" = "2.1.2" ]
+[ "$version" = "2.1.3" ]
 
 FAKE_SECURITY="$TMP/fake-security"
 SECURITY_ARGS="$TMP/security-args"
