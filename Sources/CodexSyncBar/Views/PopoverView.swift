@@ -130,7 +130,10 @@ struct PopoverView: View {
             model.dismissTransientBannerAfterFocusLoss()
         }
         .preferredColorScheme(.dark)
-        .task { await model.start() }
+        .task {
+            await model.start()
+            await model.refreshUsageIfStale()
+        }
     }
 
     private func sectionHeader(title: String, detail: String, tint: Color) -> some View {
@@ -364,20 +367,20 @@ struct PopoverView: View {
     private var usageCard: some View {
         let metrics = visibleUsageMetrics
         VStack(alignment: .leading, spacing: 10) {
-            if snapshot == nil, case let .failed(_, message, loginRequired) = state {
+            if let failure = state.failure {
                 HStack(spacing: 8) {
-                    Image(systemName: loginRequired ? "lock.fill" : "exclamationmark.triangle.fill")
+                    Image(systemName: failure.loginRequired ? "lock.fill" : "exclamationmark.triangle.fill")
                         .font(.system(size: 10, weight: .semibold))
-                    Text(loginRequired ? "재로그인이 필요합니다." : message)
+                    Text(failure.loginRequired ? "재로그인이 필요합니다." : "마지막 갱신 실패 · \(failure.message)")
                         .font(.system(size: 10, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 2)
-                    if loginRequired { Text("설정에서 로그인").font(.system(size: 9, weight: .semibold)) }
+                    if failure.loginRequired { Text("설정에서 로그인").font(.system(size: 9, weight: .semibold)) }
                 }
                 .frame(height: 28)
-                .foregroundStyle(loginRequired ? AppTheme.yellow : AppTheme.red)
-                .help(message)
+                .foregroundStyle(failure.loginRequired ? AppTheme.yellow : AppTheme.red)
+                .help(failure.message)
             } else if snapshot == nil {
                 HStack(spacing: 7) {
                     ProgressView().controlSize(.small)

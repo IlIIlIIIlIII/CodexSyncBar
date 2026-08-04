@@ -87,6 +87,7 @@ final class AppModel: ObservableObject {
     private var pendingForcedSyncAll = false
     private var hasStarted = false
     private var activeUsageRefreshCount = 0
+    private var queuedUsageRefresh = false
 
     private let fullSyncDefaultsKey = "lastFullAuthSyncAt"
     private let pendingSecretCleanupDefaultsKey = "pendingSSHSecretCleanupIdentifiers"
@@ -462,7 +463,11 @@ final class AppModel: ObservableObject {
 
     func refreshUsageOnly() async {
         guard configurationError == nil else { return }
-        guard !isRefreshing, !isManagingProfiles, !isSwitching else { return }
+        guard !isManagingProfiles, !isSwitching else { return }
+        guard !isRefreshing else {
+            queuedUsageRefresh = true
+            return
+        }
         beginUsageRefresh()
         defer { endUsageRefresh() }
 
@@ -471,6 +476,18 @@ final class AppModel: ObservableObject {
                 group.addTask { await self.refresh(profileID: profile.id, manageSpinner: false) }
             }
         }
+    }
+
+    func refreshUsageIfStale(
+        now: Date = Date(),
+        after interval: TimeInterval = UsageFreshness.foregroundRefreshInterval) async
+    {
+        let snapshots = profiles.compactMap { usageStates[$0.id]?.snapshot }
+        let allFresh = snapshots.count == profiles.count && snapshots.allSatisfy {
+            !UsageFreshness.isStale($0, relativeTo: now, after: interval)
+        }
+        guard !allFresh else { return }
+        await refreshUsageOnly()
     }
 
     func maintainAuthIfNeeded(forceSync: Bool = false, profileID: Int? = nil) async {
@@ -622,6 +639,9 @@ final class AppModel: ObservableObject {
     private func endUsageRefresh() {
         activeUsageRefreshCount = max(0, activeUsageRefreshCount - 1)
         isRefreshing = activeUsageRefreshCount > 0
+        guard !isRefreshing, queuedUsageRefresh else { return }
+        queuedUsageRefresh = false
+        Task { [weak self] in await self?.refreshUsageOnly() }
     }
 
     private func evaluateWeeklyAnchor(_ snapshot: UsageSnapshot, now: Date = Date()) {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -30,6 +31,16 @@ struct CodexSyncBarApp: App {
                 .task {
                     guard !Self.isSpecialLaunch else { return }
                     await model.start()
+                }
+                .onReceive(NotificationCenter.default.publisher(
+                    for: NSApplication.didBecomeActiveNotification)) { _ in
+                    guard !Self.isSpecialLaunch else { return }
+                    Task { await model.refreshUsageIfStale() }
+                }
+                .onReceive(NSWorkspace.shared.notificationCenter.publisher(
+                    for: NSWorkspace.didWakeNotification)) { _ in
+                    guard !Self.isSpecialLaunch else { return }
+                    Task { await model.refreshUsageOnly() }
                 }
         }
         .menuBarExtraStyle(.window)

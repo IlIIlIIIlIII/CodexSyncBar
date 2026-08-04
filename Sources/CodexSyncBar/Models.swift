@@ -117,6 +117,24 @@ enum UsageState: Equatable, Sendable {
         if case let .failed(_, _, required) = self { return required }
         return false
     }
+
+    var failure: (message: String, loginRequired: Bool)? {
+        guard case let .failed(_, message, loginRequired) = self else { return nil }
+        return (message, loginRequired)
+    }
+}
+
+enum UsageFreshness {
+    static let menuStaleInterval: TimeInterval = 10 * 60
+    static let foregroundRefreshInterval: TimeInterval = 30
+
+    static func isStale(
+        _ snapshot: UsageSnapshot,
+        relativeTo now: Date,
+        after interval: TimeInterval = menuStaleInterval) -> Bool
+    {
+        now.timeIntervalSince(snapshot.updatedAt) > interval
+    }
 }
 
 enum ProfileAuthenticationStatus: Equatable, Sendable {
@@ -216,16 +234,21 @@ enum MenuTitleFormatter {
         state: UsageState,
         items: [UsageDisplayItem] = MenuBarUsagePreferences.default.items,
         isRefreshing: Bool,
-        hasDeviceMismatch: Bool) -> String
+        hasDeviceMismatch: Bool,
+        now: Date = Date()) -> String
     {
         let label = profile.shortName
         let selectedItems = MenuBarUsagePreferences(items: items).items
         if state.needsLogin { return "\(label) 🔒" }
+        if state.failure != nil { return "\(label) ⚠\(hasDeviceMismatch ? " !" : "")" }
         if selectedItems.isEmpty {
             return "\(label)\(hasDeviceMismatch ? " !" : "")"
         }
         if isRefreshing, state.snapshot == nil { return "\(label) ···" }
         guard let snapshot = state.snapshot else { return "\(label) —" }
+        if UsageFreshness.isStale(snapshot, relativeTo: now) {
+            return "\(label) — ⏱\(hasDeviceMismatch ? " !" : "")"
+        }
 
         let fragments = selectedItems.map { item in
             let remaining = item.window(in: snapshot).map {

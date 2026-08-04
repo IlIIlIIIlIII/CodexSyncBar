@@ -51,10 +51,10 @@
 
 1. [Releases](https://github.com/IlIIlIIIlIII/CodexSyncBar/releases)에서 최신 `Codex-SyncBar-*-macOS-universal.zip`을 받습니다.
 2. ZIP을 풀고 `Codex SyncBar.app`을 `/Applications`로 옮깁니다.
-3. 처음 한 번은 Finder에서 앱을 Control-클릭한 뒤 **열기**를 선택합니다.
+3. Finder에서 앱을 엽니다. 1.0.4 이후 공개 릴리즈는 Apple 공증을 거치므로 별도의 Gatekeeper 우회가 필요하지 않습니다.
 4. 메뉴 막대의 Codex SyncBar를 열고 **설정 → 계정 → 계정 추가**를 선택합니다.
 
-공개 릴리즈는 Developer ID 공증이 아닌 ad-hoc 서명으로 만들어집니다. 따라서 macOS가 첫 실행을 확인할 수 있지만, 앱 번들의 서명 자체는 빌드 과정에서 검증됩니다.
+1.0.4 이후 공개 릴리즈는 Developer ID로 서명하고 Apple 공증을 통과한 뒤 공증 티켓을 앱에 첨부합니다. 다운로드한 ZIP을 풀어 `/Applications`로 옮기면 Gatekeeper가 개발자 신원과 공증 상태를 확인할 수 있습니다. 로컬 `./build-app.sh` 실행은 Developer ID가 없으면 기존처럼 ad-hoc 서명을 사용합니다.
 
 원한다면 릴리즈에 함께 첨부된 `SHA256SUMS`로 다운로드 파일을 확인할 수 있습니다.
 
@@ -160,6 +160,14 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - `~/.local/bin/gpt-switch`
 - `~/.local/lib/gpt-switch/codex-syncbar-askpass`
 - `~/.local/lib/gpt-switch/usage-summary.mjs`
+
+`v*` 태그 릴리즈는 다음 GitHub Actions secret이 모두 있어야 실행됩니다. P12와 App Store Connect API 개인 키는 각각 base64로 저장합니다.
+
+- `APPLE_DEVELOPER_ID_P12_BASE64`
+- `APPLE_DEVELOPER_ID_P12_PASSWORD`
+- `APPLE_NOTARY_KEY_BASE64`
+- `APPLE_NOTARY_KEY_ID`
+- `APPLE_NOTARY_ISSUER_ID`
 
 ## 데이터 위치와 삭제
 

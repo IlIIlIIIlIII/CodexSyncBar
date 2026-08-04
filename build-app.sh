@@ -42,10 +42,16 @@ chmod 755 "$APP/Contents/Resources/gpt-switch"
 chmod 700 "$APP/Contents/Resources/codex-syncbar-askpass"
 chmod 755 "$APP/Contents/Resources/usage-summary.mjs"
 
-# Keep Swift's linker-signed flag when applying the bundle's ad-hoc resource seal.
-# This lets the executable keep running when launched directly on Macs without a
-# configured Apple code-signing identity.
-codesign --force --deep --sign - --timestamp=none --options 0x20000 "$APP"
+if [ -n "${CODEX_SYNCBAR_SIGN_IDENTITY:-}" ]; then
+  codesign --force --sign "$CODEX_SYNCBAR_SIGN_IDENTITY" \
+    --timestamp --options runtime "$APP/Contents/MacOS/CodexSyncBar"
+  codesign --force --sign "$CODEX_SYNCBAR_SIGN_IDENTITY" \
+    --timestamp --options runtime "$APP"
+else
+  # Keep Swift's linker-signed flag when applying the bundle's ad-hoc resource
+  # seal for local builds without a configured Apple signing identity.
+  codesign --force --deep --sign - --timestamp=none --options 0x20000 "$APP"
+fi
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 rm -rf "$OUTPUT_DIR/$APP_NAME.app" "$OUTPUT_DIR/$APP_NAME.zip"

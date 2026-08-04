@@ -1196,11 +1196,13 @@ final class CodexSyncBarTests: XCTestCase {
 
     func testMenuTitleUsesAliasWithPercentageAndPreservesStatusSignals() {
         let profile = AccountProfile(id: 1, email: "first@example.com", alias: "업무")
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
         func snapshot(
             sessionUsed: Double = 20,
             weeklyUsed: Double = 1,
             sparkSessionUsed: Double? = 40,
-            sparkWeeklyUsed: Double = 5) -> UsageSnapshot
+            sparkWeeklyUsed: Double = 5,
+            updatedAt: Date? = nil) -> UsageSnapshot
         {
             UsageSnapshot(
                 profileID: 1,
@@ -1216,7 +1218,7 @@ final class CodexSyncBarTests: XCTestCase {
                 unlimitedCredits: false,
                 resetCredits: nil,
                 resetCreditExpirations: [],
-                updatedAt: Date())
+                updatedAt: updatedAt ?? now)
         }
 
         XCTAssertEqual(MenuTitleFormatter.title(
@@ -1224,61 +1226,130 @@ final class CodexSyncBarTests: XCTestCase {
             state: .loaded(snapshot()),
             items: [.codexWeekly, .sparkWeekly],
             isRefreshing: false,
-            hasDeviceMismatch: false), "업무 99% · 95%")
+            hasDeviceMismatch: false,
+            now: now), "업무 99% · 95%")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .loaded(snapshot()),
             items: [.codexWeekly],
             isRefreshing: false,
-            hasDeviceMismatch: false), "업무 99%")
+            hasDeviceMismatch: false,
+            now: now), "업무 99%")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .loaded(snapshot()),
             items: [],
             isRefreshing: false,
-            hasDeviceMismatch: false), "업무")
+            hasDeviceMismatch: false,
+            now: now), "업무")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .idle,
             items: [],
             isRefreshing: true,
-            hasDeviceMismatch: true), "업무 !")
+            hasDeviceMismatch: true,
+            now: now), "업무 !")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .loaded(snapshot()),
             items: [.fiveHour, .sparkFiveHour],
             isRefreshing: false,
-            hasDeviceMismatch: false), "업무 80% · 60%")
+            hasDeviceMismatch: false,
+            now: now), "업무 80% · 60%")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .loaded(snapshot(weeklyUsed: 95)),
             items: [.codexWeekly, .sparkWeekly],
             isRefreshing: false,
-            hasDeviceMismatch: false), "⚠ 업무 5% · 95%")
+            hasDeviceMismatch: false,
+            now: now), "⚠ 업무 5% · 95%")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .loaded(snapshot(sparkSessionUsed: nil)),
             items: [.sparkFiveHour, .fiveHour],
             isRefreshing: false,
-            hasDeviceMismatch: false), "업무 — · 80%")
+            hasDeviceMismatch: false,
+            now: now), "업무 — · 80%")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .loaded(snapshot()),
             items: [.fiveHour, .codexWeekly],
             isRefreshing: false,
-            hasDeviceMismatch: true), "업무 80% · 99% !")
+            hasDeviceMismatch: true,
+            now: now), "업무 80% · 99% !")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .idle,
             items: [.fiveHour, .codexWeekly],
             isRefreshing: true,
-            hasDeviceMismatch: false), "업무 ···")
+            hasDeviceMismatch: false,
+            now: now), "업무 ···")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .failed(previous: nil, message: "expired", loginRequired: true),
             items: [.fiveHour, .codexWeekly],
             isRefreshing: false,
-            hasDeviceMismatch: false), "업무 🔒")
+            hasDeviceMismatch: false,
+            now: now), "업무 🔒")
+
+        XCTAssertEqual(MenuTitleFormatter.title(
+            profile: profile,
+            state: .failed(previous: snapshot(), message: "timeout", loginRequired: false),
+            items: [.codexWeekly],
+            isRefreshing: false,
+            hasDeviceMismatch: false,
+            now: now), "업무 ⚠")
+        XCTAssertEqual(MenuTitleFormatter.title(
+            profile: profile,
+            state: .loaded(snapshot(updatedAt: now.addingTimeInterval(-601))),
+            items: [.codexWeekly],
+            isRefreshing: false,
+            hasDeviceMismatch: true,
+            now: now), "업무 — ⏱ !")
+    }
+
+    func testUsageFreshnessUsesStrictRefreshAndMenuBoundaries() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = UsageSnapshot(
+            profileID: 1,
+            email: "fixture@example.com",
+            plan: "Pro",
+            session: nil,
+            weekly: nil,
+            sparkSession: nil,
+            sparkWeekly: nil,
+            creditBalance: nil,
+            unlimitedCredits: false,
+            resetCredits: nil,
+            resetCreditExpirations: [],
+            updatedAt: now.addingTimeInterval(-30))
+
+        XCTAssertFalse(UsageFreshness.isStale(snapshot, relativeTo: now, after: 30))
+        XCTAssertTrue(UsageFreshness.isStale(snapshot, relativeTo: now, after: 29.9))
+        XCTAssertEqual(UsageFreshness.foregroundRefreshInterval, 30)
+        XCTAssertEqual(UsageFreshness.menuStaleInterval, 600)
+    }
+
+    func testForegroundWakeAndPopoverRefreshHooksAreWired() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let app = try String(contentsOf: packageRoot
+            .appendingPathComponent("Sources/CodexSyncBar/CodexSyncBarApp.swift"), encoding: .utf8)
+        let popover = try String(contentsOf: packageRoot
+            .appendingPathComponent("Sources/CodexSyncBar/Views/PopoverView.swift"), encoding: .utf8)
+        let appModel = try String(contentsOf: packageRoot
+            .appendingPathComponent("Sources/CodexSyncBar/AppModel.swift"), encoding: .utf8)
+
+        XCTAssertTrue(app.contains("NSApplication.didBecomeActiveNotification"))
+        XCTAssertTrue(app.contains("NSWorkspace.didWakeNotification"))
+        XCTAssertTrue(app.contains("await model.refreshUsageIfStale()"))
+        XCTAssertTrue(app.contains("await model.refreshUsageOnly()"))
+        XCTAssertTrue(popover.contains("await model.refreshUsageIfStale()"))
+        XCTAssertTrue(popover.contains("if let failure = state.failure"))
+        XCTAssertTrue(appModel.contains("queuedUsageRefresh = true"))
+        XCTAssertTrue(appModel.contains("Task { [weak self] in await self?.refreshUsageOnly() }"))
     }
 
     func testPendingAccountReconciliationCommitsValidFullAuthAndRemovesAbandonedReservation() throws {
@@ -1921,8 +1992,26 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertTrue(info.contains("<key>CFBundleIconFile</key>"))
         XCTAssertTrue(info.contains("<string>AppIcon</string>"))
         XCTAssertTrue(buildScript.contains("Resources/AppIcon.icns"))
+        XCTAssertTrue(buildScript.contains("CODEX_SYNCBAR_SIGN_IDENTITY"))
+        XCTAssertTrue(buildScript.contains("--timestamp --options runtime"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: iconURL.path))
         XCTAssertGreaterThan(try Data(contentsOf: iconURL).count, 100_000)
+    }
+
+    func testReleaseWorkflowRequiresDeveloperIDNotarizationAndStapling() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let workflow = try String(contentsOf: packageRoot
+            .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
+
+        XCTAssertTrue(workflow.contains("APPLE_DEVELOPER_ID_P12_BASE64"))
+        XCTAssertTrue(workflow.contains("Developer ID Application"))
+        XCTAssertTrue(workflow.contains("xcrun notarytool submit"))
+        XCTAssertTrue(workflow.contains("xcrun stapler staple"))
+        XCTAssertTrue(workflow.contains("xcrun stapler validate"))
+        XCTAssertTrue(workflow.contains("spctl --assess --type execute"))
     }
 
     func testSettingsUsesRetainedForegroundWindowAndSwitchIsImmediate() throws {
