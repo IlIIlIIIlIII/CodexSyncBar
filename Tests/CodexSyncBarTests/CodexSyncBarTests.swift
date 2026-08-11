@@ -2303,6 +2303,36 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(state.payload?.expirationDates, [])
     }
 
+    func testResetCreditsSummaryDoesNotPostponeMissingDetailRequest() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var state = ResetCreditsRequestState()
+
+        state.recordSummary(
+            ResetCreditsPayload(availableCount: 1, credits: nil),
+            at: now)
+
+        XCTAssertEqual(state.payload?.availableCount, 1)
+        XCTAssertEqual(state.payload?.expirationDates, [])
+        XCTAssertTrue(state.beginRequest(at: now))
+    }
+
+    func testResetCreditsSummaryKeepsCachedExpirationWithoutExtendingRefreshWindow() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let known = ResetCreditsPayload(
+            availableCount: 1,
+            credits: [ResetCreditPayload(expiresAt: "2030-08-20T12:00:00Z")])
+        var state = ResetCreditsRequestState()
+        state.recordSuccess(known, at: now)
+
+        state.recordSummary(
+            ResetCreditsPayload(availableCount: 1, credits: nil),
+            at: now.addingTimeInterval(ResetCreditsRequestState.refreshInterval))
+
+        XCTAssertEqual(state.payload?.expirationDates, known.expirationDates)
+        XCTAssertTrue(state.beginRequest(
+            at: now.addingTimeInterval(ResetCreditsRequestState.refreshInterval)))
+    }
+
     @MainActor
     func testAppServerParserHandlesBrowserLoginLifecycle() {
         let started = LoginCoordinator.parseAppServerLine("""

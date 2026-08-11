@@ -114,13 +114,20 @@ actor UsageService {
         let key = credentials.accountID
         var state = resetCreditsStates[key] ?? ResetCreditsRequestState()
 
-        if let embedded {
+        if let embedded, embedded.credits != nil {
             state.recordSuccess(embedded, at: now)
             resetCreditsStates[key] = state
             return state.payload
         }
 
-        guard state.beginRequest(at: now) else { return state.payload }
+        if let embedded {
+            state.recordSummary(embedded, at: now)
+        }
+
+        guard state.beginRequest(at: now) else {
+            resetCreditsStates[key] = state
+            return state.payload
+        }
         resetCreditsStates[key] = state
 
         do {
@@ -212,6 +219,21 @@ struct ResetCreditsRequestState: Equatable, Sendable {
             payload = newPayload
         }
         nextRequestAt = now.addingTimeInterval(Self.refreshInterval)
+    }
+
+    mutating func recordSummary(_ summary: ResetCreditsPayload, at now: Date) {
+        // The usage endpoint can embed only available_count. It is useful for
+        // keeping the count current, but it must not postpone the dedicated
+        // detail request that supplies expires_at values.
+        if payload?.availableCount == summary.availableCount,
+           payload?.expirationDates.contains(where: { $0 > now }) == true
+        {
+            payload = ResetCreditsPayload(
+                availableCount: summary.availableCount,
+                credits: payload?.credits)
+        } else {
+            payload = summary
+        }
     }
 
     mutating func recordFailure(at now: Date) {
