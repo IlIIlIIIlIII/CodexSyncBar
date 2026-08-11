@@ -2257,6 +2257,52 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(payload.expirationDates, payload.expirationDates.sorted())
     }
 
+    func testResetCreditsRequestStateKeepsLastKnownValueDuringFailureBackoff() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let known = ResetCreditsPayload(
+            availableCount: 2,
+            credits: [ResetCreditPayload(expiresAt: "2026-08-20T12:00:00Z")])
+        var state = ResetCreditsRequestState()
+
+        XCTAssertTrue(state.beginRequest(at: now))
+        state.recordSuccess(known, at: now)
+        XCTAssertFalse(state.beginRequest(at: now.addingTimeInterval(60)))
+
+        state.recordFailure(at: now.addingTimeInterval(ResetCreditsRequestState.refreshInterval))
+
+        XCTAssertEqual(state.payload, known)
+        XCTAssertFalse(state.beginRequest(
+            at: now.addingTimeInterval(
+                ResetCreditsRequestState.refreshInterval
+                    + ResetCreditsRequestState.failureRetryInterval - 1)))
+        XCTAssertTrue(state.beginRequest(
+            at: now.addingTimeInterval(
+                ResetCreditsRequestState.refreshInterval
+                    + ResetCreditsRequestState.failureRetryInterval)))
+    }
+
+    func testResetCreditsRequestStatePreservesKnownExpirationsForCountOnlyResponse() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let known = ResetCreditsPayload(
+            availableCount: 1,
+            credits: [ResetCreditPayload(expiresAt: "2030-08-20T12:00:00Z")])
+        var state = ResetCreditsRequestState()
+        state.recordSuccess(known, at: now)
+
+        state.recordSuccess(
+            ResetCreditsPayload(availableCount: 1, credits: nil),
+            at: now.addingTimeInterval(ResetCreditsRequestState.refreshInterval))
+
+        XCTAssertEqual(state.payload?.availableCount, 1)
+        XCTAssertEqual(state.payload?.expirationDates, known.expirationDates)
+
+        state.recordSuccess(
+            ResetCreditsPayload(availableCount: 0, credits: []),
+            at: now.addingTimeInterval(2 * ResetCreditsRequestState.refreshInterval))
+        XCTAssertEqual(state.payload?.availableCount, 0)
+        XCTAssertEqual(state.payload?.expirationDates, [])
+    }
+
     @MainActor
     func testAppServerParserHandlesBrowserLoginLifecycle() {
         let started = LoginCoordinator.parseAppServerLine("""
@@ -3263,7 +3309,7 @@ final class CodexSyncBarTests: XCTestCase {
             print("LIVE_USAGE profile=1 plan=\(snapshot.plan) weeklyRemaining=\(Int(remaining.rounded()))")
         }
         if let credits = snapshot.resetCredits, credits > 0 {
-            XCTAssertEqual(snapshot.resetCreditExpirations.count, credits)
+            XCTAssertLessThanOrEqual(snapshot.resetCreditExpirations.count, credits)
             XCTAssertTrue(snapshot.resetCreditExpirations.allSatisfy { $0 > Date() })
             let expirations = snapshot.resetCreditExpirations.map {
                 Formatting.resetCreditExpiryDescription($0)
@@ -3288,7 +3334,7 @@ final class CodexSyncBarTests: XCTestCase {
             print("LIVE_USAGE profile=2 plan=\(snapshot.plan) weeklyRemaining=\(Int(remaining.rounded()))")
         }
         if let credits = snapshot.resetCredits, credits > 0 {
-            XCTAssertEqual(snapshot.resetCreditExpirations.count, credits)
+            XCTAssertLessThanOrEqual(snapshot.resetCreditExpirations.count, credits)
             XCTAssertTrue(snapshot.resetCreditExpirations.allSatisfy { $0 > Date() })
             let expirations = snapshot.resetCreditExpirations.map {
                 Formatting.resetCreditExpiryDescription($0)

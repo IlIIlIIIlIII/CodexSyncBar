@@ -4,6 +4,7 @@ actor UsageService {
     private let authStore: AuthStore
     private let switchService: SwitchService
     private let decoder = JSONDecoder()
+    private var resetCreditsStates: [String: ResetCreditsRequestState] = [:]
     private var recoveryBusy = false
     private var recoveryWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -78,14 +79,9 @@ actor UsageService {
             credentials: credentials,
             extraHeaders: [:])
 
-        let resetCredits: ResetCreditsPayload? = try? await request(
-            url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
-            credentials: credentials,
-            extraHeaders: [
-                "OpenAI-Beta": "codex-1",
-                "originator": "Codex Desktop",
-            ],
-            timeout: 8)
+        let resetCredits = await resolveResetCredits(
+            embedded: payload.rateLimitResetCredits,
+            credentials: credentials)
 
         let spark = payload.additionalRateLimits?.first(where: { item in
             let text = "\(item.limitName ?? "") \(item.meteredFeature ?? "")".lowercased()
@@ -104,11 +100,48 @@ actor UsageService {
             sparkWeekly: sparkWindows?.weekly?.model,
             creditBalance: payload.credits?.balance,
             unlimitedCredits: payload.credits?.unlimited ?? false,
-            resetCredits: payload.rateLimitResetCredits?.availableCount ?? resetCredits?.availableCount,
+            resetCredits: resetCredits?.availableCount,
             resetCreditExpirations: resetCredits?.expirationDates
-                ?? payload.rateLimitResetCredits?.expirationDates
                 ?? [],
             updatedAt: Date())
+    }
+
+    private func resolveResetCredits(
+        embedded: ResetCreditsPayload?,
+        credentials: ProfileCredentials,
+        now: Date = Date()) async -> ResetCreditsPayload?
+    {
+        let key = credentials.accountID
+        var state = resetCreditsStates[key] ?? ResetCreditsRequestState()
+
+        if let embedded {
+            state.recordSuccess(embedded, at: now)
+            resetCreditsStates[key] = state
+            return state.payload
+        }
+
+        guard state.beginRequest(at: now) else { return state.payload }
+        resetCreditsStates[key] = state
+
+        do {
+            let fetched: ResetCreditsPayload = try await request(
+                url: URL(string: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits")!,
+                credentials: credentials,
+                extraHeaders: [
+                    "OpenAI-Beta": "codex-1",
+                    "originator": "Codex Desktop",
+                ],
+                timeout: 8)
+            var latest = resetCreditsStates[key] ?? state
+            latest.recordSuccess(fetched, at: now)
+            resetCreditsStates[key] = latest
+            return latest.payload
+        } catch {
+            var latest = resetCreditsStates[key] ?? state
+            latest.recordFailure(at: now)
+            resetCreditsStates[key] = latest
+            return latest.payload
+        }
     }
 
     private func request<T: Decodable>(
@@ -147,6 +180,43 @@ actor UsageService {
 
 private enum HTTPError: Error {
     case unauthorized
+}
+
+struct ResetCreditsRequestState: Equatable, Sendable {
+    static let refreshInterval: TimeInterval = 5 * 60
+    static let failureRetryInterval: TimeInterval = 15 * 60
+
+    private(set) var payload: ResetCreditsPayload?
+    private(set) var nextRequestAt: Date?
+
+    mutating func beginRequest(at now: Date) -> Bool {
+        if let nextRequestAt, nextRequestAt > now { return false }
+        // Mark the attempt before awaiting the network so actor reentrancy
+        // cannot start a duplicate request for the same account.
+        nextRequestAt = now.addingTimeInterval(Self.failureRetryInterval)
+        return true
+    }
+
+    mutating func recordSuccess(_ newPayload: ResetCreditsPayload, at now: Date) {
+        // Some successful responses contain only available_count. Keep still
+        // useful expiration details from the preceding full response when the
+        // count has not changed, but honor an explicit empty credits array.
+        if newPayload.credits == nil,
+           payload?.availableCount == newPayload.availableCount,
+           payload?.expirationDates.contains(where: { $0 > now }) == true
+        {
+            payload = ResetCreditsPayload(
+                availableCount: newPayload.availableCount,
+                credits: payload?.credits)
+        } else {
+            payload = newPayload
+        }
+        nextRequestAt = now.addingTimeInterval(Self.refreshInterval)
+    }
+
+    mutating func recordFailure(at now: Date) {
+        nextRequestAt = now.addingTimeInterval(Self.failureRetryInterval)
+    }
 }
 
 private struct UsagePayload: Decodable {
@@ -261,7 +331,7 @@ private struct CreditsPayload: Decodable {
     }
 }
 
-struct ResetCreditsPayload: Decodable {
+struct ResetCreditsPayload: Decodable, Equatable, Sendable {
     let availableCount: Int
     let credits: [ResetCreditPayload]?
 
@@ -275,7 +345,7 @@ struct ResetCreditsPayload: Decodable {
     }
 }
 
-struct ResetCreditPayload: Decodable {
+struct ResetCreditPayload: Decodable, Equatable, Sendable {
     let expiresAt: String?
 
     enum CodingKeys: String, CodingKey {
