@@ -108,11 +108,12 @@ printf '%s\n' "$*" >>"$GPT_SWITCH_TEST_SSH_CALLS"
 printf '%s\n' "${CODEX_SYNCBAR_CREDENTIAL_ID:-}" >"$GPT_SWITCH_TEST_CREDENTIAL_ID"
 case " $* " in
   *" __node cursor-provision "*)
-    request_base64=$(head -c 131073 | openssl base64 -A 2>/dev/null)
+    request_base64=$(head -c 524289 | openssl base64 -A 2>/dev/null)
     printf '%s' "$request_base64" | openssl base64 -d -A 2>/dev/null | jq -e '
-      (keys | sort) == ["apiKey","bridgeToken","model","models","port","schemaVersion"] and
+      (keys | sort) == ["apiKey","bridgeToken","model","modelParameters","models","port","schemaVersion"] and
       (.apiKey | type == "string" and length >= 16) and
-      .schemaVersion == 1
+      .schemaVersion == 1 and
+      ((.modelParameters | keys | sort) == (.models | sort))
     ' >/dev/null 2>&1 || exit 96
     printf 'observed\n' >"$GPT_SWITCH_TEST_CURSOR_PROVISION_OBSERVED"
     while [ -e "$GPT_SWITCH_TEST_CURSOR_PROVISION_PAUSE" ]; do sleep 0.01; done
@@ -217,7 +218,11 @@ cursor_payload=$(jq -cn \
   --arg apiKey "$cursor_api_key" \
   --arg bridgeToken "$(printf 'b%.0s' {1..64})" \
   '{schemaVersion:1,apiKey:$apiKey,model:"composer-2.5",port:32125,
-    bridgeToken:$bridgeToken,models:["composer-2.5","gpt-5.6-sol-high-fast"]}')
+    bridgeToken:$bridgeToken,models:["composer-2.5","gpt-5.6-sol-high-fast"],
+    modelParameters:{
+      "composer-2.5":{model:"composer-2.5",fast:false,thinking:false},
+      "gpt-5.6-sol-high-fast":{model:"gpt-5.6-sol",effort:"high",fast:true,thinking:false}
+    }}')
 printf '%s' "$cursor_payload" | env "${common_env[@]}" \
   GPT_SWITCH_CURSOR_BRIDGE_HELPER="$ROOT/Support/cursor-codex-bridge.mjs" \
   GPT_SWITCH_CURSOR_REMOTE_MANAGER="$ROOT/Support/cursor-remote-manager.mjs" \
@@ -929,7 +934,11 @@ CURSOR_PAYLOAD=$(jq -cn \
   --arg model 'composer-2.5' \
   --arg bridgeToken "$CURSOR_BRIDGE_CANARY" \
   '{schemaVersion:1,apiKey:$apiKey,model:$model,port:43267,bridgeToken:$bridgeToken,
-    models:["composer-2.5","gpt-5.6-sol-high-fast"]}')
+    models:["composer-2.5","gpt-5.6-sol-high-fast"],
+    modelParameters:{
+      "composer-2.5":{model:"composer-2.5",fast:false,thinking:false},
+      "gpt-5.6-sol-high-fast":{model:"gpt-5.6-sol",effort:"high",fast:true,thinking:false}
+    }}')
 cursor_env=(
   "${common_env[@]}"
   GPT_SWITCH_SSH_BIN="$CURSOR_SSH"

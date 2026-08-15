@@ -23,14 +23,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const RUNTIME_SCHEMA_VERSION = 1;
+export const MAX_PROVISION_BYTES = 512 * 1024;
 export const PROVIDER_ID = "syncbar_cursor_bridge";
 export const MARKER_BEGIN = "# BEGIN CODEX SYNCBAR CURSOR REMOTE v1";
 export const MARKER_END = "# END CODEX SYNCBAR CURSOR REMOTE v1";
 
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const MODEL_PARAMETER_EFFORTS = new Set([
+  "none", "minimal", "low", "medium", "high", "xhigh", "max",
+]);
 const BRIDGE_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
-const MAX_RUNTIME_BYTES = 128 * 1024;
-const MAX_JOURNAL_BYTES = 1024 * 1024;
+const MAX_RUNTIME_BYTES = MAX_PROVISION_BYTES;
+const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
 const MAX_INSTALLER_BYTES = 2 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 512 * 1024;
 const DEFAULT_INSTALL_URL = "https://cursor.com/install";
@@ -122,6 +126,117 @@ function validatedModels(value, model) {
   return result;
 }
 
+function validatedModelParameters(value, models) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail("modelParameters must be a JSON object", "invalid_model_parameters");
+  }
+  const expectedSlugs = [...models].sort();
+  const actualSlugs = Object.keys(value).sort();
+  if (actualSlugs.length !== expectedSlugs.length ||
+      actualSlugs.some((slug, index) => slug !== expectedSlugs[index])) {
+    fail("modelParameters keys must exactly match models", "invalid_model_parameters");
+  }
+
+  const result = {};
+  for (const slug of models) {
+    const parameters = value[slug];
+    if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) {
+      fail("modelParameters entry must be a JSON object", "invalid_model_parameters");
+    }
+    const keys = Object.keys(parameters).sort();
+    const allowedKeys = new Set(["context", "effort", "fast", "model", "thinking"]);
+    if (!Object.hasOwn(parameters, "model") || !Object.hasOwn(parameters, "fast") ||
+        !Object.hasOwn(parameters, "thinking") || keys.some((key) => !allowedKeys.has(key))) {
+      fail("modelParameters entry contains missing or unknown fields", "invalid_model_parameters");
+    }
+    if (typeof parameters.fast !== "boolean" || typeof parameters.thinking !== "boolean") {
+      fail("modelParameters flags must be booleans", "invalid_model_parameters");
+    }
+    if (Object.hasOwn(parameters, "context") && parameters.context !== "1m") {
+      fail("modelParameters context is invalid", "invalid_model_parameters");
+    }
+    if (Object.hasOwn(parameters, "effort") &&
+        (typeof parameters.effort !== "string" ||
+          !MODEL_PARAMETER_EFFORTS.has(parameters.effort))) {
+      fail("modelParameters effort is invalid", "invalid_model_parameters");
+    }
+    const normalized = {
+      model: validatedModel(parameters.model),
+      fast: parameters.fast,
+      thinking: parameters.thinking,
+    };
+    if (Object.hasOwn(parameters, "context")) normalized.context = parameters.context;
+    if (Object.hasOwn(parameters, "effort")) normalized.effort = parameters.effort;
+    result[slug] = normalized;
+  }
+  return result;
+}
+
+function migratedModelParameters(models) {
+  const aliases = new Map([
+    ["auto", "default"],
+    ["cursor-grok-4.6", "grok-4.6"],
+    ["cursor-grok-4.5", "grok-4.5"],
+    ["claude-4.6-sonnet", "claude-sonnet-4-6"],
+    ["claude-4.6-opus", "claude-opus-4-6"],
+    ["claude-4.5-opus", "claude-opus-4-5"],
+    ["claude-4.5-sonnet", "claude-sonnet-4-5"],
+    ["claude-4-sonnet", "claude-sonnet-4"],
+  ]);
+  const effortSuffixes = [
+    ["-extra-high", "xhigh"],
+    ["-minimal", "minimal"],
+    ["-default", null],
+    ["-medium", "medium"],
+    ["-xhigh", "xhigh"],
+    ["-none", "none"],
+    ["-high", "high"],
+    ["-low", "low"],
+    ["-max", "max"],
+  ];
+  const result = {};
+  for (const slug of models) {
+    if (slug === "auto") {
+      result[slug] = { model: "default", fast: false, thinking: false };
+      continue;
+    }
+    let model = slug;
+    let fast = false;
+    let thinking = false;
+    let effort;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      if (!fast && model.endsWith("-fast")) {
+        model = model.slice(0, -5);
+        fast = true;
+        changed = true;
+      }
+      if (!thinking && model.endsWith("-thinking")) {
+        model = model.slice(0, -9);
+        thinking = true;
+        changed = true;
+      }
+      if (effort === undefined) {
+        for (const [suffix, candidate] of effortSuffixes) {
+          if (model.endsWith(suffix)) {
+            model = model.slice(0, -suffix.length);
+            effort = candidate;
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+    const parameters = { model: aliases.get(model) ?? model, fast, thinking };
+    if (effort) parameters.effort = effort;
+    // Old runtimes did not retain the catalog's explicit context token. Do
+    // not infer a 1m setting while migrating them in memory.
+    result[slug] = parameters;
+  }
+  return result;
+}
+
 export function validateProvisionInput(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail("provision input must be a JSON object", "invalid_input");
@@ -129,7 +244,9 @@ export function validateProvisionInput(value) {
   if (value.schemaVersion !== RUNTIME_SCHEMA_VERSION) {
     fail("unsupported provision schemaVersion", "invalid_schema");
   }
-  const expectedKeys = ["apiKey", "bridgeToken", "model", "models", "port", "schemaVersion"];
+  const expectedKeys = [
+    "apiKey", "bridgeToken", "model", "modelParameters", "models", "port", "schemaVersion",
+  ];
   const actualKeys = Object.keys(value).sort();
   if (actualKeys.length !== expectedKeys.length ||
       actualKeys.some((key, index) => key !== expectedKeys[index])) {
@@ -140,13 +257,15 @@ export function validateProvisionInput(value) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     fail("port must be between 1024 and 65535", "invalid_port");
   }
+  const models = validatedModels(value.models, model);
   return {
     schemaVersion: RUNTIME_SCHEMA_VERSION,
     apiKey: validatedAPIKey(value.apiKey),
     model,
     port,
     bridgeToken: validatedBridgeToken(value.bridgeToken),
-    models: validatedModels(value.models, model),
+    models,
+    modelParameters: validatedModelParameters(value.modelParameters, models),
   };
 }
 
@@ -525,16 +644,24 @@ function runtimeFromDisk(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail("Cursor remote runtime is invalid", "invalid_runtime");
   }
-  const expectedKeys = [
+  const legacyKeys = [
     "agentPath", "apiKey", "bridgePath", "bridgeToken", "cursorHome", "home", "managerPath",
     "model", "models", "nodePath", "port", "schemaVersion", "workspace",
     "xdgCache", "xdgConfig", "xdgData", "xdgState",
   ];
   const actualKeys = Object.keys(value).sort();
+  const expectedKeys = Object.hasOwn(value, "modelParameters")
+    ? [...legacyKeys, "modelParameters"].sort()
+    : legacyKeys;
   if (actualKeys.length !== expectedKeys.length ||
       actualKeys.some((key, index) => key !== expectedKeys[index])) {
     fail("Cursor remote runtime has missing or unknown fields", "invalid_runtime");
   }
+  const modelParameters = Object.hasOwn(value, "modelParameters")
+    ? value.modelParameters
+    : (Array.isArray(value.models) && value.models.every((model) => typeof model === "string")
+        ? migratedModelParameters(value.models)
+        : {});
   const input = validateProvisionInput({
     schemaVersion: value.schemaVersion,
     apiKey: value.apiKey,
@@ -542,6 +669,7 @@ function runtimeFromDisk(value) {
     port: value.port,
     bridgeToken: value.bridgeToken,
     models: value.models,
+    modelParameters,
   });
   return {
     ...input,
@@ -1185,6 +1313,7 @@ export async function provision(inputValue, options = {}) {
         model: runtime.model,
         port: runtime.port,
         models: runtime.models,
+        modelParameters: runtime.modelParameters,
         agentPath: runtime.agentPath,
       };
     } catch (error) {
@@ -1265,6 +1394,7 @@ function detachedBridgeEnvironment(runtime, base = process.env) {
     ...cursorRuntimeEnvironment(runtime, base),
     SYNCBAR_CURSOR_BRIDGE_TOKEN: runtime.bridgeToken,
     SYNCBAR_CURSOR_MODELS_JSON: JSON.stringify(runtime.models),
+    SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON: JSON.stringify(runtime.modelParameters),
   };
 }
 
@@ -1468,6 +1598,7 @@ export async function show(options = {}) {
     model: runtime.model,
     port: runtime.port,
     models: runtime.models,
+    modelParameters: runtime.modelParameters,
     agentPath: runtime.agentPath,
   };
 }

@@ -2102,12 +2102,27 @@ final class AppModel: ObservableObject {
         let models = catalogModels.contains(cursorBridgePreferences.model)
             ? catalogModels
             : [cursorBridgePreferences.model] + catalogModels
+        let catalogParameters = cursorModelCatalog.acpModelParametersBySlug
+        let modelParameters = Dictionary(uniqueKeysWithValues: models.map { slug in
+            let parsedFallback = CursorModelCatalog(cliOutput: "\(slug) - \(slug)")
+                .acpModelParametersBySlug[slug]
+            return (
+                slug,
+                catalogParameters[slug] ?? parsedFallback ?? CursorACPModelParameters(
+                    model: slug,
+                    context: nil,
+                    effort: nil,
+                    fast: false,
+                    thinking: false)
+            )
+        })
         let request = try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: cursorBridgePreferences.model,
             port: cursorBridgePreferences.port,
             bridgeToken: cursorBridgePreferences.bridgeToken,
-            models: models)
+            models: models,
+            modelParameters: modelParameters)
         return try await switchService.provisionCursor(deviceID: deviceID, request: request)
     }
 

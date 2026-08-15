@@ -91,7 +91,8 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         let levels = try XCTUnwrap(models[1]["supported_reasoning_levels"] as? [[String: String]])
         XCTAssertEqual(levels.first?["effort"], "high")
         XCTAssertEqual(models[1]["base_instructions"] as? String, "template instructions")
-        XCTAssertEqual(models[1]["input_modalities"] as? [String], ["text"])
+        XCTAssertEqual(models[1]["input_modalities"] as? [String], ["text", "image"])
+        XCTAssertEqual(models[1]["supports_image_detail_original"] as? Bool, true)
     }
 
     func testDefaultCursorVariantDoesNotAdvertiseChangeableReasoning() throws {
@@ -107,6 +108,41 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         let models = try XCTUnwrap(root["models"] as? [[String: Any]])
         XCTAssertEqual(models[0]["default_reasoning_level"] as? String, "medium")
         XCTAssertEqual((models[0]["supported_reasoning_levels"] as? [Any])?.count, 0)
+    }
+
+    func testOneMillionContextOverridesCatalogWindowsOnlyForMatchingVariants() throws {
+        let cursor = CursorModelCatalog(cliOutput: """
+        gpt-5.6-sol-high - GPT-5.6 Sol 1M High
+        gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+        """)
+        let template = try JSONSerialization.data(withJSONObject: [
+            "models": [[
+                "slug": "gpt-5.6-sol",
+                "context_window": 272_000,
+                "max_context_window": 272_000,
+                "effective_context_window_percent": 95,
+            ]],
+        ])
+
+        let data = try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: cursor,
+            bundledCatalogData: template)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let models = try XCTUnwrap(root["models"] as? [[String: Any]])
+        let bySlug = Dictionary(uniqueKeysWithValues: models.compactMap { model in
+            (model["slug"] as? String).map { ($0, model) }
+        })
+
+        XCTAssertEqual(bySlug["gpt-5.6-sol-high"]?["context_window"] as? Int, 1_000_000)
+        XCTAssertEqual(bySlug["gpt-5.6-sol-high"]?["max_context_window"] as? Int, 1_000_000)
+        XCTAssertEqual(
+            bySlug["gpt-5.6-sol-high"]?["effective_context_window_percent"] as? Int,
+            95)
+        XCTAssertEqual(bySlug["gpt-5.6-sol-high-fast"]?["context_window"] as? Int, 272_000)
+        XCTAssertEqual(bySlug["gpt-5.6-sol-high-fast"]?["max_context_window"] as? Int, 272_000)
+        XCTAssertEqual(
+            bySlug["gpt-5.6-sol-high-fast"]?["effective_context_window_percent"] as? Int,
+            95)
     }
 
     func testRejectsAnUnboundedCursorModelCatalog() throws {

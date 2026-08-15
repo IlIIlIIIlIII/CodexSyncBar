@@ -336,6 +336,9 @@ actor SwitchService {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let input = try encoder.encode(request)
+        guard input.count <= CursorRemoteProvisioningRequest.maximumEncodedBytes else {
+            throw AppError.processFailed("SSH에 전달할 Cursor 설정이 너무 큽니다.")
+        }
         let result = try await run(
             arguments: ["provision-cursor", deviceID],
             input: input,
@@ -845,7 +848,7 @@ actor SwitchService {
                         let writer = inputPipe.fileHandleForWriting
                         var writeError: Error?
                         do {
-                            try writer.write(contentsOf: input)
+                            try Self.writeProcessInput(input, to: writer)
                         } catch {
                             writeError = AppError.processFailed(
                                 "gpt-switch에 입력을 안전하게 전달하지 못했습니다.")
@@ -870,6 +873,32 @@ actor SwitchService {
                     try? inputPipe.fileHandleForWriting.close()
                 }
                 completion.fail(error)
+            }
+        }
+    }
+
+    private nonisolated static func writeProcessInput(_ input: Data, to writer: FileHandle) throws {
+        let descriptor = writer.fileDescriptor
+        guard Darwin.fcntl(descriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            throw AppError.processFailed("gpt-switch 입력 스트림을 안전하게 준비하지 못했습니다.")
+        }
+
+        let maximumChunkBytes = 16 * 1024
+        try input.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                let requested = min(maximumChunkBytes, bytes.count - offset)
+                let written = Darwin.write(
+                    descriptor,
+                    baseAddress.advanced(by: offset),
+                    requested)
+                if written > 0 {
+                    offset += written
+                    continue
+                }
+                if written < 0, errno == EINTR { continue }
+                throw AppError.processFailed("gpt-switch에 입력을 안전하게 전달하지 못했습니다.")
             }
         }
     }

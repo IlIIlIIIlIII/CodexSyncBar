@@ -4247,12 +4247,12 @@ controller_provision_cursor() {
   # emit literal NUL bytes or a trailing newline, so base64/openssl is not
   # needed. Absolute root-owned tools keep a hostile PATH from interposing on
   # the only local pipeline that ever sees the Cursor API key.
-  payload=$(/usr/bin/head -c 131073) || \
+  payload=$(/usr/bin/head -c 524289) || \
     die "could not read Cursor provisioning request"
   bytes=${#payload}
-  [ "$bytes" -le 131072 ] || die "Cursor provisioning request is too large"
+  [ "$bytes" -le 524288 ] || die "Cursor provisioning request is too large"
   printf '%s' "$payload" | /usr/bin/jq -e '
-    (keys | sort) == ["apiKey","bridgeToken","model","models","port","schemaVersion"] and
+    (keys | sort) == ["apiKey","bridgeToken","model","modelParameters","models","port","schemaVersion"] and
     .schemaVersion == 1 and
     (.apiKey | type == "string" and length > 0 and (test("[\u0000-\u0020\u007f]") | not)) and
     (.model | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")) and
@@ -4261,7 +4261,22 @@ controller_provision_cursor() {
     (.models | type == "array" and length >= 1 and length <= 512) and
     (all(.models[]; type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))) and
     ((.models | length) == (.models | unique | length)) and
-    (.model as $selected | .models | index($selected) != null)
+    (.model as $selected | .models | index($selected) != null) and
+    (.models | sort) as $model_keys |
+    (.modelParameters | type == "object") and
+    ((.modelParameters | keys | sort) == $model_keys) and
+    (all(.modelParameters | to_entries[];
+      (.value | type == "object") and
+      (.value | (keys - ["context","effort","fast","model","thinking"]) | length == 0) and
+      (.value | has("model") and has("fast") and has("thinking")) and
+      (.value.model | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")) and
+      (.value.fast | type == "boolean") and
+      (.value.thinking | type == "boolean") and
+      (.value | ((has("context") | not) or .context == "1m")) and
+      (.value | ((has("effort") | not) or
+        (.effort as $effort | ($effort | type == "string") and
+          (["none","minimal","low","medium","high","xhigh","max"] | index($effort)) != null)))
+    ))
   ' >/dev/null 2>&1 || die "Cursor provisioning request is invalid"
   bytes=$(printf '%s' "$payload" | /usr/bin/jq -jr '.apiKey | utf8bytelength' 2>/dev/null) || \
     die "could not validate Cursor API key"

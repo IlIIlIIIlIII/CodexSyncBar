@@ -47,8 +47,12 @@ enum CodexCursorModelCatalogBuilder {
                     model["upgrade"] = NSNull()
                     model["additional_speed_tiers"] = []
                     model["service_tiers"] = []
-                    model["input_modalities"] = ["text"]
-                    model["supports_image_detail_original"] = false
+                    model["input_modalities"] = ["text", "image"]
+                    model["supports_image_detail_original"] = true
+                    if variant.context == "1m" {
+                        model["context_window"] = 1_000_000
+                        model["max_context_window"] = 1_000_000
+                    }
                     model["supports_parallel_tool_calls"] = false
                     model["supports_search_tool"] = false
                     model["experimental_supported_tools"] = []

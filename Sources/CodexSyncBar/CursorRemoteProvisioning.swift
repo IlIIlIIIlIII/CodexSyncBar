@@ -3,6 +3,7 @@ import Foundation
 struct CursorRemoteProvisioningRequest: Codable, Equatable, Sendable {
     static let schemaVersion = 1
     static let maximumModelCount = 512
+    static let maximumEncodedBytes = 512 * 1024
 
     let schemaVersion: Int
     let apiKey: String
@@ -10,13 +11,15 @@ struct CursorRemoteProvisioningRequest: Codable, Equatable, Sendable {
     let port: Int
     let bridgeToken: String
     let models: [String]
+    let modelParameters: [String: CursorACPModelParameters]
 
     init(
         apiKey: String,
         model: String,
         port: Int,
         bridgeToken: String,
-        models: [String]) throws
+        models: [String],
+        modelParameters: [String: CursorACPModelParameters]) throws
     {
         self.schemaVersion = Self.schemaVersion
         self.apiKey = try CursorAPIKeyValidator.validated(apiKey)
@@ -40,6 +43,17 @@ struct CursorRemoteProvisioningRequest: Codable, Equatable, Sendable {
             throw AppError.processFailed("SSH에 전달할 Cursor 모델 목록이 올바르지 않습니다.")
         }
         self.models = normalizedModels
+
+        guard Set(modelParameters.keys) == Set(normalizedModels),
+              modelParameters.values.allSatisfy({ parameters in
+                  Self.isValidModelSlug(parameters.model) &&
+                      (parameters.context == nil || parameters.context == "1m") &&
+                      parameters.effort != .default
+              })
+        else {
+            throw AppError.processFailed("SSH에 전달할 Cursor 모델 설정이 올바르지 않습니다.")
+        }
+        self.modelParameters = modelParameters
     }
 
     private static func isValidModelSlug(_ value: String) -> Bool {

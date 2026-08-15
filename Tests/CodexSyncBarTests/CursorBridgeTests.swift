@@ -37,6 +37,40 @@ final class CursorBridgeTests: XCTestCase {
         XCTAssertThrowsError(try CursorBridgePreferences(bridgeToken: "short").validated())
     }
 
+    @MainActor
+    func testCursorBridgeSidecarEnvironmentIncludesExactACPModelParameters() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        gpt-5.6-sol-high-fast - GPT-5.6 Sol 1M High Fast
+        composer-2.5 - Composer 2.5
+        """)
+
+        let environment = try CursorBridgeService.sidecarEnvironment(
+            inheriting: ["PRESERVED": "yes"],
+            bridgeToken: testCursorBridgeToken,
+            modelCatalog: catalog)
+
+        XCTAssertEqual(environment["PRESERVED"], "yes")
+        XCTAssertEqual(environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"], testCursorBridgeToken)
+        let slugsData = try XCTUnwrap(
+            environment["SYNCBAR_CURSOR_MODELS_JSON"]?.data(using: .utf8))
+        XCTAssertEqual(
+            try JSONDecoder().decode([String].self, from: slugsData),
+            ["gpt-5.6-sol-high-fast", "composer-2.5"])
+        let parametersData = try XCTUnwrap(
+            environment["SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON"]?.data(using: .utf8))
+        let parameters = try JSONDecoder().decode(
+            [String: CursorACPModelParameters].self,
+            from: parametersData)
+        XCTAssertEqual(
+            parameters["gpt-5.6-sol-high-fast"],
+            CursorACPModelParameters(
+                model: "gpt-5.6-sol",
+                context: "1m",
+                effort: .high,
+                fast: true,
+                thinking: false))
+    }
+
     func testCodexCursorConfigRoundTripsExactlyAndPreservesCRLF() throws {
         let original = [
             "# keep this comment",

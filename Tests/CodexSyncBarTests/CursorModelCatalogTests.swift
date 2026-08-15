@@ -21,6 +21,11 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.family(baseSlug: "gpt-5.3-codex")?.group, .openAICodex)
         XCTAssertEqual(catalog.family(baseSlug: "gpt-5.6-sol")?.group, .openAIGPT)
         XCTAssertEqual(catalog.family(baseSlug: "gpt-5.2")?.group, .openAIGPT)
+        XCTAssertEqual(
+            catalog.variants.first(where: { $0.slug == "gpt-5.6-sol-high" })?.context,
+            "1m")
+        XCTAssertNil(
+            catalog.variants.first(where: { $0.slug == "gpt-5.6-sol-high-fast" })?.context)
         XCTAssertNotEqual(
             CursorModelGroup.openAIGPT.displayName,
             CursorModelGroup.openAICodex.displayName)
@@ -170,5 +175,106 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(
             catalog.family(baseSlug: "composer-2.5")?.preferredVariant?.slug,
             "composer-2.5")
+    }
+
+    func testBuildsExactACPParametersWithoutInferringContextFromSlug() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        gpt-5.6-sol-high-fast - GPT-5.6 Sol 1M High Fast
+        composer-2.5 - Composer 2.5
+        claude-opus-5-thinking-low - Opus 5 1m Low Thinking
+        vendor-1m-high - Vendor 1M-preview High
+        bracketed-context - Vendor (1M)
+        """)
+
+        XCTAssertEqual(
+            catalog.acpModelParametersBySlug["gpt-5.6-sol-high-fast"],
+            CursorACPModelParameters(
+                model: "gpt-5.6-sol",
+                context: "1m",
+                effort: .high,
+                fast: true,
+                thinking: false))
+        XCTAssertEqual(
+            catalog.acpModelParametersBySlug["composer-2.5"],
+            CursorACPModelParameters(
+                model: "composer-2.5",
+                context: nil,
+                effort: nil,
+                fast: false,
+                thinking: false))
+        XCTAssertEqual(
+            catalog.acpModelParametersBySlug["claude-opus-5-thinking-low"],
+            CursorACPModelParameters(
+                model: "claude-opus-5",
+                context: "1m",
+                effort: .low,
+                fast: false,
+                thinking: true))
+        XCTAssertNil(catalog.acpModelParametersBySlug["vendor-1m-high"]?.context)
+        XCTAssertNil(catalog.acpModelParametersBySlug["bracketed-context"]?.context)
+
+        let data = try XCTUnwrap(catalog.acpModelParametersJSON().data(using: .utf8))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: [String: Any]])
+        XCTAssertEqual(object["gpt-5.6-sol-high-fast"]?["model"] as? String, "gpt-5.6-sol")
+        XCTAssertEqual(object["gpt-5.6-sol-high-fast"]?["context"] as? String, "1m")
+        XCTAssertEqual(object["gpt-5.6-sol-high-fast"]?["effort"] as? String, "high")
+        XCTAssertEqual(object["gpt-5.6-sol-high-fast"]?["fast"] as? Bool, true)
+        XCTAssertEqual(object["gpt-5.6-sol-high-fast"]?["thinking"] as? Bool, false)
+        XCTAssertNil(object["composer-2.5"]?["context"])
+        XCTAssertNil(object["composer-2.5"]?["effort"])
+    }
+
+    func testMapsCursorBaseSlugsToExactACPModelIDs() throws {
+        let aliases = [
+            "auto": "default",
+            "cursor-grok-4.6": "grok-4.6",
+            "cursor-grok-4.5": "grok-4.5",
+            "claude-4.6-sonnet": "claude-sonnet-4-6",
+            "claude-4.6-opus": "claude-opus-4-6",
+            "claude-4.5-opus": "claude-opus-4-5",
+            "claude-4.5-sonnet": "claude-sonnet-4-5",
+            "claude-4-sonnet": "claude-sonnet-4",
+        ]
+
+        for (baseSlug, modelID) in aliases {
+            XCTAssertEqual(
+                CursorModelCatalog.acpModelID(forBaseSlug: baseSlug),
+                modelID)
+        }
+        XCTAssertEqual(
+            CursorModelCatalog.acpModelID(forBaseSlug: "gpt-5.6-sol"),
+            "gpt-5.6-sol")
+
+        let catalog = CursorModelCatalog(cliOutput: """
+        auto - Auto (default)
+        cursor-grok-4.6-high - Grok 4.6 High
+        claude-4.6-sonnet-medium-thinking - Sonnet 4.6 1M Thinking
+        """)
+        XCTAssertEqual(catalog.acpModelParametersBySlug["auto"]?.model, "default")
+        XCTAssertEqual(
+            catalog.acpModelParametersBySlug["cursor-grok-4.6-high"]?.model,
+            "grok-4.6")
+        XCTAssertEqual(
+            catalog.acpModelParametersBySlug["claude-4.6-sonnet-medium-thinking"]?.model,
+            "claude-sonnet-4-6")
+    }
+
+    func testCursorModelVariantDecodesLegacyJSONWithoutContext() throws {
+        let data = Data("""
+        {
+          "slug": "composer-2.5",
+          "displayName": "Composer 2.5",
+          "baseSlug": "composer-2.5",
+          "effort": "default",
+          "fast": false,
+          "thinking": false
+        }
+        """.utf8)
+
+        let variant = try JSONDecoder().decode(CursorModelVariant.self, from: data)
+
+        XCTAssertNil(variant.context)
+        XCTAssertEqual(variant.slug, "composer-2.5")
     }
 }

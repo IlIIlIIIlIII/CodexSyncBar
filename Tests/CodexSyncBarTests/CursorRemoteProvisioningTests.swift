@@ -6,16 +6,38 @@ final class CursorRemoteProvisioningTests: XCTestCase {
     func testRequestValidationAndEncodingKeepSecretsOutOfMetadata() throws {
         let apiKey = "cursor_" + String(repeating: "a", count: 32)
         let token = String(repeating: "b", count: 64)
+        let modelParameters = [
+            "gpt-5.6-sol-high": CursorACPModelParameters(
+                model: "gpt-5.6-sol",
+                context: "1m",
+                effort: .high,
+                fast: false,
+                thinking: false),
+            "composer-2.5": CursorACPModelParameters(
+                model: "composer-2.5",
+                context: nil,
+                effort: nil,
+                fast: false,
+                thinking: false),
+        ]
         let request = try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "gpt-5.6-sol-high",
             port: 32125,
             bridgeToken: token,
-            models: ["gpt-5.6-sol-high", "composer-2.5", "composer-2.5"])
+            models: ["gpt-5.6-sol-high", "composer-2.5", "composer-2.5"],
+            modelParameters: modelParameters)
 
         XCTAssertEqual(request.schemaVersion, 1)
         XCTAssertEqual(request.models, ["gpt-5.6-sol-high", "composer-2.5"])
+        XCTAssertEqual(request.modelParameters, modelParameters)
         let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let encodedParameters = try XCTUnwrap(object["modelParameters"] as? [String: Any])
+        XCTAssertEqual(Set(encodedParameters.keys), Set(request.models))
+        let composer = try XCTUnwrap(encodedParameters["composer-2.5"] as? [String: Any])
+        XCTAssertNil(composer["context"])
+        XCTAssertNil(composer["effort"])
         let decoded = try JSONDecoder().decode(CursorRemoteProvisioningRequest.self, from: data)
         XCTAssertEqual(decoded, request)
     }
@@ -28,13 +50,37 @@ final class CursorRemoteProvisioningTests: XCTestCase {
             model: "composer-2.5",
             port: 32125,
             bridgeToken: token,
-            models: ["composer-2.5", "모델-1"]))
+            models: ["composer-2.5", "모델-1"],
+            modelParameters: parameters(for: ["composer-2.5", "모델-1"])))
         XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "composer-2.5",
             port: 32125,
             bridgeToken: token,
-            models: ["gpt-5.6-sol-high"]))
+            models: ["gpt-5.6-sol-high"],
+            modelParameters: parameters(for: ["gpt-5.6-sol-high"])))
+
+        XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
+            apiKey: apiKey,
+            model: "composer-2.5",
+            port: 32125,
+            bridgeToken: token,
+            models: ["composer-2.5"],
+            modelParameters: parameters(for: ["composer-2.5", "extra-model"])))
+        XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
+            apiKey: apiKey,
+            model: "composer-2.5",
+            port: 32125,
+            bridgeToken: token,
+            models: ["composer-2.5"],
+            modelParameters: [
+                "composer-2.5": CursorACPModelParameters(
+                    model: "composer-2.5",
+                    context: "2m",
+                    effort: .default,
+                    fast: false,
+                    thinking: false),
+            ]))
     }
 
     func testProvisioningSummaryParserAcceptsOnlyExactSafeSummary() throws {
@@ -269,14 +315,21 @@ final class CursorRemoteProvisioningTests: XCTestCase {
             executable: installed,
             trusted: trusted,
             support: support)
+        let largeRequest = try request(model: "selected-model", models: models)
+        let encoded = try JSONEncoder().encode(largeRequest)
+        XCTAssertGreaterThan(encoded.count, 128 * 1024)
+        XCTAssertLessThanOrEqual(
+            encoded.count,
+            CursorRemoteProvisioningRequest.maximumEncodedBytes)
 
         do {
             _ = try await service.provisionCursor(
                 deviceID: "build-server",
-                request: try request(model: "selected-model", models: models))
+                request: largeRequest)
             XCTFail("early-exit helper unexpectedly succeeded")
         } catch {
             XCTAssertFalse(error.localizedDescription.contains("cursor_"))
+            XCTAssertFalse(error.localizedDescription.contains("설정이 너무 큽니다"))
         }
     }
 
@@ -403,7 +456,22 @@ final class CursorRemoteProvisioningTests: XCTestCase {
             model: model,
             port: 32125,
             bridgeToken: String(repeating: "b", count: 64),
-            models: models)
+            models: models,
+            modelParameters: parameters(for: models))
+    }
+
+    private func parameters(for models: [String]) -> [String: CursorACPModelParameters] {
+        Dictionary(uniqueKeysWithValues: Set(models).map { slug in
+            (
+                slug,
+                CursorACPModelParameters(
+                    model: slug,
+                    context: nil,
+                    effort: nil,
+                    fast: false,
+                    thinking: false)
+            )
+        })
     }
 
     private func makeTemporaryDirectory(named name: String) throws -> URL {

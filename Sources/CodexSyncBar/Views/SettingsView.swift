@@ -528,7 +528,7 @@ struct SettingsView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 74, alignment: .leading)
                         if model.cursorModelCatalog.families.isEmpty {
-                            TextField("auto 또는 agent --list-models의 slug", text: $cursorModelDraft)
+                            TextField("auto 또는 cursor-agent --list-models의 slug", text: $cursorModelDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .accessibilityIdentifier("cursor-model-field")
                         } else {
@@ -630,7 +630,7 @@ struct SettingsView: View {
                             .foregroundStyle(AppTheme.yellow)
                             .textSelection(.enabled)
                     }
-                    Text("현재 Cursor 계정의 `agent --list-models` 결과를 사용합니다. OpenAI GPT와 OpenAI Codex는 별도 그룹이며, Reasoning·Thinking·Fast 조합에 대응하는 실제 slug만 적용됩니다. Codex 선택기에도 `Cursor · GPT`와 `Cursor · Codex` 접두어로 구분됩니다.")
+                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. OpenAI GPT와 OpenAI Codex는 별도 그룹이며, Context·Reasoning·Thinking·Fast 조합에 대응하는 실제 slug만 적용됩니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다. Codex 선택기에도 `Cursor · GPT`와 `Cursor · Codex` 접두어로 구분됩니다.")
                         .font(.system(size: 9))
                         .foregroundStyle(AppTheme.muted)
                 }

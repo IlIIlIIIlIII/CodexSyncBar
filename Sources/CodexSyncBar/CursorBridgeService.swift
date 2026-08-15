@@ -211,14 +211,14 @@ final class CursorBridgeService {
             "--workspace", bridgeWorkspaceURL.path,
             "--parent-pid", String(getpid()),
         ]
-        var environment = ProcessInfo.processInfo.environment
-        environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"] = preferences.bridgeToken
+        let environment: [String: String]
         do {
-            environment["SYNCBAR_CURSOR_MODELS_JSON"] = String(
-                decoding: try JSONEncoder().encode(modelCatalog.variants.map(\.slug)),
-                as: UTF8.self)
+            environment = try Self.sidecarEnvironment(
+                inheriting: ProcessInfo.processInfo.environment,
+                bridgeToken: preferences.bridgeToken,
+                modelCatalog: modelCatalog)
         } catch {
-            status = .failed("Cursor 모델 허용 목록을 만들지 못했습니다: \(error.localizedDescription)")
+            status = .failed("Cursor 모델 설정을 만들지 못했습니다: \(error.localizedDescription)")
             return status
         }
         child.environment = environment
@@ -306,6 +306,21 @@ final class CursorBridgeService {
         activePreferences = nil
         if child.isRunning { child.terminate() }
         status = .stopped
+    }
+
+    static func sidecarEnvironment(
+        inheriting base: [String: String],
+        bridgeToken: String,
+        modelCatalog: CursorModelCatalog) throws -> [String: String]
+    {
+        var environment = base
+        environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"] = bridgeToken
+        environment["SYNCBAR_CURSOR_MODELS_JSON"] = String(
+            decoding: try JSONEncoder().encode(modelCatalog.variants.map(\.slug)),
+            as: UTF8.self)
+        environment["SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON"] =
+            try modelCatalog.acpModelParametersJSON()
+        return environment
     }
 
     private var bridgeWorkspaceURL: URL {

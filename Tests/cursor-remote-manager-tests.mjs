@@ -22,6 +22,7 @@ import { pathToFileURL } from "node:url";
 import {
   MARKER_BEGIN,
   MARKER_END,
+  MAX_PROVISION_BYTES,
   RemoteManagerError,
   bridgeHealth,
   deprovision,
@@ -37,6 +38,10 @@ import {
 const managerPath = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "../Support/cursor-remote-manager.mjs",
+);
+const gptSwitchPath = path.resolve(
+  path.dirname(new URL(import.meta.url).pathname),
+  "../Support/gpt-switch",
 );
 const productionBridgePath = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -121,6 +126,19 @@ async function makeFixture(options = {}) {
   const apiKey = `api_${randomBytes(32).toString("hex")}`;
   const bridgeToken = randomBytes(32).toString("hex");
   const models = ["composer-2.5", "gpt-5.6-sol-high-fast"];
+  const modelParameters = {
+    "composer-2.5": {
+      model: "composer-2.5",
+      fast: false,
+      thinking: false,
+    },
+    "gpt-5.6-sol-high-fast": {
+      model: "gpt-5.6-sol",
+      effort: "high",
+      fast: true,
+      thinking: false,
+    },
+  };
   const port = options.port ?? await allocateLoopbackPort();
   const original = options.original ?? [
     "# retain this comment",
@@ -194,7 +212,9 @@ import path from 'node:path';
 const args = process.argv.slice(2);
 const bridgeToken = process.env.SYNCBAR_CURSOR_BRIDGE_TOKEN ?? '';
 const apiKey = process.env.CURSOR_API_KEY ?? '';
+const modelParameters = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON ?? 'null');
 if (!bridgeToken || !apiKey || args.some((value) => value.includes(bridgeToken) || value.includes(apiKey))) process.exit(81);
+if (!modelParameters || typeof modelParameters !== 'object') process.exit(85);
 if (!process.env.HOME?.endsWith('/cursor-remote-xdg/home')) process.exit(82);
 if (process.env.AGENT_CLI_CREDENTIAL_STORE !== 'file') process.exit(83);
 const value = (name) => args[args.indexOf(name) + 1];
@@ -206,7 +226,7 @@ const secretFingerprint = createHash('sha256').update(apiKey).digest('hex');
 const generation = existsSync(launchLog)
   ? readFileSync(launchLog, 'utf8').trim().split('\\n').filter(Boolean).length + 1
   : 1;
-appendFileSync(launchLog, JSON.stringify({generation, pid:process.pid, model, secretFingerprint}) + '\\n', {mode:0o600});
+appendFileSync(launchLog, JSON.stringify({generation, pid:process.pid, model, modelParameters, secretFingerprint}) + '\\n', {mode:0o600});
 if (model === 'gpt-5.6-sol-high-fast' && existsSync(path.join(realHome, 'fail-new-bridge'))) process.exit(84);
 const server = http.createServer((request, response) => {
   if (request.url !== '/healthz' || request.headers['x-syncbar-bridge-token'] !== bridgeToken) {
@@ -247,9 +267,10 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)));
     port,
     bridgeToken,
     models,
+    modelParameters,
   };
   return {
-    home, agentPath, bridgePath, apiKey, bridgeToken, models, port, original,
+    home, agentPath, bridgePath, apiKey, bridgeToken, models, modelParameters, port, original,
     env, input, statusHold, statusEntered, bridgeLaunchLog,
   };
 }
@@ -450,6 +471,7 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
     model: fixture.input.model,
     port: fixture.port,
     models: fixture.models,
+    modelParameters: fixture.modelParameters,
     agentPath: await realpath(fixture.agentPath),
   });
   assert.equal((await stat(paths.runtime)).mode & 0o777, 0o600);
@@ -457,6 +479,7 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
   assert.equal((await stat(paths.config)).mode & 0o777, 0o600);
   assert.equal(runtime.apiKey, fixture.apiKey);
   assert.equal(runtime.bridgeToken, fixture.bridgeToken);
+  assert.deepEqual(runtime.modelParameters, fixture.modelParameters);
   assert.match(runtime.cursorHome, /cursor-remote-xdg\/home$/);
   assert.match(runtime.xdgConfig, /cursor-remote-xdg\/config$/);
   assert.equal((await stat(paths.cursorHome)).mode & 0o777, 0o700);
@@ -1028,6 +1051,9 @@ test("provision input is exact and API keys reject whitespace and control charac
     port: 32125,
     bridgeToken: "b".repeat(64),
     models: ["composer-2.5"],
+    modelParameters: {
+      "composer-2.5": { model: "composer-2.5", fast: false, thinking: false },
+    },
   };
   assert.deepEqual(validateProvisionInput(base), base);
   for (const value of [
@@ -1044,6 +1070,102 @@ test("provision input is exact and API keys reject whitespace and control charac
         ["invalid_input", "invalid_secret"].includes(error.code),
     );
   }
+
+  for (const modelParameters of [
+    {},
+    { ...base.modelParameters, unknown: { model: "unknown", fast: false, thinking: false } },
+    { "composer-2.5": { model: "composer-2.5", fast: false } },
+    { "composer-2.5": { model: "composer-2.5", fast: false, thinking: false, unknown: true } },
+    { "composer-2.5": { model: "composer-2.5", context: "auto", fast: false, thinking: false } },
+    { "composer-2.5": { model: "composer-2.5", effort: "default", fast: false, thinking: false } },
+    { "composer-2.5": { model: "composer-2.5", fast: 0, thinking: false } },
+  ]) {
+    assert.throws(
+      () => validateProvisionInput({ ...base, modelParameters }),
+      (error) => error instanceof RemoteManagerError && error.code === "invalid_model_parameters",
+    );
+  }
+});
+
+test("the maximum model catalog remains inside the bounded provision payload", () => {
+  const models = Array.from({ length: 512 }, (_, index) =>
+    `model-${String(index).padStart(3, "0")}-${"x".repeat(118)}`);
+  const modelParameters = Object.fromEntries(models.map((model) => [
+    model,
+    { model, context: "1m", effort: "xhigh", fast: true, thinking: true },
+  ]));
+  const input = {
+    schemaVersion: 1,
+    apiKey: "a".repeat(1024),
+    model: models[0],
+    port: 65535,
+    bridgeToken: "b".repeat(64),
+    models,
+    modelParameters,
+  };
+  const encoded = Buffer.from(JSON.stringify(input));
+  assert.ok(encoded.length > 128 * 1024);
+  assert.ok(encoded.length <= MAX_PROVISION_BYTES);
+  assert.deepEqual(validateProvisionInput(input), input);
+});
+
+test("the provision CLI enforces the exact serialized input boundary", async () => {
+  const fixture = await makeFixture();
+  const atLimit = `{}${" ".repeat(MAX_PROVISION_BYTES - 2)}`;
+  const accepted = await spawnManager("provision", fixture, atLimit);
+  assert.equal(accepted.code, 1);
+  assert.match(accepted.stderr, /unsupported provision schemaVersion/);
+  assert.doesNotMatch(accepted.stderr, /too large/);
+
+  const oversized = `${atLimit} `;
+  const rejected = await spawnManager("provision", fixture, oversized);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.stderr, /provision input is too large/);
+});
+
+test("gpt-switch enforces the same model metadata and payload contract", async () => {
+  const source = await readFile(gptSwitchPath, "utf8");
+  assert.match(source, /head -c 524289/);
+  assert.match(source, /\[ "\$bytes" -le 524288 \]/);
+  const marker = `printf '%s' "$payload" | /usr/bin/jq -e '\n`;
+  const start = source.indexOf(marker) + marker.length;
+  const end = source.indexOf("\n  ' >/dev/null", start);
+  assert.ok(start >= marker.length && end > start, "Cursor jq validator must remain extractable");
+  const filter = source.slice(start, end);
+  const valid = {
+    schemaVersion: 1,
+    apiKey: "a".repeat(16),
+    model: "composer-2.5",
+    port: 32125,
+    bridgeToken: "b".repeat(64),
+    models: ["composer-2.5"],
+    modelParameters: {
+      "composer-2.5": {
+        model: "composer-2.5",
+        context: "1m",
+        effort: "high",
+        fast: false,
+        thinking: true,
+      },
+    },
+  };
+  const check = (value) => spawnCaptured("/usr/bin/jq", ["-e", filter], {
+    stdin: JSON.stringify(value),
+  });
+  assert.equal((await check(valid)).code, 0);
+  assert.notEqual((await check({ ...valid, modelParameters: {} })).code, 0);
+  assert.notEqual((await check({
+    ...valid,
+    modelParameters: {
+      "composer-2.5": { ...valid.modelParameters["composer-2.5"], context: "2m" },
+    },
+  })).code, 0);
+  assert.notEqual((await check({
+    ...valid,
+    modelParameters: {
+      "composer-2.5": { ...valid.modelParameters["composer-2.5"], unknown: true },
+    },
+  })).code, 0);
 });
 
 test("show and provision CLI output never disclose stored secrets", async () => {
@@ -1056,6 +1178,7 @@ test("show and provision CLI output never disclose stored secrets", async () => 
   assert.doesNotMatch(provisionResult.stderr, new RegExp(fixture.bridgeToken));
   const launches = await bridgeLaunches(fixture);
   assert.equal(launches.length, 1);
+  assert.deepEqual(launches[0].modelParameters, fixture.modelParameters);
   assert.doesNotThrow(() => process.kill(launches[0].pid, 0));
 
   const showResult = await spawnManager("show", fixture);
@@ -1064,12 +1187,14 @@ test("show and provision CLI output never disclose stored secrets", async () => 
   assert.equal(status.provisioned, true);
   assert.equal(status.healthy, true);
   assert.ok(Number.isSafeInteger(status.pid));
+  assert.deepEqual(status.modelParameters, fixture.modelParameters);
   detachedPIDs.add(status.pid);
   assert.doesNotMatch(showResult.stdout, new RegExp(fixture.apiKey));
   assert.doesNotMatch(showResult.stdout, new RegExp(fixture.bridgeToken));
 
   const directStatus = await show({ home: fixture.home, env: fixture.env });
   assert.equal(directStatus.model, fixture.input.model);
+  assert.deepEqual(directStatus.modelParameters, fixture.modelParameters);
   assert.equal(Object.hasOwn(directStatus, "apiKey"), false);
   assert.equal(Object.hasOwn(directStatus, "bridgeToken"), false);
 });
@@ -1105,6 +1230,28 @@ test("readRuntime rejects widened runtime permissions", async () => {
     readRuntime({ home: fixture.home, env: fixture.env }),
     (error) => error instanceof RemoteManagerError && error.code === "unsafe_permissions",
   );
+});
+
+test("readRuntime migrates legacy model slugs without guessing context", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  const legacy = JSON.parse(await readFile(paths.runtime, "utf8"));
+  delete legacy.modelParameters;
+  await writeFile(paths.runtime, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+  await chmod(paths.runtime, 0o600);
+
+  const migrated = await readRuntime({ home: fixture.home, env: fixture.env });
+  assert.deepEqual(migrated.modelParameters, {
+    "composer-2.5": { model: "composer-2.5", fast: false, thinking: false },
+    "gpt-5.6-sol-high-fast": {
+      model: "gpt-5.6-sol",
+      effort: "high",
+      fast: true,
+      thinking: false,
+    },
+  });
+  assert.equal(Object.hasOwn(migrated.modelParameters["gpt-5.6-sol-high-fast"], "context"), false);
 });
 
 test("provision can use an injected installer URL without putting the API key in installer argv or env", async () => {

@@ -77,9 +77,28 @@ struct CursorModelVariant: Codable, Hashable, Identifiable, Sendable {
     let slug: String
     let displayName: String
     let baseSlug: String
+    let context: String?
     let effort: CursorModelEffort
     let fast: Bool
     let thinking: Bool
+
+    init(
+        slug: String,
+        displayName: String,
+        baseSlug: String,
+        context: String? = nil,
+        effort: CursorModelEffort,
+        fast: Bool,
+        thinking: Bool)
+    {
+        self.slug = slug
+        self.displayName = displayName
+        self.baseSlug = baseSlug
+        self.context = context
+        self.effort = effort
+        self.fast = fast
+        self.thinking = thinking
+    }
 
     var id: String { slug }
 
@@ -90,6 +109,14 @@ struct CursorModelVariant: Codable, Hashable, Identifiable, Sendable {
             fast: fast,
             thinking: thinking)
     }
+}
+
+struct CursorACPModelParameters: Codable, Equatable, Sendable {
+    let model: String
+    let context: String?
+    let effort: CursorModelEffort?
+    let fast: Bool
+    let thinking: Bool
 }
 
 struct CursorModelFamily: Codable, Equatable, Identifiable, Sendable {
@@ -225,6 +252,41 @@ struct CursorModelCatalog: Equatable, Sendable {
         variants.first { $0.slug == slug }?.selection
     }
 
+    var acpModelParametersBySlug: [String: CursorACPModelParameters] {
+        Dictionary(uniqueKeysWithValues: variants.map { variant in
+            (
+                variant.slug,
+                CursorACPModelParameters(
+                    model: Self.acpModelID(forBaseSlug: variant.baseSlug),
+                    context: variant.context,
+                    effort: variant.effort == .default ? nil : variant.effort,
+                    fast: variant.fast,
+                    thinking: variant.thinking))
+        })
+    }
+
+    static func acpModelID(forBaseSlug baseSlug: String) -> String {
+        switch baseSlug {
+        case "auto": "default"
+        case "cursor-grok-4.6": "grok-4.6"
+        case "cursor-grok-4.5": "grok-4.5"
+        case "claude-4.6-sonnet": "claude-sonnet-4-6"
+        case "claude-4.6-opus": "claude-opus-4-6"
+        case "claude-4.5-opus": "claude-opus-4-5"
+        case "claude-4.5-sonnet": "claude-sonnet-4-5"
+        case "claude-4-sonnet": "claude-sonnet-4"
+        default: baseSlug
+        }
+    }
+
+    func acpModelParametersJSON() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(
+            decoding: try encoder.encode(acpModelParametersBySlug),
+            as: UTF8.self)
+    }
+
     func resolve(_ selection: CursorModelSelection) -> String? {
         family(baseSlug: selection.baseSlug)?.resolve(selection)
     }
@@ -263,9 +325,17 @@ struct CursorModelCatalog: Equatable, Sendable {
             slug: slug,
             displayName: displayName,
             baseSlug: components.baseSlug,
+            context: context(displayName: displayName),
             effort: components.effort,
             fast: components.fast,
             thinking: components.thinking)
+    }
+
+    private static func context(displayName: String) -> String? {
+        let hasOneMillionContext = displayName
+            .split(whereSeparator: \.isWhitespace)
+            .contains { $0.lowercased() == "1m" }
+        return hasOneMillionContext ? "1m" : nil
     }
 
     private static func decompose(slug: String) -> (

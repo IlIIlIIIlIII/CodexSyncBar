@@ -12,16 +12,38 @@ const SCHEMA_VERSION = 1;
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 32125;
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-const MAX_BODY_BYTES = 8 * 1024 * 1024;
+const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 7 * 1024 * 1024;
+const MAX_IMAGE_COUNT = 16;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES = 24 * 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS = 4;
 const MAX_CURSOR_MODEL_COUNT = 512;
 const MAX_CURSOR_MODELS_JSON_BYTES = 128 * 1024;
+const MAX_CURSOR_MODEL_PARAMETERS_JSON_BYTES = 512 * 1024;
+const MAX_ACP_JSON_LINE_BYTES = 1024 * 1024;
+const MAX_ACP_OUTPUT_TEXT_BYTES = 8 * 1024 * 1024;
 const CURSOR_MODEL_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const BRIDGE_START = "<SYNCBAR_BACKEND_REQUEST>";
 const BRIDGE_END = "</SYNCBAR_BACKEND_REQUEST>";
 const TOOL_START = "<SYNCBAR_TOOL_CALL>";
 const TOOL_END = "</SYNCBAR_TOOL_CALL>";
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+const UNSUPPORTED_CONTENT_MODALITY_TYPES = new Set([
+  "audio",
+  "embedded_resource",
+  "input_audio",
+  "input_video",
+  "output_audio",
+  "resource",
+  "resource_link",
+  "video",
+]);
 
 const DENY_PATTERNS = [
   "Shell(*)",
@@ -132,6 +154,91 @@ export function parseCursorModelAllowlist(rawValue, configuredModel) {
   return models;
 }
 
+export function parseCursorModelParameters(rawValue, allowedModels) {
+  if (rawValue === undefined || rawValue === null || rawValue === "") return new Map();
+  if (typeof rawValue !== "string" ||
+      Buffer.byteLength(rawValue, "utf8") > MAX_CURSOR_MODEL_PARAMETERS_JSON_BYTES) {
+    throw new BridgeError(
+      "Cursor model parameters are too large",
+      500,
+      "invalid_model_parameters",
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    throw new BridgeError(
+      "Cursor model parameters must be valid JSON",
+      500,
+      "invalid_model_parameters",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new BridgeError(
+      "Cursor model parameters must be a JSON object",
+      500,
+      "invalid_model_parameters",
+    );
+  }
+
+  const entries = Object.entries(parsed);
+  if (entries.length === 0 || entries.length > MAX_CURSOR_MODEL_COUNT) {
+    throw new BridgeError(
+      "Cursor model parameters must be a non-empty bounded object",
+      500,
+      "invalid_model_parameters",
+    );
+  }
+  const allowlist = allowedModels instanceof Set
+    ? allowedModels
+    : new Set(Array.isArray(allowedModels) ? allowedModels : []);
+  const allowedKeys = new Set(["model", "context", "effort", "fast", "thinking"]);
+  const result = new Map();
+  for (const [rawSlug, value] of entries) {
+    if (typeof rawSlug !== "string" || !CURSOR_MODEL_SLUG_PATTERN.test(rawSlug)) {
+      throw new BridgeError(
+        "Cursor model parameters contain an invalid flat model slug",
+        500,
+        "invalid_model_parameters",
+      );
+    }
+    const slug = rawSlug;
+    if (!allowlist.has(slug)) {
+      throw new BridgeError(
+        "Cursor model parameters contain a model outside the configured allowlist",
+        500,
+        "invalid_model_parameters",
+      );
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        Object.keys(value).some((key) => !allowedKeys.has(key)) ||
+        !Object.hasOwn(value, "model") || !Object.hasOwn(value, "fast") ||
+        !Object.hasOwn(value, "thinking") ||
+        typeof value.model !== "string" || !CURSOR_MODEL_SLUG_PATTERN.test(value.model) ||
+        typeof value.fast !== "boolean" || typeof value.thinking !== "boolean" ||
+        (Object.hasOwn(value, "context") &&
+          (typeof value.context !== "string" || !CURSOR_MODEL_SLUG_PATTERN.test(value.context))) ||
+        (Object.hasOwn(value, "effort") &&
+          (typeof value.effort !== "string" || !CURSOR_MODEL_SLUG_PATTERN.test(value.effort)))) {
+      throw new BridgeError(
+        `Cursor model parameters are invalid for ${slug}`,
+        500,
+        "invalid_model_parameters",
+      );
+    }
+    result.set(slug, Object.freeze({
+      model: value.model,
+      ...(Object.hasOwn(value, "context") ? { context: value.context } : {}),
+      ...(Object.hasOwn(value, "effort") ? { effort: value.effort } : {}),
+      fast: value.fast,
+      thinking: value.thinking,
+    }));
+  }
+  return result;
+}
+
 function configuredCursorModels(config) {
   if (config.allowedModels === undefined) {
     return parseCursorModelAllowlist(undefined, config.model);
@@ -140,6 +247,14 @@ function configuredCursorModels(config) {
     ? [...config.allowedModels]
     : config.allowedModels;
   return parseCursorModelAllowlist(JSON.stringify(values), config.model);
+}
+
+function configuredCursorModelParameters(config, allowedModels) {
+  if (config.modelParameters === undefined || config.modelParameters === null) return new Map();
+  const values = config.modelParameters instanceof Map
+    ? Object.fromEntries(config.modelParameters)
+    : config.modelParameters;
+  return parseCursorModelParameters(JSON.stringify(values), allowedModels);
 }
 
 function stableValue(value) {
@@ -257,27 +372,118 @@ function sameToolMatch(first, second) {
   return first?.tool === second?.tool && first?.namespace === second?.namespace;
 }
 
-function rejectUnsupportedInput(input) {
+function parsedImageDataURL(value) {
+  if (typeof value !== "string" || !value.startsWith("data:")) {
+    throw new BridgeError(
+      "Cursor image inputs must use an inline data URL",
+      400,
+      "unsupported_image_source",
+    );
+  }
+  const match = value.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/i);
+  if (!match || match[2].length === 0 || match[2].length % 4 !== 0) {
+    throw new BridgeError("Image input contains invalid base64 data", 400, "invalid_image_input");
+  }
+  const mimeType = match[1].toLowerCase();
+  if (!SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
+    throw new BridgeError(
+      `Unsupported image MIME type: ${mimeType}`,
+      400,
+      "unsupported_image_type",
+    );
+  }
+  const data = match[2];
+  const decoded = Buffer.from(data, "base64");
+  if (
+    decoded.length === 0 ||
+    decoded.length > MAX_IMAGE_BYTES ||
+    decoded.toString("base64").replace(/=+$/, "") !== data.replace(/=+$/, "")
+  ) {
+    throw new BridgeError(
+      decoded.length > MAX_IMAGE_BYTES
+        ? "Image input exceeds the per-image size limit"
+        : "Image input contains invalid base64 data",
+      decoded.length > MAX_IMAGE_BYTES ? 413 : 400,
+      decoded.length > MAX_IMAGE_BYTES ? "image_too_large" : "invalid_image_input",
+    );
+  }
+  const hasMagic = (
+    (mimeType === "image/png" && decoded.length >= 8 &&
+      decoded.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+    (mimeType === "image/jpeg" && decoded.length >= 3 &&
+      decoded[0] === 0xff && decoded[1] === 0xd8 && decoded[2] === 0xff) ||
+    (mimeType === "image/gif" && decoded.length >= 6 &&
+      (decoded.subarray(0, 6).toString("ascii") === "GIF87a" ||
+        decoded.subarray(0, 6).toString("ascii") === "GIF89a")) ||
+    (mimeType === "image/webp" && decoded.length >= 12 &&
+      decoded.subarray(0, 4).toString("ascii") === "RIFF" &&
+      decoded.subarray(8, 12).toString("ascii") === "WEBP")
+  );
+  if (!hasMagic) {
+    throw new BridgeError(
+      `Image data does not match its declared MIME type: ${mimeType}`,
+      400,
+      "invalid_image_input",
+    );
+  }
+  return { data, mimeType, byteLength: decoded.length };
+}
+
+function normalizedRichInput(input) {
+  const images = [];
+  const imageIndexByDataURL = new Map();
+  let totalImageBytes = 0;
+
   const visit = (value) => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    if (!value || typeof value !== "object") return;
-    if (
-      value.type === "input_image" ||
-      value.type === "input_file" ||
-      value.type === "computer_screenshot"
-    ) {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== "object") return value;
+    if (value.type === "input_file") {
       throw new BridgeError(
-        `Unsupported input type: ${value.type}`,
+        "Cursor ACP does not advertise embedded file input support",
         400,
         "unsupported_input_type",
       );
     }
-    for (const child of Object.values(value)) visit(child);
+    if (UNSUPPORTED_CONTENT_MODALITY_TYPES.has(value.type)) {
+      throw new BridgeError(
+        `Cursor ACP does not support ${value.type} content`,
+        400,
+        "unsupported_input_type",
+      );
+    }
+    if (value.type === "input_image" || value.type === "computer_screenshot") {
+      const parsed = parsedImageDataURL(value.image_url);
+      let index = imageIndexByDataURL.get(value.image_url);
+      if (index === undefined) {
+        if (images.length >= MAX_IMAGE_COUNT) {
+          throw new BridgeError("Too many image inputs", 413, "too_many_images");
+        }
+        totalImageBytes += parsed.byteLength;
+        if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+          throw new BridgeError("Combined image inputs are too large", 413, "images_too_large");
+        }
+        index = images.length;
+        imageIndexByDataURL.set(value.image_url, index);
+        images.push({
+          type: "image",
+          data: parsed.data,
+          mimeType: parsed.mimeType,
+        });
+      }
+      const marker = `attachment://image-${index + 1}`;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, child]) => [
+          key,
+          key === "image_url" ? marker : visit(child),
+        ]),
+      );
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, visit(child)]),
+    );
   };
-  visit(input);
+
+  return { input: visit(input), images };
 }
 
 function conversationInput(input) {
@@ -285,11 +491,11 @@ function conversationInput(input) {
   return input.filter((item) => item?.type !== "additional_tools");
 }
 
-export function buildCursorPrompt(request) {
+export function prepareCursorBackendRequest(request) {
   if (!request || typeof request !== "object" || request.input === undefined) {
     throw new BridgeError("input is required", 400, "invalid_request");
   }
-  rejectUnsupportedInput(request.input);
+  const normalized = normalizedRichInput(request.input);
   const allTools = requestTools(request);
   const tools = callableTools(request);
   const toolChoice = request.tool_choice ?? "auto";
@@ -297,7 +503,14 @@ export function buildCursorPrompt(request) {
   const mayCallTool = tools.length > 0 && choice.mode !== "none";
   const payload = {
     instructions: request.instructions ?? null,
-    conversation: conversationInput(request.input),
+    conversation: conversationInput(normalized.input),
+    client_metadata: request.client_metadata ?? null,
+    prompt_cache_key: request.prompt_cache_key ?? null,
+    image_attachments: normalized.images.map((image, index) => ({
+      id: `image-${index + 1}`,
+      mime_type: image.mimeType,
+      source: `attachment://image-${index + 1}`,
+    })),
     available_tools: tools,
     unavailable_tool_types: [...new Set(
       allTools
@@ -316,13 +529,25 @@ export function buildCursorPrompt(request) {
       ? `When an available external tool is required, return only ${TOOL_START}{\"name\":\"exact tool name\",\"arguments\":{}}${TOOL_END}. For a tool nested in a namespace, also include \"namespace\" with the exact namespace name. For a custom tool, use \"input\" instead of \"arguments\". Request exactly one tool per response.`
       : "No external tool is available for this response. Return the final answer as plain text.",
     "For a normal answer, return plain text without protocol tags.",
+    "Preserve host-defined inline rendering directives and artifact paths exactly in the final answer.",
     "The backend request is canonical JSON with deterministic key ordering.",
   ].join("\n");
   const prompt = `${contract}\n\n${BRIDGE_START}\n${stableJSONStringify(payload)}\n${BRIDGE_END}`;
   if (Buffer.byteLength(prompt, "utf8") > MAX_PROMPT_BYTES) {
     throw new BridgeError("Request is too large for the Cursor CLI bridge", 413, "request_too_large");
   }
-  return prompt;
+  return {
+    prompt,
+    acpPrompt: [
+      { type: "text", text: prompt },
+      ...normalized.images,
+    ],
+    imageCount: normalized.images.length,
+  };
+}
+
+export function buildCursorPrompt(request) {
+  return prepareCursorBackendRequest(request).prompt;
 }
 
 function toolByName(request, name, namespace) {
@@ -772,6 +997,620 @@ export function runCursorAgent({
   });
 }
 
+function acpMessageText(content) {
+  if (!content || typeof content !== "object") return "";
+  return content.type === "text" && typeof content.text === "string" ? content.text : "";
+}
+
+function acpModelParameters(slug) {
+  if (slug === "auto") {
+    return { model: "default", effort: null, fast: null, thinking: null, context: null };
+  }
+  let base = slug;
+  let fast = false;
+  let thinking = false;
+  let effort = null;
+  const effortSuffixes = [
+    ["-extra-high", "xhigh"],
+    ["-minimal", "minimal"],
+    ["-default", null],
+    ["-medium", "medium"],
+    ["-xhigh", "xhigh"],
+    ["-none", "none"],
+    ["-high", "high"],
+    ["-low", "low"],
+    ["-max", "max"],
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    if (!fast && base.endsWith("-fast")) {
+      base = base.slice(0, -5);
+      fast = true;
+      changed = true;
+    }
+    if (!thinking && base.endsWith("-thinking")) {
+      base = base.slice(0, -9);
+      thinking = true;
+      changed = true;
+    }
+    if (effort === null) {
+      for (const [suffix, value] of effortSuffixes) {
+        if (base.endsWith(suffix)) {
+          base = base.slice(0, -suffix.length);
+          effort = value ?? "default";
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  const aliases = new Map([
+    ["cursor-grok-4.6", "grok-4.6"],
+    ["cursor-grok-4.5", "grok-4.5"],
+    ["claude-4.6-sonnet", "claude-sonnet-4-6"],
+    ["claude-4.6-opus", "claude-opus-4-6"],
+    ["claude-4.5-opus", "claude-opus-4-5"],
+    ["claude-4.5-sonnet", "claude-sonnet-4-5"],
+    ["claude-4-sonnet", "claude-sonnet-4"],
+  ]);
+  const model = aliases.get(base) ?? base;
+  const alwaysOneMillion = new Set([
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-fable-5",
+    "claude-sonnet-5",
+    "claude-opus-4-7",
+  ]);
+  const oneMillionUnlessFast = new Set([
+    "gpt-5.6-sol",
+    "gpt-5.5",
+    "gpt-5.6-terra",
+    "gpt-5.4",
+    "gpt-5.6-luna",
+  ]);
+  const context = alwaysOneMillion.has(model) || (oneMillionUnlessFast.has(model) && !fast)
+    ? "1m"
+    : null;
+  return {
+    model,
+    effort: effort === "default" ? null : effort,
+    fast,
+    thinking,
+    context,
+  };
+}
+
+function explicitACPModelParameters(slug, value) {
+  if (value === undefined || value === null) return null;
+  let rawValue;
+  try {
+    rawValue = JSON.stringify({ [slug]: value });
+  } catch {
+    throw new BridgeError(
+      `Cursor model parameters are invalid for ${slug}`,
+      500,
+      "invalid_model_parameters",
+    );
+  }
+  return parseCursorModelParameters(rawValue, new Set([slug])).get(slug) ?? null;
+}
+
+function acpConfigOption(options, id) {
+  return Array.isArray(options) ? options.find((option) => option?.id === id) : null;
+}
+
+function acpConfigSupports(option, value) {
+  return Boolean(option && Array.isArray(option.options) &&
+    option.options.some((candidate) => candidate?.value === value));
+}
+
+export function runCursorACP({
+  agentPath,
+  workspace,
+  model,
+  modelParameters,
+  prompt,
+  timeoutMs,
+  signal,
+  env,
+  onSpawn,
+  onClose,
+}) {
+  return new Promise((resolve, reject) => {
+    if (!Array.isArray(prompt) || prompt.length < 2 || prompt[0]?.type !== "text") {
+      reject(new BridgeError("Cursor ACP prompt is invalid", 500, "invalid_acp_prompt"));
+      return;
+    }
+    let explicitParameters;
+    try {
+      explicitParameters = explicitACPModelParameters(model, modelParameters);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const args = [
+      "--workspace",
+      workspace,
+      "--trust",
+      "--sandbox",
+      "enabled",
+    ];
+    if (model && model !== "auto") args.push("--model", model);
+    args.push("acp");
+    const child = spawn(agentPath, args, {
+      cwd: workspace,
+      env,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    onSpawn?.(child);
+
+    let nextID = 1;
+    let stdoutBuffer = "";
+    let stderrBytes = 0;
+    let outputText = "";
+    let outputTextBytes = 0;
+    let sessionID = null;
+    let currentModeID = null;
+    let settled = false;
+    const pending = new Map();
+    const modeWaiters = new Set();
+    const metadata = {
+      protocol: "acp",
+      sessionID: null,
+      nativeToolCalls: 0,
+      nativeToolSubtype: null,
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+      child.stdout.removeAllListeners("data");
+      for (const waiter of pending.values()) {
+        waiter.reject(new BridgeError("Cursor ACP request ended before a response", 502, "agent_failed"));
+      }
+      pending.clear();
+      for (const waiter of modeWaiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(new BridgeError("Cursor ACP mode confirmation was interrupted", 502, "agent_failed"));
+      }
+      modeWaiters.clear();
+    };
+    const finishError = (error) => {
+      if (settled) return;
+      settled = true;
+      if (sessionID && child.stdin.writable) {
+        child.stdin.write(`${JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: { sessionId: sessionID },
+        })}\n`);
+      }
+      terminateChild(child);
+      cleanup();
+      reject(error);
+    };
+    const finishSuccess = () => {
+      if (settled) return;
+      settled = true;
+      terminateChild(child);
+      cleanup();
+      resolve({ text: outputText, metadata });
+    };
+    const abort = () => finishError(new BridgeError("Cursor request was cancelled", 499, "cancelled"));
+    const timeout = setTimeout(() => {
+      finishError(new BridgeError("Cursor CLI request timed out", 504, "timeout"));
+    }, timeoutMs);
+    timeout.unref();
+    signal?.addEventListener("abort", abort, { once: true });
+
+    const writeMessage = (message) => {
+      if (settled || !child.stdin.writable) {
+        throw new BridgeError("Cursor ACP input stream is unavailable", 502, "agent_failed");
+      }
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+    const sendRequest = (method, params) => new Promise((requestResolve, requestReject) => {
+      const id = nextID++;
+      pending.set(id, { resolve: requestResolve, reject: requestReject, method });
+      try {
+        writeMessage({ jsonrpc: "2.0", id, method, params });
+      } catch (error) {
+        pending.delete(id);
+        requestReject(error);
+      }
+    });
+    const waitForMode = (modeID) => {
+      if (currentModeID === modeID) return Promise.resolve();
+      return new Promise((modeResolve, modeReject) => {
+        const waiter = {
+          modeID,
+          resolve: modeResolve,
+          reject: modeReject,
+          timer: null,
+        };
+        waiter.timer = setTimeout(() => {
+          modeWaiters.delete(waiter);
+          modeReject(new BridgeError(
+            `Cursor ACP did not confirm ${modeID} mode`,
+            502,
+            "mode_mismatch",
+          ));
+        }, 1500);
+        waiter.timer.unref();
+        modeWaiters.add(waiter);
+      });
+    };
+
+    const handleServerRequest = (message) => {
+      const method = message.method;
+      if (method === "session/request_permission") {
+        if (message.id === undefined || message.params?.sessionId !== sessionID) {
+          finishError(new BridgeError(
+            "Cursor ACP returned an invalid permission request",
+            502,
+            "invalid_agent_stream",
+          ));
+          return;
+        }
+        metadata.nativeToolCalls += 1;
+        metadata.nativeToolSubtype = "permission_request";
+        if (child.stdin.writable) {
+          child.stdin.write(`${JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { outcome: { outcome: "cancelled" } },
+          })}\n`);
+        }
+        finishError(new BridgeError(
+          "Cursor ACP requested permission for a blocked native tool",
+          502,
+          "native_tool_blocked",
+        ));
+        return;
+      }
+      if (
+        method === "fs/read_text_file" ||
+        method === "fs/write_text_file" ||
+        method?.startsWith("terminal/") ||
+        method?.startsWith("cursor/") ||
+        method === "elicitation/create"
+      ) {
+        finishError(new BridgeError(
+          `Cursor ACP attempted a blocked client interaction (${method})`,
+          502,
+          "native_tool_blocked",
+        ));
+        return;
+      }
+      if (message.id !== undefined && child.stdin.writable) {
+        child.stdin.write(`${JSON.stringify({
+          jsonrpc: "2.0",
+          id: message.id,
+          error: { code: -32601, message: "Method not supported by this client" },
+        })}\n`);
+      }
+      finishError(new BridgeError(
+        `Cursor ACP returned an unsupported server request (${String(method)})`,
+        502,
+        "invalid_agent_stream",
+      ));
+    };
+
+    const handleMessage = (message) => {
+      if (!message || typeof message !== "object" || message.jsonrpc !== "2.0") {
+        finishError(new BridgeError("Cursor ACP returned invalid JSON-RPC", 502, "invalid_agent_stream"));
+        return;
+      }
+      const hasResult = Object.hasOwn(message, "result");
+      const hasError = Object.hasOwn(message, "error");
+      if (message.id !== undefined && (hasResult || hasError)) {
+        if (hasResult === hasError) {
+          finishError(new BridgeError(
+            "Cursor ACP returned an invalid JSON-RPC response",
+            502,
+            "invalid_agent_stream",
+          ));
+          return;
+        }
+        const waiter = pending.get(message.id);
+        if (!waiter) {
+          finishError(new BridgeError("Cursor ACP returned an unknown response id", 502, "invalid_agent_stream"));
+          return;
+        }
+        pending.delete(message.id);
+        if (message.error) {
+          waiter.reject(new BridgeError(
+            `Cursor ACP ${waiter.method} failed`,
+            502,
+            "agent_failed",
+          ));
+        } else {
+          waiter.resolve(message.result);
+        }
+        return;
+      }
+      if (message.method === "session/update") {
+        if (message.id !== undefined || !sessionID || message.params?.sessionId !== sessionID) {
+          finishError(new BridgeError(
+            "Cursor ACP returned an update for an unexpected session",
+            502,
+            "invalid_agent_stream",
+          ));
+          return;
+        }
+        const update = message.params?.update;
+        if (!update || typeof update.sessionUpdate !== "string") {
+          finishError(new BridgeError("Cursor ACP returned an invalid session update", 502, "invalid_agent_stream"));
+          return;
+        }
+        if (update.sessionUpdate === "agent_message_chunk") {
+          const text = acpMessageText(update.content);
+          if (!text && update.content?.type !== "text") {
+            finishError(new BridgeError(
+              `Cursor ACP returned unsupported assistant content (${String(update.content?.type)})`,
+              502,
+              "unsupported_agent_output",
+            ));
+            return;
+          }
+          outputTextBytes += Buffer.byteLength(text, "utf8");
+          if (outputTextBytes > MAX_ACP_OUTPUT_TEXT_BYTES) {
+            finishError(new BridgeError(
+              "Cursor ACP assistant output is too large",
+              502,
+              "agent_output_too_large",
+            ));
+            return;
+          }
+          outputText += text;
+        } else if (update.sessionUpdate === "current_mode_update") {
+          currentModeID = update.currentModeId ?? null;
+          for (const waiter of [...modeWaiters]) {
+            if (waiter.modeID !== currentModeID) continue;
+            clearTimeout(waiter.timer);
+            modeWaiters.delete(waiter);
+            waiter.resolve();
+          }
+        } else if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+          metadata.nativeToolCalls += 1;
+          metadata.nativeToolSubtype = update.kind ?? update.title ?? update.sessionUpdate;
+          finishError(new BridgeError(
+            `Cursor CLI attempted a blocked native tool (${metadata.nativeToolSubtype})`,
+            502,
+            "native_tool_blocked",
+          ));
+        }
+        return;
+      }
+      if (typeof message.method === "string") {
+        handleServerRequest(message);
+        return;
+      }
+      finishError(new BridgeError(
+        "Cursor ACP returned an unrecognized JSON-RPC message",
+        502,
+        "invalid_agent_stream",
+      ));
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      if (settled) return;
+      stdoutBuffer += chunk;
+      for (;;) {
+        const newline = stdoutBuffer.indexOf("\n");
+        if (newline < 0) break;
+        const line = stdoutBuffer.slice(0, newline);
+        stdoutBuffer = stdoutBuffer.slice(newline + 1);
+        if (!line.trim()) continue;
+        if (Buffer.byteLength(line, "utf8") > MAX_ACP_JSON_LINE_BYTES) {
+          finishError(new BridgeError(
+            "Cursor ACP returned an oversized JSON line",
+            502,
+            "invalid_agent_stream",
+          ));
+          return;
+        }
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          finishError(new BridgeError("Cursor ACP returned malformed JSON", 502, "invalid_agent_stream"));
+          return;
+        }
+        handleMessage(message);
+        if (settled) return;
+      }
+      if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_ACP_JSON_LINE_BYTES) {
+        finishError(new BridgeError(
+          "Cursor ACP returned an oversized unterminated JSON line",
+          502,
+          "invalid_agent_stream",
+        ));
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderrBytes += chunk.length;
+    });
+    child.stdin.on("error", () => {
+      // Startup and termination races are reported by the process handlers.
+    });
+    child.on("error", (error) => {
+      finishError(new BridgeError(
+        `Could not start Cursor CLI: ${error.code ?? "spawn_failed"}`,
+        503,
+        "agent_unavailable",
+      ));
+    });
+    child.on("close", (code, childSignal) => {
+      onClose?.(child);
+      if (settled) return;
+      finishError(new BridgeError(
+        `Cursor ACP exited before completing (code ${code ?? "null"}, signal ${childSignal ?? "none"}, stderr bytes ${stderrBytes})`,
+        502,
+        "agent_failed",
+      ));
+    });
+
+    (async () => {
+      try {
+        const initialized = await sendRequest("initialize", {
+          protocolVersion: 1,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+            _meta: { parameterizedModelPicker: true },
+          },
+          clientInfo: {
+            name: "codex-syncbar-cursor-bridge",
+            title: "Codex SyncBar Cursor Bridge",
+            version: String(SCHEMA_VERSION),
+          },
+        });
+        if (initialized?.agentCapabilities?.promptCapabilities?.image !== true) {
+          throw new BridgeError(
+            "Installed Cursor CLI does not advertise ACP image input support",
+            503,
+            "image_input_unavailable",
+          );
+        }
+        await sendRequest("authenticate", { methodId: "cursor_login" });
+        const session = await sendRequest("session/new", {
+          cwd: workspace,
+          mcpServers: [],
+        });
+        if (!session || typeof session.sessionId !== "string" || session.sessionId.length === 0) {
+          throw new BridgeError("Cursor ACP did not create a session", 502, "invalid_agent_stream");
+        }
+        sessionID = session.sessionId;
+        metadata.sessionID = sessionID;
+        const modes = session.modes;
+        currentModeID = modes?.currentModeId ?? null;
+        if (
+          !modes ||
+          !Array.isArray(modes.availableModes) ||
+          !modes.availableModes.some((mode) => mode?.id === "ask")
+        ) {
+          throw new BridgeError("Cursor ACP does not advertise ask mode", 503, "ask_mode_unavailable");
+        }
+        await sendRequest("session/set_mode", { sessionId: sessionID, modeId: "ask" });
+        await waitForMode("ask");
+
+        const requestedModel = explicitParameters ?? acpModelParameters(model);
+        const expectedConfigValues = new Map();
+        let configOptions = session.configOptions;
+        const setConfig = async (configID, value, required = true) => {
+          const option = acpConfigOption(configOptions, configID);
+          if (!option || !acpConfigSupports(option, value)) {
+            if (!required) return;
+            throw new BridgeError(
+              `Cursor ACP cannot select ${configID}=${value} for ${model}`,
+              502,
+              "model_configuration_unavailable",
+            );
+          }
+          expectedConfigValues.set(configID, value);
+          if (option.currentValue === value) return;
+          const changed = await sendRequest("session/set_config_option", {
+            sessionId: sessionID,
+            configId: configID,
+            value,
+          });
+          if (!Array.isArray(changed?.configOptions)) {
+            throw new BridgeError(
+              `Cursor ACP did not confirm ${configID} configuration`,
+              502,
+              "model_mismatch",
+            );
+          }
+          configOptions = changed.configOptions;
+          if (acpConfigOption(configOptions, configID)?.currentValue !== value) {
+            throw new BridgeError(
+              `Cursor ACP selected a different ${configID} value`,
+              502,
+              "model_mismatch",
+            );
+          }
+        };
+        await setConfig("model", requestedModel.model);
+        if (requestedModel.context) {
+          await setConfig("context", requestedModel.context);
+        } else if (requestedModel.model !== "default") {
+          const contextOption = acpConfigOption(configOptions, "context");
+          if (contextOption) {
+            const nonMillionContexts = Array.isArray(contextOption.options)
+              ? contextOption.options
+                .map((candidate) => candidate?.value)
+                .filter((value) => typeof value === "string" && value.toLowerCase() !== "1m")
+              : [];
+            if (nonMillionContexts.length !== 1) {
+              throw new BridgeError(
+                `Cursor ACP cannot resolve the standard context for ${model}`,
+                502,
+                "model_configuration_unavailable",
+              );
+            }
+            await setConfig("context", nonMillionContexts[0]);
+          }
+        }
+        if (requestedModel.effort) {
+          if (acpConfigOption(configOptions, "reasoning")) {
+            await setConfig("reasoning", requestedModel.effort);
+          } else {
+            await setConfig("effort", requestedModel.effort);
+          }
+        }
+        if (acpConfigOption(configOptions, "thinking")) {
+          await setConfig("thinking", requestedModel.thinking ? "true" : "false");
+        } else if (requestedModel.thinking) {
+          throw new BridgeError(
+            `Cursor ACP cannot enable thinking for ${model}`,
+            502,
+            "model_configuration_unavailable",
+          );
+        }
+        if (requestedModel.fast !== null && acpConfigOption(configOptions, "fast")) {
+          await setConfig("fast", requestedModel.fast ? "true" : "false");
+        } else if (requestedModel.fast) {
+          throw new BridgeError(
+            `Cursor ACP cannot enable fast mode for ${model}`,
+            502,
+            "model_configuration_unavailable",
+          );
+        }
+        for (const [configID, value] of expectedConfigValues) {
+          if (acpConfigOption(configOptions, configID)?.currentValue !== value) {
+            throw new BridgeError(
+              `Cursor ACP selected a different ${configID} value`,
+              502,
+              "model_mismatch",
+            );
+          }
+        }
+        const result = await sendRequest("session/prompt", {
+          sessionId: sessionID,
+          prompt,
+        });
+        if (result?.stopReason !== "end_turn") {
+          throw new BridgeError(
+            `Cursor ACP ended without a complete turn (${String(result?.stopReason ?? "unknown")})`,
+            502,
+            "agent_incomplete",
+          );
+        }
+        finishSuccess();
+      } catch (error) {
+        finishError(error instanceof BridgeError
+          ? error
+          : new BridgeError("Cursor ACP request failed", 502, "agent_failed"));
+      }
+    })();
+    if (signal?.aborted) abort();
+  });
+}
+
 async function ensureDirectory(url) {
   await mkdir(url, { recursive: true, mode: 0o700 });
   const stat = await lstat(url);
@@ -853,6 +1692,10 @@ function parseArguments(argv) {
     process.env.SYNCBAR_CURSOR_MODELS_JSON,
     config.model,
   );
+  config.modelParameters = parseCursorModelParameters(
+    process.env.SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON,
+    config.allowedModels,
+  );
   return config;
 }
 
@@ -895,6 +1738,7 @@ async function readJSONBody(request) {
 
 export function createBridgeServer(config) {
   const allowedModels = configuredCursorModels(config);
+  const modelParameters = configuredCursorModelParameters(config, allowedModels);
   const activeControllers = new Set();
   const activeChildren = new Set();
   const server = http.createServer(async (request, response) => {
@@ -964,12 +1808,14 @@ export function createBridgeServer(config) {
           "model_mismatch",
         );
       }
-      const prompt = buildCursorPrompt(body);
-      const execution = runCursorAgent({
+      const prepared = prepareCursorBackendRequest(body);
+      const usesACP = prepared.imageCount > 0;
+      const execution = (usesACP ? runCursorACP : runCursorAgent)({
         agentPath: config.agentPath,
         workspace: config.workspace,
         model: body.model,
-        prompt,
+        modelParameters: modelParameters.get(body.model),
+        prompt: usesACP ? prepared.acpPrompt : prepared.prompt,
         timeoutMs: config.timeoutMs,
         signal: controller.signal,
         env: cursorChildEnvironment(process.env),

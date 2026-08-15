@@ -98,7 +98,7 @@ shasum -a 256 -c SHA256SUMS
 ### 4. Cursor 구독 모델 연결 (실험)
 
 1. [공식 Cursor CLI](https://cursor.com/docs/cli/installation)를 설치하고 터미널에서 `cursor-agent login`을 완료합니다.
-2. 사용 가능한 exact slug는 `agent --list-models`로 확인할 수 있습니다. SyncBar도 같은 목록을 자동으로 불러옵니다.
+2. 사용 가능한 exact slug는 `cursor-agent --list-models`로 확인할 수 있습니다. SyncBar도 같은 목록을 자동으로 불러옵니다.
 3. SyncBar의 **설정 → 모델**에서 base 모델, Reasoning, Thinking, Fast와 localhost 포트를 선택한 뒤 **Codex 기본 모델로 사용**을 누릅니다. 목록에 실제로 존재하지 않는 조합을 합성하지 않습니다.
 4. SyncBar가 계정별 카탈로그를 만들고 Codex 최상위 `model_catalog_json`에 연결합니다. Codex 모델 선택기에서는 `Cursor · GPT · …`와 `Cursor · Codex · …` 접두어로 두 계열을 구분합니다. Codex 자체에는 provider별 section 필드가 없어 접두어와 정렬로 구분합니다.
 5. SyncBar가 캐시된 로컬 Codex `app-server`만 종료해 시작 시 카탈로그와 설정을 다시 읽게 합니다. 새 Codex 작업은 `syncbar_cursor_bridge` provider를 사용하고, 실행 중인 일반 Codex CLI는 종료하지 않습니다.
@@ -108,9 +108,9 @@ shasum -a 256 -c SHA256SUMS
 
 SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.toml`을 사용하고, 그렇지 않으면 `~/.codex/config.toml`을 사용합니다. 실제 대상 경로는 설정 화면에 표시합니다.
 
-브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증한 뒤 Codex Responses 요청을 Cursor CLI의 headless agent 호출로 변환합니다. Cursor에는 실제 프로젝트 대신 전용 빈 작업공간, ask mode, sandbox와 deny 정책을 전달하고 `--force`/`--yolo`는 사용하지 않습니다. CLI가 native tool 호출을 시작하면 응답을 중단합니다. 그래도 Cursor의 사용자 전역 rules·hooks·MCP 설정과 현행 권한 표면을 완전히 격리한다고 보장할 수 없으므로 이 기능은 실험 기능입니다.
+브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증합니다. 텍스트 요청은 Cursor CLI headless agent로, 이미지나 Computer Use 스크린샷이 포함된 요청은 공식 ACP 이미지 블록으로 전달합니다. Cursor에는 실제 프로젝트 대신 전용 빈 작업공간, ask mode, sandbox와 deny 정책을 전달하고 `--force`/`--yolo`는 사용하지 않습니다. ACP 세션에서도 모델·context·Reasoning/Effort·Thinking·Fast를 선택한 exact variant와 대조하며, native tool이나 권한 요청이 시작되면 응답을 중단합니다. 그래도 Cursor의 사용자 전역 rules·hooks·MCP 설정과 현행 권한 표면을 완전히 격리한다고 보장할 수 없으므로 이 기능은 실험 기능입니다.
 
-Cursor CLI는 raw inference API가 아니라 agent workflow입니다. 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프를 지원합니다. 이미지 입력은 명시적으로 거부하며, `web_search`·`image_generation`·`tool_search`는 요청 전체를 실패시키지 않되 Cursor backend에는 사용할 수 없는 도구로 표시합니다. 변환된 프롬프트는 프로세스 인자가 아닌 stdin으로 전달합니다. Cursor의 exact variant마다 해당 Reasoning 정도를 Codex 카탈로그에 기록하며, `max`는 Codex의 모델 기능 설정에 따라 별도 활성화가 필요할 수 있습니다.
+Cursor CLI는 raw inference API가 아니라 agent workflow입니다. 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. HTML 그래프는 Codex의 outer tool이 visualization 파일을 만든 뒤 반환하는 inline directive를 byte-for-byte 보존합니다. Computer Use·브라우저·이미지 생성은 Codex의 outer custom/plugin tool이 실행하고, 그 결과 이미지나 스크린샷을 다음 Cursor turn에 전달하는 방식으로 동작합니다. Cursor ACP가 제공하지 않는 direct `computer_call`·provider-side `image_generation_call`, `input_file`/`file_id`, 오디오 입력은 지원하지 않으며 조용히 버리지 않고 오류로 종료합니다. `web_search`·`image_generation`·`tool_search`는 요청 전체를 실패시키지 않되 Cursor backend에는 사용할 수 없는 도구로 표시합니다. 변환된 프롬프트는 프로세스 인자가 아닌 stdin으로 전달합니다. Cursor의 exact variant마다 해당 Reasoning 정도를 Codex 카탈로그에 기록하며, `max`는 Codex의 모델 기능 설정에 따라 별도 활성화가 필요할 수 있습니다.
 
 ## 인증과 보안
 
