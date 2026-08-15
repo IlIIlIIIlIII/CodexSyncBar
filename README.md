@@ -38,6 +38,7 @@
 - 장치별 연결 상태, 적용 계정, 최근 30일 토큰 사용량과 API 가격 기준 추정 비용을 보여 줍니다.
 - 계정마다 별도의 영구 Chrome 프로필을 사용해 Google 로그인과 패스키·Touch ID를 지원합니다.
 - 로그인, 로그아웃, 인증 새로고침, 시작 프로그램 및 SSH 장치 관리는 설정 창에 모아 두었습니다.
+- 실험 기능으로 Cursor CLI 구독 모델을 로컬 Responses 브리지로 Codex의 기본 model provider에 연결합니다. 계정의 모델 목록을 동기화하고 GPT·Codex 계열과 Reasoning·Thinking·Fast 변형을 구분해 선택할 수 있으며, 원래 설정으로 복구할 수 있습니다.
 
 ## 설치 전 확인
 
@@ -45,6 +46,7 @@
 - `/Applications/Google Chrome.app`에 설치된 Google Chrome
 - 공식 Codex CLI (`/opt/homebrew/bin/codex`, `/usr/local/bin/codex` 또는 `~/.local/bin/codex`)
 - 로컬 및 SSH 장치의 `bash`, `jq`, `node`, `tar`
+- Cursor 구독 모델 브리지를 이 Mac에서 사용할 경우 공식 Cursor CLI의 `cursor-agent`와 완료된 `cursor-agent login`
 - SSH 장치를 사용할 경우, 해당 호스트의 키를 미리 `known_hosts`에 등록해야 합니다.
 
 ## 릴리즈로 설치하기
@@ -93,12 +95,32 @@ shasum -a 256 -c SHA256SUMS
 
 전환 후에는 이전 인증을 캐시할 수 있는 Codex `app-server`만 선별해 다시 시작합니다. 실행 중인 일반 Codex CLI 작업과 TCP 기반의 별도 서버는 종료하지 않습니다.
 
+### 4. Cursor 구독 모델 연결 (실험)
+
+1. [공식 Cursor CLI](https://cursor.com/docs/cli/installation)를 설치하고 터미널에서 `cursor-agent login`을 완료합니다.
+2. 사용 가능한 exact slug는 `agent --list-models`로 확인할 수 있습니다. SyncBar도 같은 목록을 자동으로 불러옵니다.
+3. SyncBar의 **설정 → 모델**에서 base 모델, Reasoning, Thinking, Fast와 localhost 포트를 선택한 뒤 **Codex 기본 모델로 사용**을 누릅니다. 목록에 실제로 존재하지 않는 조합을 합성하지 않습니다.
+4. SyncBar가 계정별 카탈로그를 만들고 Codex 최상위 `model_catalog_json`에 연결합니다. Codex 모델 선택기에서는 `Cursor · GPT · …`와 `Cursor · Codex · …` 접두어로 두 계열을 구분합니다. Codex 자체에는 provider별 section 필드가 없어 접두어와 정렬로 구분합니다.
+5. SyncBar가 캐시된 로컬 Codex `app-server`만 종료해 시작 시 카탈로그와 설정을 다시 읽게 합니다. 새 Codex 작업은 `syncbar_cursor_bridge` provider를 사용하고, 실행 중인 일반 Codex CLI는 종료하지 않습니다.
+6. SSH에서도 사용할 때는 Cursor Dashboard에서 만든 User API Key를 **설정 → 모델 → SSH 원격 Cursor**에 저장합니다. 키는 이 Mac의 기기 전용 Keychain에 보관되며, 활성 SSH 장치로 동기화할 때 stdin으로만 전달됩니다.
+7. 원격 호스트에는 공식 Cursor 설치 스크립트로 `agent`를 자동 설치하고 SyncBar 전용 bridge·manager와 격리된 Cursor 인증 저장소를 구성합니다. macOS Cursor 로그인/Keychain 파일을 Linux에 복사하거나 변환하지 않습니다.
+8. **이전 Codex 모델로 복구**를 누르면 SyncBar가 바꾼 로컬 및 연결 가능한 SSH 장치의 최상위 `model`·`model_provider`·`model_catalog_json`과 관리 provider 블록을 원래 값으로 되돌리고, 원격 전용 runtime·Cursor 인증 저장소도 제거합니다. 설정이 외부에서 바뀌었다면 덮어쓰지 않고 해당 장치를 정리 실패로 표시합니다.
+
+SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.toml`을 사용하고, 그렇지 않으면 `~/.codex/config.toml`을 사용합니다. 실제 대상 경로는 설정 화면에 표시합니다.
+
+브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증한 뒤 Codex Responses 요청을 Cursor CLI의 headless agent 호출로 변환합니다. Cursor에는 실제 프로젝트 대신 전용 빈 작업공간, ask mode, sandbox와 deny 정책을 전달하고 `--force`/`--yolo`는 사용하지 않습니다. CLI가 native tool 호출을 시작하면 응답을 중단합니다. 그래도 Cursor의 사용자 전역 rules·hooks·MCP 설정과 현행 권한 표면을 완전히 격리한다고 보장할 수 없으므로 이 기능은 실험 기능입니다.
+
+Cursor CLI는 raw inference API가 아니라 agent workflow입니다. 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프를 지원합니다. 이미지 입력은 명시적으로 거부하며, `web_search`·`image_generation`·`tool_search`는 요청 전체를 실패시키지 않되 Cursor backend에는 사용할 수 없는 도구로 표시합니다. 변환된 프롬프트는 프로세스 인자가 아닌 stdin으로 전달합니다. Cursor의 exact variant마다 해당 Reasoning 정도를 Codex 카탈로그에 기록하며, `max`는 Codex의 모델 기능 설정에 따라 별도 활성화가 필요할 수 있습니다.
+
 ## 인증과 보안
 
 - 전체 refresh token은 이 Mac의 권한 `0600` 인증 파일에만 보관합니다.
 - SSH 장치에는 `refresh_token`을 비운 access-only 인증만 전달합니다.
 - SSH 비밀번호와 개인 키 암호는 macOS Keychain의 기기 전용 항목에만 저장합니다.
-- 비밀값은 설정 JSON, 프로세스 인자, 환경 변수 또는 로그에 기록하지 않습니다.
+- Cursor User API Key는 이 Mac의 기기 전용 Keychain에 저장합니다. SSH 동기화 후에는 원격 `~/.local/share/gpt-switch/cursor-remote-runtime.json`과 전용 Cursor XDG 저장소에도 소유자 전용 `0600` 파일로 보관되며, 원격 저장본은 macOS Keychain처럼 암호화된 파일이 아닙니다.
+- 원격 Cursor Agent는 SyncBar 전용 `HOME`·`XDG_CONFIG_HOME`과 현행 CLI의 비공개 file credential-store 선택자를 사용합니다. 이 선택자는 Cursor의 문서화된 호환 계약이 아니므로 CLI 업데이트 뒤 status·model·bridge health 검증이 실패하면 SyncBar도 안전하게 중단합니다.
+- Cursor API key와 bridge token은 SSH 명령, 프로세스 인자, Codex 설정, 정상 stdout/stderr에 넣지 않습니다. 원격 manager는 저장된 API key를 Cursor 자식 프로세스의 `CURSOR_API_KEY` 환경으로만 주입합니다.
+- 이 Mac의 Keychain 키만 삭제해도 이미 동기화된 원격 키는 남습니다. **이전 Codex 모델로 복구**로 원격을 함께 정리하거나, 실패한 장치가 다시 연결된 뒤 복구를 재시도해야 합니다.
 - 개인 키와 인증서는 절대 경로의 일반 파일이어야 하며 심볼릭 링크를 허용하지 않습니다.
 - 개인 키 소유자는 현재 사용자여야 하고 권한은 `0400` 또는 `0600`이어야 합니다.
 - SSH는 strict host-key checking을 사용하고 agent, X11, 포트 포워딩과 TTY 할당을 차단합니다.
@@ -160,6 +182,7 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - `~/.local/bin/gpt-switch`
 - `~/.local/lib/gpt-switch/codex-syncbar-askpass`
 - `~/.local/lib/gpt-switch/usage-summary.mjs`
+- `~/.local/lib/gpt-switch/cursor-codex-bridge.mjs`
 
 `v*` 태그 릴리즈는 다음 GitHub Actions secret이 모두 있어야 실행됩니다. P12와 App Store Connect API 개인 키는 각각 base64로 저장합니다.
 
@@ -176,6 +199,8 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - 설정과 계정 인증: `~/.local/share/gpt-switch`
 - 앱 전용 Chrome 세션: `~/Library/Application Support/Codex SyncBar`
 - SSH 비밀번호·키 암호: macOS Keychain 서비스 `com.sunggu.codexsyncbar.ssh`
+- Cursor User API Key: macOS Keychain 서비스 `com.sunggu.codexsyncbar.cursor`
+- SSH 원격 Cursor runtime·인증: 원격 `~/.local/share/gpt-switch/cursor-remote-runtime.json` 및 `cursor-remote-xdg/`
 
 앱만 제거하려면 `/Applications/Codex SyncBar.app`을 휴지통으로 옮기면 됩니다. 계정·Chrome 세션·Keychain 항목까지 지우려면 먼저 설정에서 장치와 계정을 정리한 뒤 위 데이터 디렉터리를 삭제하세요. 원격 장치의 파일은 Mac 앱을 삭제하는 것만으로 자동 삭제되지 않습니다.
 

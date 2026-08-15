@@ -1,0 +1,388 @@
+import Foundation
+
+enum CursorModelGroup: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case automatic
+    case cursor
+    case openAIGPT = "openai-gpt"
+    case openAICodex = "openai-codex"
+    case anthropicClaude = "anthropic-claude"
+    case googleGemini = "google-gemini"
+    case kimi
+    case glm
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .automatic: "자동 선택 (Cursor 구독)"
+        case .cursor: "Cursor 모델"
+        case .openAIGPT: "OpenAI GPT (Cursor 구독)"
+        case .openAICodex: "OpenAI Codex (Cursor 구독)"
+        case .anthropicClaude: "Anthropic Claude (Cursor 구독)"
+        case .googleGemini: "Google Gemini (Cursor 구독)"
+        case .kimi: "Kimi (Cursor 구독)"
+        case .glm: "GLM (Cursor 구독)"
+        case .other: "기타 모델 (Cursor 구독)"
+        }
+    }
+}
+
+enum CursorModelEffort: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+    case none
+    case minimal
+    case low
+    case medium
+    case `default`
+    case high
+    case xhigh
+    case max
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: "None"
+        case .minimal: "Minimal"
+        case .low: "Low"
+        case .medium: "Medium"
+        case .default: "Default"
+        case .high: "High"
+        case .xhigh: "Extra High"
+        case .max: "Max"
+        }
+    }
+}
+
+struct CursorModelSelection: Codable, Hashable, Sendable {
+    let baseSlug: String
+    let effort: CursorModelEffort
+    let fast: Bool
+    let thinking: Bool
+
+    init(
+        baseSlug: String,
+        effort: CursorModelEffort = .default,
+        fast: Bool = false,
+        thinking: Bool = false)
+    {
+        self.baseSlug = baseSlug
+        self.effort = effort
+        self.fast = fast
+        self.thinking = thinking
+    }
+}
+
+struct CursorModelVariant: Codable, Hashable, Identifiable, Sendable {
+    let slug: String
+    let displayName: String
+    let baseSlug: String
+    let effort: CursorModelEffort
+    let fast: Bool
+    let thinking: Bool
+
+    var id: String { slug }
+
+    var selection: CursorModelSelection {
+        CursorModelSelection(
+            baseSlug: baseSlug,
+            effort: effort,
+            fast: fast,
+            thinking: thinking)
+    }
+}
+
+struct CursorModelFamily: Codable, Equatable, Identifiable, Sendable {
+    let baseSlug: String
+    let displayName: String
+    let group: CursorModelGroup
+    let variants: [CursorModelVariant]
+
+    var id: String { baseSlug }
+
+    var availableEfforts: [CursorModelEffort] {
+        let available = Set(variants.map(\.effort))
+        return CursorModelEffort.allCases.filter(available.contains)
+    }
+
+    var supportsFast: Bool {
+        variants.contains(where: \.fast)
+    }
+
+    var supportsThinking: Bool {
+        variants.contains(where: \.thinking)
+    }
+
+    var preferredVariant: CursorModelVariant? {
+        let preferredEfforts: [CursorModelEffort] = [
+            .default, .medium, .high, .low, .none, .minimal, .xhigh, .max,
+        ]
+        for effort in preferredEfforts {
+            if let variant = variants.first(where: {
+                $0.effort == effort && !$0.fast && !$0.thinking
+            }) {
+                return variant
+            }
+        }
+        return variants.first(where: { !$0.fast && !$0.thinking }) ?? variants.first
+    }
+
+    func availableEfforts(fast: Bool, thinking: Bool) -> [CursorModelEffort] {
+        let available = Set(variants.lazy
+            .filter { $0.fast == fast && $0.thinking == thinking }
+            .map(\.effort))
+        return CursorModelEffort.allCases.filter(available.contains)
+    }
+
+    func resolve(
+        effort: CursorModelEffort = .default,
+        fast: Bool = false,
+        thinking: Bool = false) -> String?
+    {
+        variants.first {
+            $0.effort == effort && $0.fast == fast && $0.thinking == thinking
+        }?.slug
+    }
+
+    func resolve(_ selection: CursorModelSelection) -> String? {
+        guard selection.baseSlug == baseSlug else { return nil }
+        return resolve(
+            effort: selection.effort,
+            fast: selection.fast,
+            thinking: selection.thinking)
+    }
+}
+
+struct CursorModelSection: Equatable, Identifiable, Sendable {
+    let group: CursorModelGroup
+    let families: [CursorModelFamily]
+
+    var id: CursorModelGroup { group }
+}
+
+struct CursorModelCatalog: Equatable, Sendable {
+    let variants: [CursorModelVariant]
+    let families: [CursorModelFamily]
+
+    init(cliOutput: String) {
+        var parsedVariants: [CursorModelVariant] = []
+        var seenSlugs = Set<String>()
+
+        for rawLine in cliOutput.split(whereSeparator: \.isNewline) {
+            guard let variant = Self.parseLine(String(rawLine)),
+                  seenSlugs.insert(variant.slug).inserted
+            else {
+                continue
+            }
+            parsedVariants.append(variant)
+        }
+
+        variants = parsedVariants
+
+        var baseSlugs: [String] = []
+        var variantsByBase: [String: [CursorModelVariant]] = [:]
+        for variant in parsedVariants {
+            if variantsByBase[variant.baseSlug] == nil {
+                baseSlugs.append(variant.baseSlug)
+            }
+            variantsByBase[variant.baseSlug, default: []].append(variant)
+        }
+
+        families = baseSlugs.compactMap { baseSlug in
+            guard let familyVariants = variantsByBase[baseSlug],
+                  let firstVariant = familyVariants.first
+            else {
+                return nil
+            }
+            return CursorModelFamily(
+                baseSlug: baseSlug,
+                displayName: Self.baseDisplayName(for: firstVariant),
+                group: Self.group(for: baseSlug),
+                variants: familyVariants)
+        }
+    }
+
+    var sections: [CursorModelSection] {
+        CursorModelGroup.allCases.compactMap { group in
+            let matchingFamilies = families.filter { $0.group == group }
+            guard !matchingFamilies.isEmpty else { return nil }
+            return CursorModelSection(group: group, families: matchingFamilies)
+        }
+    }
+
+    func family(baseSlug: String) -> CursorModelFamily? {
+        families.first { $0.baseSlug == baseSlug }
+    }
+
+    func family(containingSlug slug: String) -> CursorModelFamily? {
+        guard let baseSlug = variants.first(where: { $0.slug == slug })?.baseSlug else {
+            return nil
+        }
+        return family(baseSlug: baseSlug)
+    }
+
+    func selection(forSlug slug: String) -> CursorModelSelection? {
+        variants.first { $0.slug == slug }?.selection
+    }
+
+    func resolve(_ selection: CursorModelSelection) -> String? {
+        family(baseSlug: selection.baseSlug)?.resolve(selection)
+    }
+
+    func resolve(
+        baseSlug: String,
+        effort: CursorModelEffort = .default,
+        fast: Bool = false,
+        thinking: Bool = false) -> String?
+    {
+        resolve(CursorModelSelection(
+            baseSlug: baseSlug,
+            effort: effort,
+            fast: fast,
+            thinking: thinking))
+    }
+
+    private static func parseLine(_ rawLine: String) -> CursorModelVariant? {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let separator = line.range(of: " - ") else { return nil }
+
+        let slug = String(line[..<separator.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = String(line[separator.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !displayName.isEmpty,
+              slug.range(
+                  of: #"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"#,
+                  options: .regularExpression) != nil
+        else {
+            return nil
+        }
+
+        let components = decompose(slug: slug)
+        return CursorModelVariant(
+            slug: slug,
+            displayName: displayName,
+            baseSlug: components.baseSlug,
+            effort: components.effort,
+            fast: components.fast,
+            thinking: components.thinking)
+    }
+
+    private static func decompose(slug: String) -> (
+        baseSlug: String,
+        effort: CursorModelEffort,
+        fast: Bool,
+        thinking: Bool)
+    {
+        var baseSlug = slug
+        var effort: CursorModelEffort?
+        var fast = false
+        var thinking = false
+
+        func stripSuffix(_ suffix: String) -> Bool {
+            guard baseSlug.lowercased().hasSuffix(suffix) else { return false }
+            baseSlug.removeLast(suffix.count)
+            return true
+        }
+
+        let effortSuffixes: [(String, CursorModelEffort)] = [
+            ("-extra-high", .xhigh),
+            ("-minimal", .minimal),
+            ("-default", .default),
+            ("-medium", .medium),
+            ("-xhigh", .xhigh),
+            ("-none", .none),
+            ("-high", .high),
+            ("-low", .low),
+            ("-max", .max),
+        ]
+
+        var changed = true
+        while changed {
+            changed = false
+
+            if !fast, stripSuffix("-fast") {
+                fast = true
+                changed = true
+            }
+            if !thinking, stripSuffix("-thinking") {
+                thinking = true
+                changed = true
+            }
+            if effort == nil {
+                for (suffix, candidate) in effortSuffixes where stripSuffix(suffix) {
+                    effort = candidate
+                    changed = true
+                    break
+                }
+            }
+        }
+
+        return (baseSlug, effort ?? .default, fast, thinking)
+    }
+
+    private static func group(for baseSlug: String) -> CursorModelGroup {
+        let normalized = baseSlug.lowercased()
+        if normalized == "auto" {
+            return .automatic
+        }
+        if normalized.hasPrefix("gpt-") {
+            let components = normalized.split(separator: "-")
+            return components.contains("codex") ? .openAICodex : .openAIGPT
+        }
+        if normalized.hasPrefix("cursor-") || normalized.hasPrefix("composer-") {
+            return .cursor
+        }
+        if normalized.hasPrefix("claude-") {
+            return .anthropicClaude
+        }
+        if normalized.hasPrefix("gemini-") {
+            return .googleGemini
+        }
+        if normalized.hasPrefix("kimi-") {
+            return .kimi
+        }
+        if normalized.hasPrefix("glm-") {
+            return .glm
+        }
+        return .other
+    }
+
+    private static func baseDisplayName(for variant: CursorModelVariant) -> String {
+        var displayName = variant.displayName
+            .replacingOccurrences(of: " (NO ZDR)", with: "")
+            .replacingOccurrences(of: "(NO ZDR)", with: "")
+
+        var excludedWords = Set(["1m", "(default)"])
+        if variant.fast {
+            excludedWords.insert("fast")
+        }
+        if variant.thinking {
+            excludedWords.insert("thinking")
+        }
+        switch variant.effort {
+        case .none:
+            excludedWords.insert("none")
+        case .minimal:
+            excludedWords.insert("minimal")
+        case .low:
+            excludedWords.insert("low")
+        case .medium:
+            excludedWords.insert("medium")
+        case .default:
+            break
+        case .high:
+            excludedWords.insert("high")
+        case .xhigh:
+            excludedWords.formUnion(["extra", "high", "xhigh"])
+        case .max:
+            excludedWords.insert("max")
+        }
+
+        let words = displayName.split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !excludedWords.contains($0.lowercased()) }
+        displayName = words.joined(separator: " ")
+        return displayName.isEmpty ? variant.baseSlug : displayName
+    }
+}

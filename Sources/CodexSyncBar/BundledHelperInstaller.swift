@@ -18,9 +18,13 @@ struct BundledHelperInstaller {
         let helper = resources.appendingPathComponent("gpt-switch")
         let askpass = resources.appendingPathComponent("codex-syncbar-askpass")
         let usageSummary = resources.appendingPathComponent("usage-summary.mjs")
+        let cursorBridge = resources.appendingPathComponent("cursor-codex-bridge.mjs")
+        let cursorRemoteManager = resources.appendingPathComponent("cursor-remote-manager.mjs")
         guard FileManager.default.fileExists(atPath: helper.path),
               FileManager.default.fileExists(atPath: askpass.path),
-              FileManager.default.fileExists(atPath: usageSummary.path)
+              FileManager.default.fileExists(atPath: usageSummary.path),
+              FileManager.default.fileExists(atPath: cursorBridge.path),
+              FileManager.default.fileExists(atPath: cursorRemoteManager.path)
         else { return }
         try Self(resourceDirectory: resources).install()
     }
@@ -54,6 +58,14 @@ struct BundledHelperInstaller {
         try installResource(
             named: "usage-summary.mjs",
             to: helperLibrary.appendingPathComponent("usage-summary.mjs"),
+            permissions: 0o755)
+        try installResource(
+            named: "cursor-codex-bridge.mjs",
+            to: helperLibrary.appendingPathComponent("cursor-codex-bridge.mjs"),
+            permissions: 0o755)
+        try installResource(
+            named: "cursor-remote-manager.mjs",
+            to: helperLibrary.appendingPathComponent("cursor-remote-manager.mjs"),
             permissions: 0o755)
     }
 

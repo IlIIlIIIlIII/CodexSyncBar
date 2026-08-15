@@ -4,7 +4,7 @@ set +x
 set -euo pipefail
 
 PROGRAM_NAME="gpt-switch"
-SCRIPT_VERSION="2.1.3"
+SCRIPT_VERSION="2.2.0"
 USAGE_SCHEMA_VERSION=5
 STATE_ROOT="${GPT_SWITCH_STATE_ROOT:-$HOME/.local/share/gpt-switch}"
 CONFIG_FILE="${GPT_SWITCH_CONFIG_FILE:-$STATE_ROOT/config.json}"
@@ -29,6 +29,8 @@ REMOTE_BIN='${HOME}/.local/bin/gpt-switch'
 SSH_BIN="${GPT_SWITCH_SSH_BIN:-/usr/bin/ssh}"
 ASKPASS_HELPER="${GPT_SWITCH_ASKPASS_HELPER:-$HOME/.local/lib/gpt-switch/codex-syncbar-askpass}"
 USAGE_HELPER="${GPT_SWITCH_USAGE_HELPER:-$HOME/.local/lib/gpt-switch/usage-summary.mjs}"
+CURSOR_BRIDGE_HELPER="${GPT_SWITCH_CURSOR_BRIDGE_HELPER:-$HOME/.local/lib/gpt-switch/cursor-codex-bridge.mjs}"
+CURSOR_REMOTE_MANAGER="${GPT_SWITCH_CURSOR_REMOTE_MANAGER:-$HOME/.local/lib/gpt-switch/cursor-remote-manager.mjs}"
 CODEX_APP_SERVER_PATTERN='^(([^[:space:]]*/)?[c]odex([.]js)?|([^[:space:]]*/)?node[[:space:]]+[^[:space:]]*/codex([.]js)?)([[:space:]]+-c[[:space:]]+[^[:space:]]+)*[[:space:]]+app-server[[:space:]]+(proxy([[:space:]]|$)|--listen[[:space:]]+unix://)'
 OSASCRIPT_BIN="${GPT_SWITCH_OSASCRIPT_BIN:-/usr/bin/osascript}"
 OPEN_BIN="${GPT_SWITCH_OPEN_BIN:-/usr/bin/open}"
@@ -98,6 +100,9 @@ Usage:
   gpt-switch accounts-json
   gpt-switch test-device DEVICE-ID
   gpt-switch bootstrap-device DEVICE-ID
+  gpt-switch provision-cursor DEVICE-ID
+  gpt-switch deprovision-cursor DEVICE-ID
+  gpt-switch cursor-bridge-auth
   gpt-switch --version
   gpt-switch help
 
@@ -2133,6 +2138,187 @@ validate_askpass_helper() {
   [ -x "$ASKPASS_HELPER" ] || die "askpass helper is unavailable"
 }
 
+validate_cursor_helper_source() {
+  local source="$1"
+  local label="$2"
+  local owner descriptor=0
+  case "$source" in
+    /dev/fd/5|/dev/fd/6|/dev/fd/7)
+      [ -f "$source" ] || die "$label descriptor is unavailable"
+      descriptor=1
+      ;;
+    *)
+      [ -f "$source" ] && [ ! -L "$source" ] || die "$label is unavailable"
+      ;;
+  esac
+  owner=$(file_owner_id "$source")
+  [ "$owner" = "$(id -u)" ] || [ "$owner" = 0 ] || die "$label owner is unsafe"
+  if [ "$descriptor" -eq 1 ]; then
+    # macOS devfs exposes an already-open read-only descriptor as mode 0444;
+    # Linux commonly reports the underlying file mode instead.
+    case "$(file_mode "$source")" in 400|440|444|500|700|755) ;; *) die "$label descriptor permissions are unsafe" ;; esac
+  else
+    case "$(file_mode "$source")" in 500|700|755) ;; *) die "$label permissions are unsafe" ;; esac
+  fi
+}
+
+open_cursor_provisioning_source_fds() {
+  local self_source="$0"
+  local bridge_source="$CURSOR_BRIDGE_HELPER"
+  local manager_source="$CURSOR_REMOTE_MANAGER"
+  local self_identity bridge_identity manager_identity
+
+  validate_cursor_helper_source "$self_source" "controller helper source"
+  validate_cursor_helper_source "$bridge_source" "Cursor bridge helper"
+  validate_cursor_helper_source "$manager_source" "Cursor remote manager"
+  self_identity=$(file_identity_following_symlinks "$self_source") || \
+    die "could not identify controller helper source"
+  bridge_identity=$(file_identity_following_symlinks "$bridge_source") || \
+    die "could not identify Cursor bridge helper"
+  manager_identity=$(file_identity_following_symlinks "$manager_source") || \
+    die "could not identify Cursor remote manager"
+  exec 7<"$self_source" || die "could not pin controller helper source"
+  exec 6<"$bridge_source" || { exec 7>&-; die "could not pin Cursor bridge helper"; }
+  exec 5<"$manager_source" || {
+    exec 6>&-
+    exec 7>&-
+    die "could not pin Cursor remote manager"
+  }
+
+  # Compare the pre-open identities to the descriptors, then never read the
+  # private snapshot pathnames again. A swap between validation and open(2)
+  # therefore fails instead of becoming the packaged helper.
+  if [ "$self_identity" != "$(file_identity_following_symlinks /dev/fd/7)" ] || \
+     [ "$bridge_identity" != "$(file_identity_following_symlinks /dev/fd/6)" ] || \
+     [ "$manager_identity" != "$(file_identity_following_symlinks /dev/fd/5)" ]; then
+    exec 5>&-
+    exec 6>&-
+    exec 7>&-
+    die "Cursor helper source changed while pinning trusted files"
+  fi
+  validate_cursor_helper_source /dev/fd/7 "controller helper source"
+  validate_cursor_helper_source /dev/fd/6 "Cursor bridge helper"
+  validate_cursor_helper_source /dev/fd/5 "Cursor remote manager"
+}
+
+remote_install_cursor_helpers() {
+  local index="$1"
+  local bridge_source="${2:-$CURSOR_BRIDGE_HELPER}"
+  local manager_source="${3:-$CURSOR_REMOTE_MANAGER}"
+  local payload_dir archive command
+  validate_cursor_helper_source "$bridge_source" "Cursor bridge helper"
+  validate_cursor_helper_source "$manager_source" "Cursor remote manager"
+  command -v tar >/dev/null 2>&1 || die "tar is required to install Cursor helpers"
+
+  ensure_dirs
+  payload_dir=$(mktemp -d "$STATE_ROOT/.cursor-payload.XXXXXX") || \
+    die "could not prepare Cursor helper payload"
+  chmod 700 "$payload_dir"
+  archive=$(mktemp "$STATE_ROOT/.cursor-payload.XXXXXX.tar") || {
+    rm -rf "$payload_dir"
+    die "could not prepare Cursor helper archive"
+  }
+  chmod 600 "$archive"
+  if ! cp "$bridge_source" "$payload_dir/cursor-codex-bridge.mjs" || \
+     ! cp "$manager_source" "$payload_dir/cursor-remote-manager.mjs" || \
+     ! chmod 755 "$payload_dir/cursor-codex-bridge.mjs" "$payload_dir/cursor-remote-manager.mjs" || \
+     ! tar -cf "$archive" -C "$payload_dir" cursor-codex-bridge.mjs cursor-remote-manager.mjs; then
+    rm -f "$archive"
+    rm -rf "$payload_dir"
+    die "could not build Cursor helper payload"
+  fi
+
+  command='set -eu
+umask 077
+state="$HOME/.local/share/gpt-switch"
+lib="$HOME/.local/lib/gpt-switch"
+mkdir -p "$state" "$lib"
+chmod 700 "$state" "$lib"
+stage=$(mktemp -d "$state/.cursor-install.XXXXXX")
+bridge="$lib/cursor-codex-bridge.mjs"
+manager="$lib/cursor-remote-manager.mjs"
+bridge_new=""
+manager_new=""
+bridge_touched=0
+manager_touched=0
+bridge_existed=0
+manager_existed=0
+committed=0
+rollback_failed=0
+mode_of() { stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }
+owner_of() { stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"; }
+restore_one() {
+  destination="$1"
+  backup="$2"
+  existed="$3"
+  if [ "$existed" -eq 1 ]; then
+    rollback=$(mktemp "$lib/.cursor-rollback.XXXXXX")
+    cp "$backup" "$rollback"
+    chmod 755 "$rollback"
+    mv -f "$rollback" "$destination"
+  else
+    rm -f "$destination"
+  fi
+}
+cleanup_cursor_install() {
+  rc=$?
+  trap - EXIT HUP INT TERM
+  if [ "$committed" -ne 1 ]; then
+    [ "$bridge_touched" -eq 0 ] || restore_one "$bridge" "$stage/bridge.backup" "$bridge_existed" || rollback_failed=1
+    [ "$manager_touched" -eq 0 ] || restore_one "$manager" "$stage/manager.backup" "$manager_existed" || rollback_failed=1
+  fi
+  [ -z "$bridge_new" ] || rm -f "$bridge_new"
+  [ -z "$manager_new" ] || rm -f "$manager_new"
+  if [ "$rollback_failed" -eq 0 ]; then
+    rm -rf "$stage"
+  else
+    printf "Cursor helper rollback failed; backups preserved at %s\n" "$stage" >&2
+  fi
+  exit "$rc"
+}
+trap cleanup_cursor_install EXIT HUP INT TERM
+tar -xf - -C "$stage"
+[ -f "$stage/cursor-codex-bridge.mjs" ] && [ ! -L "$stage/cursor-codex-bridge.mjs" ]
+[ -f "$stage/cursor-remote-manager.mjs" ] && [ ! -L "$stage/cursor-remote-manager.mjs" ]
+if [ -e "$bridge" ] || [ -L "$bridge" ]; then
+  [ -f "$bridge" ] && [ ! -L "$bridge" ] && [ "$(owner_of "$bridge")" = "$(id -u)" ]
+  cp "$bridge" "$stage/bridge.backup"
+  bridge_existed=1
+fi
+if [ -e "$manager" ] || [ -L "$manager" ]; then
+  [ -f "$manager" ] && [ ! -L "$manager" ] && [ "$(owner_of "$manager")" = "$(id -u)" ]
+  cp "$manager" "$stage/manager.backup"
+  manager_existed=1
+fi
+manager_new=$(mktemp "$lib/.cursor-remote-manager.XXXXXX.mjs")
+bridge_new=$(mktemp "$lib/.cursor-codex-bridge.XXXXXX.mjs")
+cp "$stage/cursor-remote-manager.mjs" "$manager_new"
+cp "$stage/cursor-codex-bridge.mjs" "$bridge_new"
+chmod 755 "$manager_new" "$bridge_new"
+[ "$(owner_of "$manager_new")" = "$(id -u)" ] && [ "$(mode_of "$manager_new")" = 755 ]
+[ "$(owner_of "$bridge_new")" = "$(id -u)" ] && [ "$(mode_of "$bridge_new")" = 755 ]
+mv -f "$manager_new" "$manager"
+manager_new=""
+manager_touched=1
+mv -f "$bridge_new" "$bridge"
+bridge_new=""
+bridge_touched=1
+[ -f "$manager" ] && [ ! -L "$manager" ] && [ "$(mode_of "$manager")" = 755 ]
+[ -f "$bridge" ] && [ ! -L "$bridge" ] && [ "$(mode_of "$bridge")" = 755 ]
+committed=1
+rm -rf "$stage"
+trap - EXIT HUP INT TERM
+printf "cursor_helpers=installed\n"'
+
+  if ! remote_ssh "$index" "$command" <"$archive" >/dev/null; then
+    rm -f "$archive"
+    rm -rf "$payload_dir"
+    return 1
+  fi
+  rm -f "$archive"
+  rm -rf "$payload_dir"
+}
+
 remote_ssh() {
   local index="$1"
   shift
@@ -2202,13 +2388,10 @@ remote_ssh() {
 
 remote_install_helpers() {
   local index="$1"
-  local source_helper="$0"
-  local payload_dir archive command owner
+  local source_helper="${2:-$0}"
+  local payload_dir archive command
 
-  [ -f "$source_helper" ] && [ ! -L "$source_helper" ] || die "controller helper source is unsafe"
-  owner=$(file_owner_id "$source_helper")
-  [ "$owner" = "$(id -u)" ] || [ "$owner" = 0 ] || die "controller helper source owner is unsafe"
-  case "$(file_mode "$source_helper")" in 500|700|755) ;; *) die "controller helper source permissions are unsafe" ;; esac
+  validate_cursor_helper_source "$source_helper" "controller helper source"
   validate_askpass_helper
   require_usage_helper
   command -v tar >/dev/null 2>&1 || die "tar is required to bootstrap a device"
@@ -2569,6 +2752,7 @@ fi'
     esac
     case "$entry" in
       .local/bin/gpt-switch|.local/lib/gpt-switch/codex-syncbar-askpass|\
+      .local/lib/gpt-switch/usage-summary.mjs|\
       .local/share/gpt-switch|.local/share/gpt-switch/*|.codex/auth.json) ;;
       *) valid=0; break ;;
     esac
@@ -2637,6 +2821,9 @@ remote_node_file() {
   shift 3
   local command="$REMOTE_BIN __node $action"
   local argument
+  [ -f "$source" ] && [ ! -L "$source" ] || die "unsafe internal remote input"
+  [ "$(file_owner_id "$source")" = "$(id -u)" ] || die "unsafe internal remote input owner"
+  [ "$(file_mode "$source")" = 600 ] || die "unsafe internal remote input permissions"
   for argument in "$@"; do
     case "$argument" in
       ''|*[!0-9a-zA-Z_-]*) die "unsafe internal remote argument" ;;
@@ -2659,6 +2846,42 @@ remote_node_args() {
     command="$command $argument"
   done
   remote_ssh "$index" "$command"
+}
+
+node_cursor_provision() {
+  validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
+  if "$NODE_BIN" "$CURSOR_REMOTE_MANAGER" provision >/dev/null 2>&1; then
+    if ! node_stop_clients >/dev/null 2>&1; then
+      die "Cursor provisioning committed but Codex clients could not be stopped"
+    fi
+    printf 'cursor=provisioned result=ok\n'
+    return
+  fi
+  die "Cursor provisioning failed; details were withheld to protect credentials"
+}
+
+node_cursor_deprovision() {
+  validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
+  if "$NODE_BIN" "$CURSOR_REMOTE_MANAGER" deprovision </dev/null >/dev/null 2>&1; then
+    if node_stop_clients >/dev/null 2>&1; then
+      printf 'cursor=deprovisioned result=ok\n'
+      return
+    fi
+    die "Cursor deprovisioning committed but Codex clients could not be stopped"
+  fi
+  die "Cursor deprovisioning failed; details were withheld to protect credentials"
+}
+
+cursor_bridge_auth() {
+  local token
+  validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
+  token=$("$NODE_BIN" "$CURSOR_REMOTE_MANAGER" auth 2>/dev/null) || \
+    die "Cursor bridge startup failed"
+  case "$token" in
+    *$'\n'*|*[!a-f0-9]*|'') die "Cursor bridge returned an invalid credential" ;;
+  esac
+  [ "${#token}" -eq 64 ] || die "Cursor bridge returned an invalid credential"
+  printf '%s\n' "$token"
 }
 
 field_value() {
@@ -4007,6 +4230,96 @@ controller_bootstrap_device() {
     "$wanted" "$active" "$enrolled" "$version"
 }
 
+controller_provision_cursor() {
+  local wanted="$1" index=0 found=-1 payload result bytes version
+  local LC_ALL=C
+  umask 077
+  case "$wanted" in ''|*[!a-z0-9-]*|-*) die "invalid device id" ;; esac
+  while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
+    if [ "${REMOTE_LABELS[$index]}" = "$wanted" ]; then found=$index; break; fi
+    index=$((index + 1))
+  done
+  [ "$found" -ge 0 ] || die "device not found: $wanted"
+  index=$found
+
+  open_cursor_provisioning_source_fds
+  # Keep the bounded JSON request in a Bash variable. Swift's encoder cannot
+  # emit literal NUL bytes or a trailing newline, so base64/openssl is not
+  # needed. Absolute root-owned tools keep a hostile PATH from interposing on
+  # the only local pipeline that ever sees the Cursor API key.
+  payload=$(/usr/bin/head -c 131073) || \
+    die "could not read Cursor provisioning request"
+  bytes=${#payload}
+  [ "$bytes" -le 131072 ] || die "Cursor provisioning request is too large"
+  printf '%s' "$payload" | /usr/bin/jq -e '
+    (keys | sort) == ["apiKey","bridgeToken","model","models","port","schemaVersion"] and
+    .schemaVersion == 1 and
+    (.apiKey | type == "string" and length > 0 and (test("[\u0000-\u0020\u007f]") | not)) and
+    (.model | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")) and
+    (.port | type == "number" and floor == . and . >= 1024 and . <= 65535) and
+    (.bridgeToken | type == "string" and test("^[a-f0-9]{64}$")) and
+    (.models | type == "array" and length >= 1 and length <= 512) and
+    (all(.models[]; type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))) and
+    ((.models | length) == (.models | unique | length)) and
+    (.model as $selected | .models | index($selected) != null)
+  ' >/dev/null 2>&1 || die "Cursor provisioning request is invalid"
+  bytes=$(printf '%s' "$payload" | /usr/bin/jq -jr '.apiKey | utf8bytelength' 2>/dev/null) || \
+    die "could not validate Cursor API key"
+  [ "$bytes" -ge 16 ] && [ "$bytes" -le 1024 ] || die "Cursor API key length is invalid"
+
+  # Build and send the Cursor archive before the first untrusted SSH process
+  # can replace the private snapshot pathnames. The archive reads only the
+  # already-open descriptors, so a later pathname swap cannot change its bytes.
+  remote_install_cursor_helpers "$index" /dev/fd/6 /dev/fd/5 || \
+    die "Cursor helper installation failed for $wanted"
+  remote_install_helpers "$index" /dev/fd/7 >/dev/null || \
+    die "helper installation failed for $wanted"
+  version=$(remote_node "$index" version 2>/dev/null) || \
+    die "installed helper is unreachable on $wanted"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on $wanted"
+
+  # `printf` is a Bash builtin, so the request is never placed in an exec argv
+  # or environment. SSH receives the JSON only on stdin;
+  # remote diagnostics are discarded and stdout remains memory-only.
+  if ! result=$(printf '%s' "$payload" | \
+      remote_ssh "$index" "$REMOTE_BIN __node cursor-provision" 2>/dev/null); then
+    die "Cursor provisioning failed on $wanted; remote details were withheld"
+  fi
+  [ "$result" = 'cursor=provisioned result=ok' ] || \
+    die "Cursor provisioning verification failed on $wanted"
+  payload=""
+  printf 'device=%s cursor=provisioned result=ok version=%s\n' \
+    "$wanted" "$version"
+}
+
+controller_deprovision_cursor() {
+  local wanted="$1" index=0 found=-1 result version
+  umask 077
+  case "$wanted" in ''|*[!a-z0-9-]*|-*) die "invalid device id" ;; esac
+  while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
+    if [ "${REMOTE_LABELS[$index]}" = "$wanted" ]; then found=$index; break; fi
+    index=$((index + 1))
+  done
+  [ "$found" -ge 0 ] || die "device not found: $wanted"
+  index=$found
+
+  open_cursor_provisioning_source_fds
+  remote_install_cursor_helpers "$index" /dev/fd/6 /dev/fd/5 || \
+    die "Cursor helper installation failed for $wanted"
+  remote_install_helpers "$index" /dev/fd/7 >/dev/null || \
+    die "helper installation failed for $wanted"
+  version=$(remote_node "$index" version 2>/dev/null) || \
+    die "installed helper is unreachable on $wanted"
+  [ "$version" = "$SCRIPT_VERSION" ] || die "helper version mismatch on $wanted"
+  if ! result=$(remote_node "$index" cursor-deprovision </dev/null 2>/dev/null); then
+    die "Cursor deprovisioning failed on $wanted; remote details were withheld"
+  fi
+  [ "$result" = 'cursor=deprovisioned result=ok' ] || \
+    die "Cursor deprovisioning verification failed on $wanted"
+  printf 'device=%s cursor=deprovisioned result=ok version=%s\n' \
+    "$wanted" "$version"
+}
+
 application_running() {
   local bundle_id="$1"
   "$OSASCRIPT_BIN" -e "application id \"$bundle_id\" is running" 2>/dev/null | grep -qx 'true'
@@ -4098,6 +4411,8 @@ node_main() {
     install-access) [ "$#" -eq 3 ] || die "node install-access requires profile, account fingerprint, and access fingerprint"; node_install_access "$1" "$2" "$3" ;;
     inspect-access) [ "$#" -eq 2 ] || die "node inspect-access requires profile and access fingerprint"; node_inspect_access "$1" "$2" ;;
     usage-summary) [ "$#" -eq 0 ] || die "node usage-summary takes no arguments"; node_usage_summary ;;
+    cursor-provision) [ "$#" -eq 0 ] || die "node cursor-provision takes no arguments"; node_cursor_provision ;;
+    cursor-deprovision) [ "$#" -eq 0 ] || die "node cursor-deprovision takes no arguments"; node_cursor_deprovision ;;
     version) [ "$#" -eq 0 ] || die "node version takes no arguments"; printf '%s\n' "$SCRIPT_VERSION" ;;
     *) die "unknown internal action: $action" ;;
   esac
@@ -4144,6 +4459,12 @@ main() {
     return
   fi
 
+  if [ "$command" = "cursor-bridge-auth" ]; then
+    [ "$#" -eq 1 ] || die "cursor-bridge-auth takes no arguments"
+    cursor_bridge_auth
+    return
+  fi
+
   if [ "$command" = version ] || [ "$command" = --version ]; then
     [ "$#" -eq 1 ] || die "$command takes no arguments"
     printf '%s\n' "$SCRIPT_VERSION"
@@ -4156,7 +4477,7 @@ main() {
   esac
 
   case "$command" in
-    test-device|bootstrap-device)
+    test-device|bootstrap-device|provision-cursor|deprovision-cursor)
       if [ "$#" -eq 2 ]; then load_configuration "$2"; else load_configuration; fi
       ;;
     *) load_configuration ;;
@@ -4224,6 +4545,22 @@ main() {
       [ "$#" -eq 2 ] || die "bootstrap-device requires a device id"
       acquire_controller_lock
       controller_bootstrap_device "$2"
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return
+      ;;
+    provision-cursor)
+      [ "$#" -eq 2 ] || die "provision-cursor requires a device id"
+      acquire_controller_lock
+      controller_provision_cursor "$2"
+      release_controller_lock
+      trap - EXIT HUP INT TERM
+      return
+      ;;
+    deprovision-cursor)
+      [ "$#" -eq 2 ] || die "deprovision-cursor requires a device id"
+      acquire_controller_lock
+      controller_deprovision_cursor "$2"
       release_controller_lock
       trap - EXIT HUP INT TERM
       return

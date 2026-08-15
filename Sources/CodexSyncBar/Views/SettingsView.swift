@@ -4,6 +4,7 @@ import SwiftUI
 private enum SettingsSection: String, CaseIterable, Identifiable {
     case accounts = "계정"
     case devices = "장치"
+    case models = "모델"
     case general = "일반"
 
     var id: String { rawValue }
@@ -12,6 +13,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .accounts: "person.2.fill"
         case .devices: "network"
+        case .models: "cpu.fill"
         case .general: "gearshape.fill"
         }
     }
@@ -45,15 +47,23 @@ struct SettingsView: View {
     @State private var accountDragToken: String?
     @State private var deviceDraft: SSHDeviceConfiguration?
     @State private var deviceToRemove: SSHDeviceConfiguration?
+    @State private var cursorModelDraft: String
+    @State private var cursorPortDraft: String
+    @State private var cursorAgentPathDraft: String
+    @State private var cursorAPIKeyDraft = ""
 
     init(model: AppModel, readmeDetailOnly: Bool = false) {
         self.model = model
         self.readmeDetailOnly = readmeDetailOnly
+        _cursorModelDraft = State(initialValue: model.cursorBridgePreferences.model)
+        _cursorPortDraft = State(initialValue: String(model.cursorBridgePreferences.port))
+        _cursorAgentPathDraft = State(initialValue: model.cursorBridgePreferences.agentPath ?? "")
     }
 
     private var settingsMutationDisabled: Bool {
         model.managementActionsDisabled
             || model.isManagingProfiles
+            || model.isManagingCursorProvider
             || model.isSwitching
             || model.isMaintainingAuth
             || model.profileManagementRecoveryNeeded
@@ -137,6 +147,7 @@ struct SettingsView: View {
                 switch selection ?? .accounts {
                 case .accounts: accountsPage
                 case .devices: devicesPage
+                case .models: modelsPage
                 case .general: generalPage
                 }
             }
@@ -415,6 +426,407 @@ struct SettingsView: View {
                 systemImage: status?.isReachable == true ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(status?.isReachable == true ? AppTheme.green : AppTheme.yellow)
+        }
+    }
+
+    private var modelsPage: some View {
+        SettingsPage(
+            title: "모델",
+            subtitle: "Cursor 구독 모델을 로컬 및 SSH 원격 Codex에 연결합니다.")
+        {
+            if let banner = model.banner { BannerView(banner: banner) }
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "testtube.2")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(AppTheme.yellow)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("실험 기능")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Cursor의 공식 raw API가 아니라 로그인된 Cursor CLI agent를 사용합니다. 호출은 Cursor 구독의 agent workflow로 계산되며 Codex/OpenAI 사용량과 합산되지 않습니다.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(AppTheme.muted)
+                        Text("Cursor CLI에는 실제 저장소 대신 전용 빈 작업공간과 deny 정책을 전달합니다. 다만 사용자 전역 rules·hooks·MCP와 모든 native 도구를 완전히 격리한다고 보장할 수는 없습니다.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(AppTheme.muted)
+                    }
+                }
+                .padding(12)
+                .background(AppTheme.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppTheme.yellow.opacity(0.22)))
+
+                SettingsGroupTitle("연결 상태")
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Image(systemName: cursorStatusIcon)
+                            .foregroundStyle(cursorStatusColor)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(model.cursorBridgeStatus.title)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(model.cursorBridgeEndpoint)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(AppTheme.muted)
+                                .textSelection(.enabled)
+                        }
+                        Spacer()
+                        if model.isCursorProviderActive {
+                            Label("Codex 기본 provider", systemImage: "checkmark.circle.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(AppTheme.green)
+                        }
+                        Button("연결 확인") {
+                            Task { await model.checkCursorBridge() }
+                        }
+                        .disabled(settingsMutationDisabled)
+                    }
+                    .padding(.vertical, 8)
+
+                    Divider().overlay(AppTheme.border)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Node.js")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(model.cursorResolvedNodePath ?? "찾지 못함")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text("Cursor CLI")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(model.cursorResolvedAgentPath ?? "찾지 못함")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(AppTheme.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 8)
+
+                    Divider().overlay(AppTheme.border)
+
+                    HStack {
+                        Text("Codex 설정")
+                            .font(.system(size: 11, weight: .semibold))
+                        Spacer()
+                        Text(model.cursorCodexConfigurationPath)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(AppTheme.muted)
+                            .lineLimit(1)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 8)
+                }
+
+                Divider().overlay(AppTheme.border)
+                SettingsGroupTitle("Cursor provider")
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Text("모델")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 74, alignment: .leading)
+                        if model.cursorModelCatalog.families.isEmpty {
+                            TextField("auto 또는 agent --list-models의 slug", text: $cursorModelDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("cursor-model-field")
+                        } else {
+                            Picker("", selection: cursorBaseModelBinding) {
+                                if selectedCursorFamily == nil {
+                                    Text("직접 지정 · \(cursorModelDraft)")
+                                        .tag(cursorModelDraft)
+                                }
+                                ForEach(model.cursorModelCatalog.sections) { section in
+                                    Section(section.group.displayName) {
+                                        ForEach(section.families) { family in
+                                            Text(family.displayName).tag(family.baseSlug)
+                                        }
+                                    }
+                                }
+                            }
+                            .labelsHidden()
+                            .accessibilityLabel("Cursor 모델 계열")
+                            .accessibilityIdentifier("cursor-model-picker")
+                        }
+                        if model.isLoadingCursorModels {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button {
+                                Task { await model.refreshCursorModels(agentPath: cursorAgentPathDraft) }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .help("Cursor 모델 목록 새로고침")
+                            .disabled(settingsMutationDisabled)
+                            .accessibilityIdentifier("cursor-model-refresh-button")
+                        }
+                    }
+
+                    if let family = selectedCursorFamily,
+                       let variant = selectedCursorVariant
+                    {
+                        HStack(spacing: 12) {
+                            Text("Reasoning")
+                                .font(.system(size: 11, weight: .semibold))
+                                .frame(width: 74, alignment: .leading)
+                            Picker("", selection: cursorEffortBinding) {
+                                ForEach(family.availableEfforts(
+                                    fast: variant.fast,
+                                    thinking: variant.thinking))
+                                { effort in
+                                    Text(effort.displayName).tag(effort)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 132)
+                            .accessibilityLabel("Cursor reasoning 정도")
+                            .accessibilityIdentifier("cursor-reasoning-picker")
+
+                            Toggle("Thinking", isOn: cursorThinkingBinding)
+                                .toggleStyle(.checkbox)
+                                .disabled(!canToggleCursorThinking)
+                                .accessibilityIdentifier("cursor-thinking-toggle")
+                            Toggle("Fast", isOn: cursorFastBinding)
+                                .toggleStyle(.checkbox)
+                                .disabled(!canToggleCursorFast)
+                                .accessibilityIdentifier("cursor-fast-toggle")
+                            Spacer()
+                        }
+
+                        HStack(spacing: 8) {
+                            Text("실행 slug")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(AppTheme.muted)
+                            Text(variant.slug)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(AppTheme.muted)
+                                .textSelection(.enabled)
+                            Spacer()
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Text("포트")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 74, alignment: .leading)
+                        TextField("32125", text: $cursorPortDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 76)
+                            .accessibilityIdentifier("cursor-port-field")
+                    }
+                    HStack(spacing: 10) {
+                        Text("agent 경로")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 74, alignment: .leading)
+                        TextField("비워 두면 자동 탐색", text: $cursorAgentPathDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 10, design: .monospaced))
+                            .accessibilityIdentifier("cursor-agent-path-field")
+                    }
+                    if let catalogError = model.cursorModelCatalogError {
+                        Label(catalogError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(AppTheme.yellow)
+                            .textSelection(.enabled)
+                    }
+                    Text("현재 Cursor 계정의 `agent --list-models` 결과를 사용합니다. OpenAI GPT와 OpenAI Codex는 별도 그룹이며, Reasoning·Thinking·Fast 조합에 대응하는 실제 slug만 적용됩니다. Codex 선택기에도 `Cursor · GPT`와 `Cursor · Codex` 접두어로 구분됩니다.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(AppTheme.muted)
+                }
+
+                if let error = model.cursorBridgeError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(AppTheme.yellow)
+                        .textSelection(.enabled)
+                }
+
+                Divider().overlay(AppTheme.border)
+                SettingsGroupTitle("SSH 원격 Cursor")
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("macOS Cursor 로그인 저장소는 Linux로 복사할 수 없습니다. Cursor User API Key는 이 Mac의 Keychain에 저장되며, SSH stdin으로 전송된 뒤 각 원격 장치의 ~/.local/share/gpt-switch/cursor-remote-runtime.json과 전용 cursor-remote-xdg/에 소유자 전용으로 저장됩니다. Cursor provider 전체 해제가 성공한 원격 장치에서는 두 저장소를 함께 제거합니다.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(AppTheme.muted)
+                    HStack(spacing: 10) {
+                        SecureField(
+                            model.hasCursorAPIKey ? "저장됨 · 새 값으로 교체" : "Cursor User API Key",
+                            text: $cursorAPIKeyDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("cursor-api-key-field")
+                        Button(model.hasCursorAPIKey ? "교체 및 동기화" : "저장 및 동기화") {
+                            let key = cursorAPIKeyDraft
+                            Task {
+                                if await model.saveCursorAPIKeyAndSync(key) {
+                                    cursorAPIKeyDraft = ""
+                                }
+                            }
+                        }
+                        .disabled(settingsMutationDisabled || cursorAPIKeyDraft.isEmpty)
+                        if model.hasCursorAPIKey {
+                            Button("이 Mac에서 삭제", role: .destructive) {
+                                model.deleteCursorAPIKey()
+                            }
+                            .disabled(settingsMutationDisabled)
+                        }
+                    }
+                    HStack {
+                        Label(
+                            model.hasCursorAPIKey ? "Keychain에 저장됨" : "API key가 저장되지 않음",
+                            systemImage: model.hasCursorAPIKey ? "key.fill" : "key.slash")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(model.hasCursorAPIKey ? AppTheme.green : AppTheme.muted)
+                        Spacer()
+                        Button("활성 SSH 장치에 동기화") {
+                            Task { await model.syncCursorProviderToSSHDevices() }
+                        }
+                        .disabled(
+                            settingsMutationDisabled
+                                || !model.hasCursorAPIKey
+                                || !model.isCursorProviderActive)
+                        .accessibilityIdentifier("cursor-ssh-sync-button")
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button("CLI 설치 안내") { model.openCursorCLIInstallationGuide() }
+                    Button("cursor-agent login 복사") { model.copyCursorLoginCommand() }
+                    Spacer()
+                    if model.isCursorProviderActive {
+                        Button("이전 Codex 모델로 복구", role: .destructive) {
+                            Task { await model.disableCursorProvider() }
+                        }
+                        .disabled(settingsMutationDisabled)
+                    }
+                    Button(model.isCursorProviderActive ? "설정 업데이트" : "Codex 기본 모델로 사용") {
+                        guard let port = Int(cursorPortDraft) else { return }
+                        Task {
+                            await model.enableCursorProvider(
+                                model: cursorModelDraft,
+                                port: port,
+                                agentPath: cursorAgentPathDraft)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(settingsMutationDisabled || Int(cursorPortDraft) == nil)
+                    .accessibilityIdentifier("cursor-provider-enable-button")
+                }
+            }
+            .appCard()
+        }
+        .onAppear {
+            cursorModelDraft = model.cursorBridgePreferences.model
+            cursorPortDraft = String(model.cursorBridgePreferences.port)
+            cursorAgentPathDraft = model.cursorBridgePreferences.agentPath ?? ""
+        }
+        .task {
+            if model.cursorModelCatalog.families.isEmpty {
+                await model.refreshCursorModels(agentPath: cursorAgentPathDraft)
+            }
+        }
+    }
+
+    private var selectedCursorFamily: CursorModelFamily? {
+        model.cursorModelCatalog.family(containingSlug: cursorModelDraft)
+    }
+
+    private var selectedCursorVariant: CursorModelVariant? {
+        model.cursorModelCatalog.variants.first { $0.slug == cursorModelDraft }
+    }
+
+    private var cursorBaseModelBinding: Binding<String> {
+        Binding(
+            get: { selectedCursorFamily?.baseSlug ?? cursorModelDraft },
+            set: { baseSlug in
+                guard let family = model.cursorModelCatalog.family(baseSlug: baseSlug),
+                      let variant = family.preferredVariant
+                else { return }
+                cursorModelDraft = variant.slug
+            })
+    }
+
+    private var cursorEffortBinding: Binding<CursorModelEffort> {
+        Binding(
+            get: { selectedCursorVariant?.effort ?? .default },
+            set: { effort in
+                guard let family = selectedCursorFamily,
+                      let variant = selectedCursorVariant,
+                      let slug = family.resolve(
+                          effort: effort,
+                          fast: variant.fast,
+                          thinking: variant.thinking)
+                else { return }
+                cursorModelDraft = slug
+            })
+    }
+
+    private var cursorFastBinding: Binding<Bool> {
+        Binding(
+            get: { selectedCursorVariant?.fast ?? false },
+            set: { fast in
+                guard let family = selectedCursorFamily,
+                      let variant = selectedCursorVariant,
+                      let slug = family.resolve(
+                          effort: variant.effort,
+                          fast: fast,
+                          thinking: variant.thinking)
+                else { return }
+                cursorModelDraft = slug
+            })
+    }
+
+    private var cursorThinkingBinding: Binding<Bool> {
+        Binding(
+            get: { selectedCursorVariant?.thinking ?? false },
+            set: { thinking in
+                guard let family = selectedCursorFamily,
+                      let variant = selectedCursorVariant,
+                      let slug = family.resolve(
+                          effort: variant.effort,
+                          fast: variant.fast,
+                          thinking: thinking)
+                else { return }
+                cursorModelDraft = slug
+            })
+    }
+
+    private var canToggleCursorFast: Bool {
+        guard let family = selectedCursorFamily,
+              let variant = selectedCursorVariant
+        else { return false }
+        return family.resolve(
+            effort: variant.effort,
+            fast: !variant.fast,
+            thinking: variant.thinking) != nil
+    }
+
+    private var canToggleCursorThinking: Bool {
+        guard let family = selectedCursorFamily,
+              let variant = selectedCursorVariant
+        else { return false }
+        return family.resolve(
+            effort: variant.effort,
+            fast: variant.fast,
+            thinking: !variant.thinking) != nil
+    }
+
+    private var cursorStatusIcon: String {
+        switch model.cursorBridgeStatus {
+        case .healthy: "checkmark.circle.fill"
+        case .starting: "clock.fill"
+        case .stopped: "pause.circle.fill"
+        case .missingNode, .missingAgent, .unauthenticated, .portConflict, .failed:
+            "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var cursorStatusColor: Color {
+        switch model.cursorBridgeStatus {
+        case .healthy: AppTheme.green
+        case .starting: AppTheme.blue
+        case .stopped: AppTheme.muted
+        case .missingNode, .missingAgent, .unauthenticated, .portConflict, .failed:
+            AppTheme.yellow
         }
     }
 

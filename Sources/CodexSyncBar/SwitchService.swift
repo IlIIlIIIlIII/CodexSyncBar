@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import Security
 
 struct ProcessResult: Sendable {
     let status: Int32
@@ -30,15 +32,54 @@ struct DeviceBootstrapResult: Sendable, Equatable {
 }
 
 actor SwitchService {
+    private struct TrustedProvisioningLaunch {
+        let directory: URL
+        let executable: URL
+        let environment: [String: String]
+
+        func cleanup() {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    private struct ProvisioningHelperBytes {
+        let data: Data
+    }
+
+    private static let maximumProvisioningHelperBytes = 4 * 1024 * 1024
     private let executable: URL
+    private let trustedProvisioningExecutable: URL?
+    private let installedCursorRemoteManager: URL
+    private let installedCursorBridgeHelper: URL
+    private let trustedCursorRemoteManager: URL?
+    private let trustedCursorBridgeHelper: URL?
     private var maintenanceBusy = false
     private var maintenanceWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(
         executable: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/bin/gpt-switch"))
+            .appendingPathComponent(".local/bin/gpt-switch"),
+        trustedProvisioningExecutable: URL? = Bundle.main.resourceURL?
+            .appendingPathComponent("gpt-switch"),
+        installedCursorRemoteManager: URL? = nil,
+        installedCursorBridgeHelper: URL? = nil,
+        trustedCursorRemoteManager: URL? = nil,
+        trustedCursorBridgeHelper: URL? = nil)
     {
         self.executable = executable
+        self.trustedProvisioningExecutable = trustedProvisioningExecutable
+        let installedLibrary = executable.deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("lib/gpt-switch", isDirectory: true)
+        self.installedCursorRemoteManager = installedCursorRemoteManager
+            ?? installedLibrary.appendingPathComponent("cursor-remote-manager.mjs")
+        self.installedCursorBridgeHelper = installedCursorBridgeHelper
+            ?? installedLibrary.appendingPathComponent("cursor-codex-bridge.mjs")
+        let trustedResources = trustedProvisioningExecutable?.deletingLastPathComponent()
+        self.trustedCursorRemoteManager = trustedCursorRemoteManager
+            ?? trustedResources?.appendingPathComponent("cursor-remote-manager.mjs")
+        self.trustedCursorBridgeHelper = trustedCursorBridgeHelper
+            ?? trustedResources?.appendingPathComponent("cursor-codex-bridge.mjs")
     }
 
     func fetchStatus() async throws -> [DeviceStatus] {
@@ -76,6 +117,17 @@ actor SwitchService {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             throw AppError.processFailed(
                 message.isEmpty ? "로컬 인증 복구 상태를 확인하지 못했습니다." : message)
+        }
+    }
+
+    func reloadLocalCodexConfiguration() async throws {
+        await acquireMaintenanceSlot()
+        defer { releaseMaintenanceSlot() }
+        let result = try await run(arguments: ["__node", "stop-clients"])
+        guard result.status == 0 else {
+            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw AppError.processFailed(
+                message.isEmpty ? "Codex 설정 프로세스를 다시 불러오지 못했습니다." : message)
         }
     }
 
@@ -273,6 +325,379 @@ actor SwitchService {
         return try Self.parseBootstrapResult(result.output, expectedDeviceID: id)
     }
 
+    func provisionCursor(
+        deviceID: String,
+        request: CursorRemoteProvisioningRequest) async throws -> CursorRemoteProvisioningResult
+    {
+        await acquireMaintenanceSlot()
+        defer { releaseMaintenanceSlot() }
+        let trustedLaunch = try validatedProvisioningLaunch()
+        defer { trustedLaunch.cleanup() }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let input = try encoder.encode(request)
+        let result = try await run(
+            arguments: ["provision-cursor", deviceID],
+            input: input,
+            executableOverride: trustedLaunch.executable,
+            environmentOverrides: trustedLaunch.environment,
+            inheritsEnvironment: false)
+        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.status == 0 else {
+            // The helper receives the raw API key on stdin. Never promote its
+            // untrusted output into a user-visible error, even if a future or
+            // locally modified helper accidentally echoes its input.
+            throw AppError.processFailed("SSH 장치의 Cursor 설치와 인증에 실패했습니다.")
+        }
+        let version = try Self.parseCursorProvisioningResult(
+            output,
+            expectedDeviceID: deviceID)
+        let normalized = Self.normalizedCursorResult(
+            deviceID: deviceID,
+            cursorState: "provisioned",
+            version: version)
+        return CursorRemoteProvisioningResult(deviceID: deviceID, output: normalized)
+    }
+
+    func deprovisionCursor(deviceID: String) async throws -> CursorRemoteDeprovisioningResult {
+        await acquireMaintenanceSlot()
+        defer { releaseMaintenanceSlot() }
+        let trustedLaunch = try validatedProvisioningLaunch()
+        defer { trustedLaunch.cleanup() }
+        let result = try await run(
+            arguments: ["deprovision-cursor", deviceID],
+            executableOverride: trustedLaunch.executable,
+            environmentOverrides: trustedLaunch.environment,
+            inheritsEnvironment: false)
+        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.status == 0 else {
+            throw AppError.processFailed("SSH 장치의 Cursor provider 해제에 실패했습니다.")
+        }
+        let version = try Self.parseCursorDeprovisioningResult(
+            output,
+            expectedDeviceID: deviceID)
+        let normalized = Self.normalizedCursorResult(
+            deviceID: deviceID,
+            cursorState: "deprovisioned",
+            version: version)
+        return CursorRemoteDeprovisioningResult(deviceID: deviceID, output: normalized)
+    }
+
+    nonisolated static func parseCursorProvisioningResult(
+        _ output: String,
+        expectedDeviceID: String) throws -> String
+    {
+        try parseCursorResult(
+            output,
+            expectedDeviceID: expectedDeviceID,
+            expectedCursorState: "provisioned",
+            invalidMessage: "SSH Cursor 설치 검증 응답이 올바르지 않습니다.",
+            missingMessage: "SSH Cursor 설치 검증 응답을 찾지 못했습니다.")
+    }
+
+    nonisolated static func parseCursorDeprovisioningResult(
+        _ output: String,
+        expectedDeviceID: String) throws -> String
+    {
+        try parseCursorResult(
+            output,
+            expectedDeviceID: expectedDeviceID,
+            expectedCursorState: "deprovisioned",
+            invalidMessage: "SSH Cursor 해제 검증 응답이 올바르지 않습니다.",
+            missingMessage: "SSH Cursor 해제 검증 응답을 찾지 못했습니다.")
+    }
+
+    private nonisolated static func parseCursorResult(
+        _ output: String,
+        expectedDeviceID: String,
+        expectedCursorState: String,
+        invalidMessage: String,
+        missingMessage: String) throws -> String
+    {
+        for line in output.split(whereSeparator: \.isNewline).reversed() {
+            var fields: [String: String] = [:]
+            var malformed = false
+            for token in line.split(whereSeparator: \.isWhitespace) {
+                guard let separator = token.firstIndex(of: "=") else {
+                    malformed = true
+                    break
+                }
+                let key = String(token[..<separator])
+                guard ["device", "cursor", "result", "version"].contains(key),
+                      fields[key] == nil
+                else {
+                    malformed = true
+                    break
+                }
+                fields[key] = String(token[token.index(after: separator)...])
+            }
+            guard !fields.isEmpty else { continue }
+            guard !malformed,
+                  Set(fields.keys) == Set(["device", "cursor", "result", "version"]),
+                  fields["device"] == expectedDeviceID,
+                  fields["cursor"] == expectedCursorState,
+                  fields["result"] == "ok",
+                  let version = fields["version"], !version.isEmpty
+            else {
+                throw AppError.processFailed(invalidMessage)
+            }
+            return version
+        }
+        throw AppError.processFailed(missingMessage)
+    }
+
+    private nonisolated static func normalizedCursorResult(
+        deviceID: String,
+        cursorState: String,
+        version: String) -> String
+    {
+        "device=\(deviceID) cursor=\(cursorState) result=ok version=\(version)\n"
+    }
+
+    private func validatedProvisioningLaunch() throws
+        -> TrustedProvisioningLaunch
+    {
+        guard let trustedProvisioningExecutable,
+              let trustedCursorRemoteManager,
+              let trustedCursorBridgeHelper
+        else {
+            throw AppError.processFailed(
+                "앱 번들의 Cursor helper를 찾지 못해 Cursor 자격증명을 전달하지 않았습니다.")
+        }
+        try Self.validateMainBundleSignatureIfRequired(trustedHelpers: [
+            trustedProvisioningExecutable,
+            trustedCursorRemoteManager,
+            trustedCursorBridgeHelper,
+        ])
+        let executableBytes = try Self.validatedProvisioningHelperBytes(
+            installed: executable,
+            trusted: trustedProvisioningExecutable,
+            name: "gpt-switch")
+        let managerBytes = try Self.validatedProvisioningHelperBytes(
+            installed: installedCursorRemoteManager,
+            trusted: trustedCursorRemoteManager,
+            name: "cursor-remote-manager.mjs")
+        let bridgeBytes = try Self.validatedProvisioningHelperBytes(
+            installed: installedCursorBridgeHelper,
+            trusted: trustedCursorBridgeHelper,
+            name: "cursor-codex-bridge.mjs")
+        // Re-check the signed bundle after opening and reading every resource.
+        // A bundle that changed during validation fails closed before the
+        // secret-bearing child process is created.
+        try Self.validateMainBundleSignatureIfRequired(trustedHelpers: [
+            trustedProvisioningExecutable,
+            trustedCursorRemoteManager,
+            trustedCursorBridgeHelper,
+        ])
+
+        let snapshotDirectory = try Self.makeProvisioningSnapshotDirectory()
+        do {
+            let snapshotExecutable = snapshotDirectory.appendingPathComponent("gpt-switch")
+            let snapshotManager = snapshotDirectory.appendingPathComponent("cursor-remote-manager.mjs")
+            let snapshotBridge = snapshotDirectory.appendingPathComponent("cursor-codex-bridge.mjs")
+            try Self.writeProvisioningSnapshot(executableBytes.data, to: snapshotExecutable)
+            try Self.writeProvisioningSnapshot(managerBytes.data, to: snapshotManager)
+            try Self.writeProvisioningSnapshot(bridgeBytes.data, to: snapshotBridge)
+
+            var environment = Self.provisioningEnvironmentAllowlist()
+            environment["GPT_SWITCH_CURSOR_REMOTE_MANAGER"] = snapshotManager.path
+            environment["GPT_SWITCH_CURSOR_BRIDGE_HELPER"] = snapshotBridge.path
+            return TrustedProvisioningLaunch(
+                directory: snapshotDirectory,
+                executable: snapshotExecutable,
+                environment: environment)
+        } catch {
+            try? FileManager.default.removeItem(at: snapshotDirectory)
+            throw error
+        }
+    }
+
+    nonisolated static func validateProvisioningHelper(
+        installed: URL,
+        trusted: URL,
+        name: String = "gpt-switch") throws
+    {
+        _ = try validatedProvisioningHelperBytes(
+            installed: installed,
+            trusted: trusted,
+            name: name)
+    }
+
+    private nonisolated static func validatedProvisioningHelperBytes(
+        installed: URL,
+        trusted: URL,
+        name: String) throws -> ProvisioningHelperBytes
+    {
+        let installedData = try securelyReadProvisioningHelper(
+            installed,
+            allowedOwners: [getuid()],
+            unsafeMessage: "설치된 \(name)이 안전한 사용자 소유 파일이 아니어서 Cursor 자격증명을 전달하지 않았습니다.")
+        let trustedData = try securelyReadProvisioningHelper(
+            trusted,
+            allowedOwners: [getuid(), 0],
+            unsafeMessage: "앱 번들의 \(name)이 안전하지 않아 Cursor 자격증명을 전달하지 않았습니다.")
+        guard installedData == trustedData else {
+            throw AppError.processFailed(
+                "설치된 \(name)이 앱 번들과 일치하지 않아 Cursor 자격증명을 전달하지 않았습니다. 앱을 다시 열어 주세요.")
+        }
+        return ProvisioningHelperBytes(data: trustedData)
+    }
+
+    private nonisolated static func securelyReadProvisioningHelper(
+        _ url: URL,
+        allowedOwners: Set<uid_t>,
+        unsafeMessage: String) throws -> Data
+    {
+        let descriptor = url.path.withCString {
+            Darwin.open($0, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard descriptor >= 0 else { throw AppError.processFailed(unsafeMessage) }
+        defer { Darwin.close(descriptor) }
+
+        var before = stat()
+        guard fstat(descriptor, &before) == 0,
+              (before.st_mode & S_IFMT) == S_IFREG,
+              allowedOwners.contains(before.st_uid),
+              [mode_t(0o700), mode_t(0o755)].contains(before.st_mode & 0o777),
+              before.st_nlink == 1,
+              before.st_size > 0,
+              before.st_size <= off_t(maximumProvisioningHelperBytes)
+        else {
+            throw AppError.processFailed(unsafeMessage)
+        }
+
+        var data = Data()
+        data.reserveCapacity(Int(before.st_size))
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { storage in
+                Darwin.read(descriptor, storage.baseAddress, storage.count)
+            }
+            if count == 0 { break }
+            guard count > 0 else {
+                if errno == EINTR { continue }
+                throw AppError.processFailed(unsafeMessage)
+            }
+            guard data.count + count <= maximumProvisioningHelperBytes else {
+                throw AppError.processFailed(unsafeMessage)
+            }
+            data.append(buffer, count: count)
+        }
+
+        var after = stat()
+        guard fstat(descriptor, &after) == 0,
+              before.st_dev == after.st_dev,
+              before.st_ino == after.st_ino,
+              before.st_uid == after.st_uid,
+              before.st_mode == after.st_mode,
+              before.st_nlink == after.st_nlink,
+              before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              before.st_ctimespec.tv_sec == after.st_ctimespec.tv_sec,
+              before.st_ctimespec.tv_nsec == after.st_ctimespec.tv_nsec,
+              data.count == Int(after.st_size)
+        else {
+            throw AppError.processFailed(unsafeMessage)
+        }
+        return data
+    }
+
+    private nonisolated static func validateMainBundleSignatureIfRequired(
+        trustedHelpers: [URL]) throws
+    {
+        let bundleURL = Bundle.main.bundleURL.standardizedFileURL
+        guard bundleURL.pathExtension == "app",
+              let resources = Bundle.main.resourceURL?.standardizedFileURL
+        else { return }
+
+        let expected = Set([
+            resources.appendingPathComponent("gpt-switch").standardizedFileURL.path,
+            resources.appendingPathComponent("cursor-remote-manager.mjs").standardizedFileURL.path,
+            resources.appendingPathComponent("cursor-codex-bridge.mjs").standardizedFileURL.path,
+        ])
+        guard Set(trustedHelpers.map { $0.standardizedFileURL.path }) == expected else {
+            throw AppError.processFailed(
+                "앱 번들의 Cursor helper 위치가 올바르지 않아 Cursor 자격증명을 전달하지 않았습니다.")
+        }
+
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(bundleURL as CFURL, [], &staticCode) == errSecSuccess,
+              let staticCode,
+              SecStaticCodeCheckValidity(
+                  staticCode,
+                  SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate),
+                  nil) == errSecSuccess
+        else {
+            throw AppError.processFailed(
+                "앱 번들의 코드 서명 또는 리소스가 변경되어 Cursor 자격증명을 전달하지 않았습니다.")
+        }
+    }
+
+    private nonisolated static func makeProvisioningSnapshotDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodexSyncBarProvisioning-\(UUID().uuidString)",
+            isDirectory: true)
+        guard directory.path.withCString({ Darwin.mkdir($0, 0o700) }) == 0 else {
+            throw AppError.processFailed("Cursor helper 보안 스냅샷을 준비하지 못했습니다.")
+        }
+        return directory
+    }
+
+    private nonisolated static func writeProvisioningSnapshot(_ data: Data, to url: URL) throws {
+        let descriptor = url.path.withCString {
+            Darwin.open($0, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o700)
+        }
+        guard descriptor >= 0 else {
+            throw AppError.processFailed("Cursor helper 보안 스냅샷을 준비하지 못했습니다.")
+        }
+        defer { Darwin.close(descriptor) }
+
+        do {
+            try data.withUnsafeBytes { storage in
+                guard let base = storage.baseAddress else { return }
+                var written = 0
+                while written < storage.count {
+                    let count = Darwin.write(
+                        descriptor,
+                        base.advanced(by: written),
+                        storage.count - written)
+                    if count < 0, errno == EINTR { continue }
+                    guard count > 0 else {
+                        throw AppError.processFailed("Cursor helper 보안 스냅샷을 기록하지 못했습니다.")
+                    }
+                    written += count
+                }
+            }
+            // Provisioning only reads these files (Bash interprets the main
+            // helper explicitly), so remove write permission before launch.
+            guard fchmod(descriptor, 0o500) == 0, fsync(descriptor) == 0 else {
+                throw AppError.processFailed("Cursor helper 보안 스냅샷을 확정하지 못했습니다.")
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+
+    private nonisolated static func provisioningEnvironmentAllowlist() -> [String: String] {
+        var environment = [
+            "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "TMPDIR": "/private/tmp",
+        ]
+        if let socket = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"],
+           socket.hasPrefix("/"),
+           !socket.contains("\n"),
+           !socket.contains("\r")
+        {
+            environment["SSH_AUTH_SOCK"] = socket
+        }
+        return environment
+    }
+
     /// SSH can add banners or warnings to the combined output. Only the last
     /// bootstrap summary-shaped line is accepted, and duplicate fields fail
     /// closed instead of trapping in Dictionary(uniqueKeysWithValues:).
@@ -367,15 +792,25 @@ actor SwitchService {
         maintenanceWaiters.removeFirst().resume()
     }
 
-    private func run(arguments: [String]) async throws -> ProcessResult {
-        guard FileManager.default.isReadableFile(atPath: executable.path) else {
-            throw AppError.processFailed("gpt-switch를 찾을 수 없습니다: \(executable.path)")
+    private func run(
+        arguments: [String],
+        input: Data? = nil,
+        executableOverride: URL? = nil,
+        environmentOverrides: [String: String] = [:],
+        inheritsEnvironment: Bool = true) async throws -> ProcessResult
+    {
+        let launchedExecutable = executableOverride ?? executable
+        guard FileManager.default.isReadableFile(atPath: launchedExecutable.path) else {
+            throw AppError.processFailed("gpt-switch를 찾을 수 없습니다: \(launchedExecutable.path)")
         }
 
         return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let pipe = Pipe()
-            let completion = ProcessExecutionCompletion(continuation: continuation)
+            let inputPipe = input.map { _ in Pipe() }
+            let completion = ProcessExecutionCompletion(
+                continuation: continuation,
+                expectsInput: input != nil)
 
             // Locally installed helper scripts can inherit macOS provenance
             // metadata from the app bundle. Launching such a script directly
@@ -383,12 +818,18 @@ actor SwitchService {
             // and readable. Invoke the Bash script explicitly so execution is
             // stable across app updates and provenance changes.
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = [executable.path] + arguments
-            var environment = ProcessInfo.processInfo.environment
-            environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(FileManager.default.homeDirectoryForCurrentUser.path)/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            process.arguments = [launchedExecutable.path] + arguments
+            var environment = inheritsEnvironment ? ProcessInfo.processInfo.environment : [:]
+            if inheritsEnvironment {
+                environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(FileManager.default.homeDirectoryForCurrentUser.path)/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            }
+            for (key, value) in environmentOverrides {
+                environment[key] = value
+            }
             process.environment = environment
             process.standardOutput = pipe
             process.standardError = pipe
+            process.standardInput = inputPipe
             process.terminationHandler = { finished in
                 completion.finish(status: finished.terminationStatus)
             }
@@ -399,11 +840,35 @@ actor SwitchService {
                 // verbose SSH output continuously and avoids the previous
                 // termination/readability race that could lose the summary.
                 pipe.fileHandleForWriting.closeFile()
+                if let input, let inputPipe {
+                    DispatchQueue.global(qos: .utility).async {
+                        let writer = inputPipe.fileHandleForWriting
+                        var writeError: Error?
+                        do {
+                            try writer.write(contentsOf: input)
+                        } catch {
+                            writeError = AppError.processFailed(
+                                "gpt-switch에 입력을 안전하게 전달하지 못했습니다.")
+                        }
+                        do {
+                            try writer.close()
+                        } catch {
+                            if writeError == nil {
+                                writeError = AppError.processFailed(
+                                    "gpt-switch 입력 스트림을 안전하게 닫지 못했습니다.")
+                            }
+                        }
+                        completion.finish(inputError: writeError)
+                    }
+                }
                 DispatchQueue.global(qos: .utility).async {
                     let data = pipe.fileHandleForReading.readDataToEndOfFile()
                     completion.finish(output: data)
                 }
             } catch {
+                if let inputPipe {
+                    try? inputPipe.fileHandleForWriting.close()
+                }
                 completion.fail(error)
             }
         }
@@ -486,9 +951,15 @@ private final class ProcessExecutionCompletion: @unchecked Sendable {
     private var continuation: CheckedContinuation<ProcessResult, Error>?
     private var status: Int32?
     private var output: Data?
+    private var inputFinished: Bool
+    private var inputError: Error?
 
-    init(continuation: CheckedContinuation<ProcessResult, Error>) {
+    init(
+        continuation: CheckedContinuation<ProcessResult, Error>,
+        expectsInput: Bool)
+    {
         self.continuation = continuation
+        self.inputFinished = !expectsInput
     }
 
     func finish(status: Int32) {
@@ -496,9 +967,7 @@ private final class ProcessExecutionCompletion: @unchecked Sendable {
         self.status = status
         let completed = takeCompletedResultLocked()
         lock.unlock()
-        if let (continuation, result) = completed {
-            continuation.resume(returning: result)
-        }
+        resume(completed)
     }
 
     func finish(output: Data) {
@@ -506,9 +975,16 @@ private final class ProcessExecutionCompletion: @unchecked Sendable {
         self.output = output
         let completed = takeCompletedResultLocked()
         lock.unlock()
-        if let (continuation, result) = completed {
-            continuation.resume(returning: result)
-        }
+        resume(completed)
+    }
+
+    func finish(inputError: Error?) {
+        lock.lock()
+        self.inputError = inputError
+        inputFinished = true
+        let completed = takeCompletedResultLocked()
+        lock.unlock()
+        resume(completed)
     }
 
     func fail(_ error: Error) {
@@ -520,14 +996,24 @@ private final class ProcessExecutionCompletion: @unchecked Sendable {
     }
 
     private func takeCompletedResultLocked()
-        -> (CheckedContinuation<ProcessResult, Error>, ProcessResult)?
+        -> (CheckedContinuation<ProcessResult, Error>, Result<ProcessResult, Error>)?
     {
-        guard let continuation, let status, let output else { return nil }
+        guard let continuation, let status, let output, inputFinished else { return nil }
         self.continuation = nil
+        if let inputError {
+            return (continuation, .failure(inputError))
+        }
         return (
             continuation,
-            ProcessResult(
+            .success(ProcessResult(
                 status: status,
-                output: String(data: output, encoding: .utf8) ?? ""))
+                output: String(data: output, encoding: .utf8) ?? "")))
+    }
+
+    private func resume(
+        _ completed: (CheckedContinuation<ProcessResult, Error>, Result<ProcessResult, Error>)?)
+    {
+        guard let (continuation, result) = completed else { return }
+        continuation.resume(with: result)
     }
 }

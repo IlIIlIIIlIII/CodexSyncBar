@@ -6,6 +6,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 HELPER_REPOSITORY_SOURCE="$ROOT/Support/gpt-switch"
 ASKPASS_REPOSITORY_SOURCE="$ROOT/Support/codex-syncbar-askpass"
 USAGE_SOURCE="$ROOT/Support/usage-summary.mjs"
+CURSOR_BRIDGE_SOURCE="$ROOT/Support/cursor-codex-bridge.mjs"
+CURSOR_MANAGER_SOURCE="$ROOT/Support/cursor-remote-manager.mjs"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/codex-syncbar-helper.XXXXXX")
 TEST_PROCESS_PIDS=()
 cleanup() {
@@ -26,7 +28,11 @@ cp "$HELPER_REPOSITORY_SOURCE" "$HELPER"
 cp "$ASKPASS_REPOSITORY_SOURCE" "$ASKPASS_SOURCE"
 chmod 700 "$HELPER" "$ASKPASS_SOURCE"
 
-node "$ROOT/Tests/usage-summary-tests.mjs"
+if [ "${GPT_SWITCH_TEST_SKIP_NODE_SUITES:-0}" != 1 ]; then
+  node "$ROOT/Tests/usage-summary-tests.mjs"
+  node --test "$ROOT/Tests/cursor-codex-bridge-tests.mjs"
+  node --test "$ROOT/Tests/cursor-remote-manager-tests.mjs"
+fi
 
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/.local/share/gpt-switch"
@@ -100,6 +106,20 @@ if [ -n "${GPT_SWITCH_TEST_SSH_SLEEP:-}" ]; then sleep "$GPT_SWITCH_TEST_SSH_SLE
 printf '%s\n' "$@" >"$GPT_SWITCH_TEST_SSH_ARGS"
 printf '%s\n' "$*" >>"$GPT_SWITCH_TEST_SSH_CALLS"
 printf '%s\n' "${CODEX_SYNCBAR_CREDENTIAL_ID:-}" >"$GPT_SWITCH_TEST_CREDENTIAL_ID"
+case " $* " in
+  *" __node cursor-provision "*)
+    request_base64=$(head -c 131073 | openssl base64 -A 2>/dev/null)
+    printf '%s' "$request_base64" | openssl base64 -d -A 2>/dev/null | jq -e '
+      (keys | sort) == ["apiKey","bridgeToken","model","models","port","schemaVersion"] and
+      (.apiKey | type == "string" and length >= 16) and
+      .schemaVersion == 1
+    ' >/dev/null 2>&1 || exit 96
+    printf 'observed\n' >"$GPT_SWITCH_TEST_CURSOR_PROVISION_OBSERVED"
+    while [ -e "$GPT_SWITCH_TEST_CURSOR_PROVISION_PAUSE" ]; do sleep 0.01; done
+    printf 'cursor=provisioned result=ok\n'
+    exit 0
+    ;;
+esac
 cat >"$GPT_SWITCH_TEST_SSH_STDIN"
 if [ -n "${GPT_SWITCH_TEST_FAIL_TARGET:-}" ]; then
   case " $* " in
@@ -114,11 +134,11 @@ if [ -n "${GPT_SWITCH_TEST_LIVE_FALLBACK_TARGET:-}" ]; then
 fi
 case " $* " in
   *" __node status "*) printf 'active=3 fingerprint=abcdef123456 mode=600 auth_mode=chatgpt cli=logged-in credential=access-only access_fp=123456abcdef expires_at=4102444800\n' ;;
-  *" __node version "*) printf '2.1.3\n' ;;
+  *" __node version "*) printf '2.2.0\n' ;;
   *" __node initialize "*) printf 'active=3 fingerprint=abcdef123456 state=initialized\n' ;;
   *" __node verify "*) printf 'active=3 fingerprint=abcdef123456\n' ;;
   *".bootstrap."*) printf 'bootstrap=installed\n' ;;
-  *) printf 'version=2.1.3 active=3 active_fp=abcdef123456 target_fp=abcdef123456\n' ;;
+  *) printf 'version=2.2.0 active=3 active_fp=abcdef123456 target_fp=abcdef123456\n' ;;
 esac
 SH
 chmod 700 "$FAKE_SSH"
@@ -184,6 +204,70 @@ common_env=(
   GPT_SWITCH_TEST_CREDENTIAL_ID="$CREDENTIAL_ID"
 )
 
+# Hold the final SSH call open and inspect controller state while the API key
+# is live. A request/key tempfile implementation fails here before cleanup;
+# the memory/stdin implementation never creates a crash-persistent artifact.
+CURSOR_PROVISION_OBSERVED="$TMP/cursor-provision-observed"
+CURSOR_PROVISION_PAUSE="$TMP/cursor-provision-pause"
+CURSOR_PROVISION_OUTPUT="$TMP/cursor-provision-output"
+CURSOR_PROVISION_ERRORS="$TMP/cursor-provision-errors"
+touch "$CURSOR_PROVISION_PAUSE"
+cursor_api_key="cursor_$(printf 's%.0s' {1..48})"
+cursor_payload=$(jq -cn \
+  --arg apiKey "$cursor_api_key" \
+  --arg bridgeToken "$(printf 'b%.0s' {1..64})" \
+  '{schemaVersion:1,apiKey:$apiKey,model:"composer-2.5",port:32125,
+    bridgeToken:$bridgeToken,models:["composer-2.5","gpt-5.6-sol-high-fast"]}')
+printf '%s' "$cursor_payload" | env "${common_env[@]}" \
+  GPT_SWITCH_CURSOR_BRIDGE_HELPER="$ROOT/Support/cursor-codex-bridge.mjs" \
+  GPT_SWITCH_CURSOR_REMOTE_MANAGER="$ROOT/Support/cursor-remote-manager.mjs" \
+  GPT_SWITCH_TEST_CURSOR_PROVISION_OBSERVED="$CURSOR_PROVISION_OBSERVED" \
+  GPT_SWITCH_TEST_CURSOR_PROVISION_PAUSE="$CURSOR_PROVISION_PAUSE" \
+  "$HELPER" provision-cursor staging-node \
+  >"$CURSOR_PROVISION_OUTPUT" 2>"$CURSOR_PROVISION_ERRORS" &
+cursor_provision_pid=$!
+TEST_PROCESS_PIDS+=("$cursor_provision_pid")
+attempt=0
+while [ ! -f "$CURSOR_PROVISION_OBSERVED" ] && kill -0 "$cursor_provision_pid" 2>/dev/null && \
+      [ "$attempt" -lt 500 ]; do
+  sleep 0.01
+  attempt=$((attempt + 1))
+done
+if [ ! -f "$CURSOR_PROVISION_OBSERVED" ]; then
+  printf 'Cursor provisioning did not reach the SSH stdin checkpoint\n' >&2
+  sed -n '1,20p' "$CURSOR_PROVISION_ERRORS" >&2
+  exit 1
+fi
+cursor_secret_artifact=""
+while IFS= read -r candidate; do
+  if grep -Fq -- "$cursor_api_key" "$candidate"; then
+    cursor_secret_artifact="$candidate"
+    break
+  fi
+done < <(find "$STATE" -type f -print)
+if [ -n "$cursor_secret_artifact" ]; then
+  printf 'Cursor API key was written to controller state: %s\n' "$cursor_secret_artifact" >&2
+  exit 1
+fi
+if find "$STATE" -maxdepth 1 -type f \
+    \( -name '.cursor-provision.*' -o -name '.cursor-api-key.*' \) \
+    -print -quit | grep -q .; then
+  printf 'Cursor provisioning created a secret request artifact\n' >&2
+  exit 1
+fi
+rm -f "$CURSOR_PROVISION_PAUSE"
+wait "$cursor_provision_pid"
+TEST_PROCESS_PIDS=()
+grep -F 'device=staging-node cursor=provisioned result=ok version=2.2.0' \
+  "$CURSOR_PROVISION_OUTPUT" >/dev/null
+if grep -Fq -- "$cursor_api_key" \
+    "$SSH_ARGS" "$SSH_CALLS" "$CURSOR_PROVISION_OUTPUT" "$CURSOR_PROVISION_ERRORS"; then
+  printf 'Cursor API key leaked through argv or helper output\n' >&2
+  exit 1
+fi
+cursor_payload=""
+cursor_api_key=""
+
 # A remote can report the current controller version while still carrying an
 # older usage helper. The controller must repair that schema mismatch before it
 # exposes the remote total to the app-wide aggregate.
@@ -202,7 +286,7 @@ cat >"$USAGE_SSH" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 case " $* " in
-  *" __node version "*) printf '2.1.3\n' ;;
+  *" __node version "*) printf '2.2.0\n' ;;
   *" __node usage-summary "*)
     if [ -f "$GPT_SWITCH_TEST_USAGE_REMOTE_STATE" ]; then
       printf '%s\n' '{"schemaVersion":5,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":2,"inputTokens":18,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":20,"buckets":[],"errors":[]}'
@@ -514,8 +598,14 @@ if kill -0 "$pre_switch_reconnect_pid" >/dev/null 2>&1; then
   printf 'pre-switch reconnect generation survived the post-copy stop\n' >&2
   exit 1
 fi
-[ "$(cat "$STATE/current")" = 2 ]
-cmp -s "$STATE/profiles/2.auth.json" "$CODEX/auth.json"
+if [ "$(cat "$STATE/current")" != 2 ]; then
+  printf 'post-copy stop did not preserve the switched profile marker\n' >&2
+  exit 1
+fi
+if ! cmp -s "$STATE/profiles/2.auth.json" "$CODEX/auth.json"; then
+  printf 'post-copy stop did not preserve the switched auth\n' >&2
+  exit 1
+fi
 env "${common_env[@]}" "$HELPER" __node switch 3 0 >/dev/null
 
 switch_active_before=$(shasum -a 256 "$CODEX/auth.json" | awk '{print $1}')
@@ -690,6 +780,302 @@ grep -F 'different or unbound SSH endpoint' "$TMP/bootstrap-host-binding.out" >/
 rm -f "$foreign_recovery"
 cp "$STATE/config.valid.json" "$STATE/config.json"
 chmod 600 "$STATE/config.json"
+
+# Exercise the public Cursor provision/deprovision transport against a local
+# fake SSH endpoint that runs the installed remote helper and real manager.
+# The fake remote deliberately echoes both request secrets to SSH stderr after
+# provisioning; the controller must capture and discard those diagnostics.
+CURSOR_REMOTE_HOME="$(cd "$TMP" && pwd -P)/cursor-remote-home"
+CURSOR_REMOTE_CONFIG_ORIGINAL="$TMP/cursor-remote-config.original"
+CURSOR_REMOTE_CONFIG="$CURSOR_REMOTE_HOME/.codex/config.toml"
+CURSOR_REMOTE_AGENT="$CURSOR_REMOTE_HOME/fake-cursor-agent"
+CURSOR_REMOTE_PROCESS_BIN="$CURSOR_REMOTE_HOME/test-bin"
+CURSOR_REMOTE_STOP_CALLS="$TMP/cursor-stop-calls"
+CURSOR_SSH="$TMP/cursor-ssh"
+CURSOR_SSH_ARGS="$TMP/cursor-ssh-args"
+CURSOR_NODE=$(command -v node)
+mkdir -p "$CURSOR_REMOTE_HOME/.codex" "$CURSOR_REMOTE_PROCESS_BIN"
+chmod 700 "$CURSOR_REMOTE_HOME" "$CURSOR_REMOTE_HOME/.codex" "$CURSOR_REMOTE_PROCESS_BIN"
+printf '# keep-this-config-sentinel\r\napproval_policy = "never"\r\nmodel = "gpt-5.6-sol"\r\nmodel_provider = "openai"\r\n\r\n[mcp_servers.keep_me]\r\ncommand = "/usr/bin/true"\r\n' \
+  >"$CURSOR_REMOTE_CONFIG_ORIGINAL"
+cp "$CURSOR_REMOTE_CONFIG_ORIGINAL" "$CURSOR_REMOTE_CONFIG"
+chmod 644 "$CURSOR_REMOTE_CONFIG"
+
+cat >"$CURSOR_REMOTE_AGENT" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[ -n "${CURSOR_API_KEY:-}" ] || exit 90
+for argument in "$@"; do
+  case "$argument" in *"$CURSOR_API_KEY"*) exit 91 ;; esac
+done
+case "${1:-}" in
+  status)
+    mkdir -p "$XDG_CONFIG_HOME"
+    printf 'api-key-authenticated\n' >"$XDG_CONFIG_HOME/auth-state"
+    chmod 600 "$XDG_CONFIG_HOME/auth-state"
+    printf '{"authenticated":true}\n'
+    ;;
+  --list-models)
+    printf 'Available models\n\ncomposer-2.5 - Composer 2.5\ngpt-5.6-sol-high-fast - GPT 5.6 Sol High Fast\n'
+    ;;
+  *) exit 92 ;;
+esac
+SH
+chmod 700 "$CURSOR_REMOTE_AGENT"
+
+cat >"$CURSOR_REMOTE_PROCESS_BIN/pgrep" <<'SH'
+#!/usr/bin/env bash
+printf 'stop-clients\n' >>"$GPT_SWITCH_TEST_CURSOR_STOP_CALLS"
+if [ "${GPT_SWITCH_TEST_CURSOR_STOP_FAILURE:-0}" = 1 ]; then
+  printf '999999\n'
+  exit 0
+fi
+exit 1
+SH
+cat >"$CURSOR_REMOTE_PROCESS_BIN/ps" <<'SH'
+#!/usr/bin/env bash
+if [ "${GPT_SWITCH_TEST_CURSOR_STOP_FAILURE:-0}" = 1 ]; then
+  printf '/usr/bin/codex app-server --listen unix:///tmp/codex-app-server.sock\n'
+  exit 0
+fi
+exit 1
+SH
+cat >"$CURSOR_REMOTE_PROCESS_BIN/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod 700 "$CURSOR_REMOTE_PROCESS_BIN/pgrep" "$CURSOR_REMOTE_PROCESS_BIN/ps" \
+  "$CURSOR_REMOTE_PROCESS_BIN/sleep"
+
+cat >"$CURSOR_SSH" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+if [ "${GPT_SWITCH_TEST_SWAP_CURSOR_SOURCES:-0}" = 1 ] && \
+   [ ! -e "$GPT_SWITCH_TEST_SWAP_CURSOR_MARKER" ]; then
+  bridge_replacement="$GPT_SWITCH_CURSOR_BRIDGE_HELPER.replacement.$$"
+  manager_replacement="$GPT_SWITCH_CURSOR_REMOTE_MANAGER.replacement.$$"
+  printf '#!/usr/bin/env node\n// replaced bridge source\n' >"$bridge_replacement"
+  printf '#!/usr/bin/env node\n// replaced manager source\n' >"$manager_replacement"
+  chmod 700 "$bridge_replacement" "$manager_replacement"
+  mv "$bridge_replacement" "$GPT_SWITCH_CURSOR_BRIDGE_HELPER"
+  mv "$manager_replacement" "$GPT_SWITCH_CURSOR_REMOTE_MANAGER"
+  : >"$GPT_SWITCH_TEST_SWAP_CURSOR_MARKER"
+fi
+printf '%s\n' "$@" >>"$GPT_SWITCH_TEST_CURSOR_SSH_ARGS"
+remote_command=""
+for remote_command in "$@"; do :; done
+[ -n "$remote_command" ]
+remote_home="$GPT_SWITCH_TEST_CURSOR_REMOTE_HOME"
+run_remote() {
+  HOME="$remote_home" \
+    PATH="$GPT_SWITCH_TEST_CURSOR_PROCESS_BIN:$remote_home/.local/bin:$PATH" \
+    GPT_SWITCH_STATE_ROOT="$remote_home/.local/share/gpt-switch" \
+    CODEX_HOME="$remote_home/.codex" \
+    GPT_SWITCH_NODE_BIN="$GPT_SWITCH_TEST_CURSOR_NODE" \
+    GPT_SWITCH_CURSOR_BRIDGE_HELPER= \
+    GPT_SWITCH_CURSOR_REMOTE_MANAGER= \
+    CURSOR_REMOTE_NODE_PATH="$GPT_SWITCH_TEST_CURSOR_NODE" \
+    CURSOR_REMOTE_AGENT_PATH="$GPT_SWITCH_TEST_CURSOR_AGENT" \
+    CURSOR_REMOTE_BRIDGE_PATH="$remote_home/.local/lib/gpt-switch/cursor-codex-bridge.mjs" \
+    /bin/bash -c "$remote_command"
+}
+leak_captured_secrets() {
+  jq -r '.apiKey, .bridgeToken' >&2
+}
+case "$remote_command" in
+  *"__node cursor-provision"*)
+    request_base64=$(head -c 131073 | openssl base64 -A 2>/dev/null)
+    set +e
+    printf '%s' "$request_base64" | openssl base64 -d -A 2>/dev/null | run_remote
+    rc=$?
+    set -e
+    printf '%s' "$request_base64" | openssl base64 -d -A 2>/dev/null | \
+      leak_captured_secrets
+    request_base64=""
+    exit "$rc"
+    ;;
+  *"__node cursor-deprovision"*)
+    set +e
+    run_remote </dev/null
+    rc=$?
+    set -e
+    exit "$rc"
+    ;;
+  *) run_remote ;;
+esac
+SH
+chmod 700 "$CURSOR_SSH"
+
+# Use private copies so the fake SSH endpoint can replace the original
+# pathnames during provisioning without touching repository-owned sources.
+CURSOR_PINNED_BRIDGE_SOURCE="$TMP/pinned-cursor-codex-bridge.mjs"
+CURSOR_PINNED_MANAGER_SOURCE="$TMP/pinned-cursor-remote-manager.mjs"
+CURSOR_PINNED_BRIDGE_ORIGINAL="$TMP/pinned-cursor-codex-bridge.original.mjs"
+CURSOR_PINNED_MANAGER_ORIGINAL="$TMP/pinned-cursor-remote-manager.original.mjs"
+cp "$CURSOR_BRIDGE_SOURCE" "$CURSOR_PINNED_BRIDGE_SOURCE"
+cp "$CURSOR_MANAGER_SOURCE" "$CURSOR_PINNED_MANAGER_SOURCE"
+cp "$CURSOR_BRIDGE_SOURCE" "$CURSOR_PINNED_BRIDGE_ORIGINAL"
+cp "$CURSOR_MANAGER_SOURCE" "$CURSOR_PINNED_MANAGER_ORIGINAL"
+chmod 500 "$CURSOR_PINNED_BRIDGE_SOURCE" "$CURSOR_PINNED_MANAGER_SOURCE"
+chmod 700 \
+  "$CURSOR_PINNED_BRIDGE_ORIGINAL" "$CURSOR_PINNED_MANAGER_ORIGINAL"
+CURSOR_SWAP_MARKER="$TMP/cursor-helper-sources-swapped"
+
+CURSOR_API_CANARY="cursor_api_canary_0123456789abcdef"
+CURSOR_BRIDGE_CANARY="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+CURSOR_PAYLOAD=$(jq -cn \
+  --arg apiKey "$CURSOR_API_CANARY" \
+  --arg model 'composer-2.5' \
+  --arg bridgeToken "$CURSOR_BRIDGE_CANARY" \
+  '{schemaVersion:1,apiKey:$apiKey,model:$model,port:43267,bridgeToken:$bridgeToken,
+    models:["composer-2.5","gpt-5.6-sol-high-fast"]}')
+cursor_env=(
+  "${common_env[@]}"
+  GPT_SWITCH_SSH_BIN="$CURSOR_SSH"
+  GPT_SWITCH_CURSOR_BRIDGE_HELPER="$CURSOR_PINNED_BRIDGE_SOURCE"
+  GPT_SWITCH_CURSOR_REMOTE_MANAGER="$CURSOR_PINNED_MANAGER_SOURCE"
+  GPT_SWITCH_TEST_CURSOR_REMOTE_HOME="$CURSOR_REMOTE_HOME"
+  GPT_SWITCH_TEST_CURSOR_PROCESS_BIN="$CURSOR_REMOTE_PROCESS_BIN"
+  GPT_SWITCH_TEST_CURSOR_STOP_CALLS="$CURSOR_REMOTE_STOP_CALLS"
+  GPT_SWITCH_TEST_CURSOR_NODE="$CURSOR_NODE"
+  GPT_SWITCH_TEST_CURSOR_AGENT="$CURSOR_REMOTE_AGENT"
+  GPT_SWITCH_TEST_CURSOR_SSH_ARGS="$CURSOR_SSH_ARGS"
+)
+
+CURSOR_PROVISION_STDOUT="$TMP/cursor-provision.stdout"
+CURSOR_PROVISION_STDERR="$TMP/cursor-provision.stderr"
+if ! printf '%s' "$CURSOR_PAYLOAD" | env "${cursor_env[@]}" \
+    GPT_SWITCH_TEST_SWAP_CURSOR_SOURCES=1 \
+    GPT_SWITCH_TEST_SWAP_CURSOR_MARKER="$CURSOR_SWAP_MARKER" \
+    "$HELPER" provision-cursor staging-node \
+    >"$CURSOR_PROVISION_STDOUT" 2>"$CURSOR_PROVISION_STDERR"; then
+  if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
+      "$CURSOR_PROVISION_STDOUT" "$CURSOR_PROVISION_STDERR" >/dev/null; then
+    printf 'Cursor provisioning failure leaked a credential\n' >&2
+  else
+    printf 'Cursor provisioning with pinned helper sources failed:\n' >&2
+    sed 's/^/  /' "$CURSOR_PROVISION_STDERR" >&2
+  fi
+  exit 1
+fi
+grep -Fx 'device=staging-node cursor=provisioned result=ok version=2.2.0' \
+  "$CURSOR_PROVISION_STDOUT" >/dev/null
+[ ! -s "$CURSOR_PROVISION_STDERR" ]
+[ -e "$CURSOR_SWAP_MARKER" ]
+cmp -s "$CURSOR_PINNED_BRIDGE_ORIGINAL" \
+  "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/cursor-codex-bridge.mjs"
+cmp -s "$CURSOR_PINNED_MANAGER_ORIGINAL" \
+  "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/cursor-remote-manager.mjs"
+# Restore the private sources for later independent deprovision invocations.
+cp "$CURSOR_PINNED_BRIDGE_ORIGINAL" "$CURSOR_PINNED_BRIDGE_SOURCE"
+cp "$CURSOR_PINNED_MANAGER_ORIGINAL" "$CURSOR_PINNED_MANAGER_SOURCE"
+chmod 700 "$CURSOR_PINNED_BRIDGE_SOURCE" "$CURSOR_PINNED_MANAGER_SOURCE"
+if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
+    "$CURSOR_SSH_ARGS" "$CURSOR_PROVISION_STDOUT" "$CURSOR_PROVISION_STDERR" >/dev/null; then
+  printf 'Cursor provisioning leaked a credential through argv or user-visible output\n' >&2
+  exit 1
+fi
+[ "$(cat "$CURSOR_REMOTE_STOP_CALLS")" = stop-clients ]
+[ ! -e "$STATE/.controller-lock" ]
+if find "$STATE" -maxdepth 1 -name '.cursor-*' -print -quit | grep -q .; then
+  printf 'Cursor provisioning left a controller credential staging file\n' >&2
+  exit 1
+fi
+
+CURSOR_RUNTIME="$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-runtime.json"
+CURSOR_BACKUP="$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-config-backup.json"
+CURSOR_AUTH_STATE="$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-xdg/config/auth-state"
+CURSOR_TEST_RUNTIME="$CURSOR_RUNTIME" "$CURSOR_NODE" --input-type=module <<'NODE'
+import { readFile } from "node:fs/promises";
+import http from "node:http";
+
+const runtime = JSON.parse(await readFile(process.env.CURSOR_TEST_RUNTIME, "utf8"));
+const result = await new Promise((resolve, reject) => {
+  const request = http.request({
+    host: "127.0.0.1",
+    port: runtime.port,
+    path: "/healthz",
+    headers: { "X-SyncBar-Bridge-Token": runtime.bridgeToken },
+  }, (response) => {
+    const chunks = [];
+    response.on("data", (chunk) => chunks.push(chunk));
+    response.on("end", () => resolve({ response, body: Buffer.concat(chunks) }));
+  });
+  request.setTimeout(2_000, () => request.destroy(new Error("health timeout")));
+  request.on("error", reject);
+  request.end();
+});
+const body = JSON.parse(result.body.toString("utf8"));
+if (result.response.statusCode !== 200 || body.status !== "ok" ||
+    body.protocol !== "responses" || body.model !== runtime.model ||
+    !Number.isInteger(body.pid)) {
+  throw new Error("authenticated loopback bridge is unhealthy");
+}
+NODE
+[ "$(stat -f '%Lp' "$CURSOR_RUNTIME")" = 600 ]
+[ "$(stat -f '%Lp' "$CURSOR_BACKUP")" = 600 ]
+[ "$(stat -f '%Lp' "$CURSOR_AUTH_STATE")" = 600 ]
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_CONFIG")" = 600 ]
+jq -e --arg api "$CURSOR_API_CANARY" --arg token "$CURSOR_BRIDGE_CANARY" \
+  '.apiKey == $api and .bridgeToken == $token' "$CURSOR_RUNTIME" >/dev/null
+grep -F '# keep-this-config-sentinel' "$CURSOR_REMOTE_CONFIG" >/dev/null
+grep -F '[mcp_servers.keep_me]' "$CURSOR_REMOTE_CONFIG" >/dev/null
+grep -F 'model_provider = "syncbar_cursor_bridge"' "$CURSOR_REMOTE_CONFIG" >/dev/null
+if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" "$CURSOR_REMOTE_CONFIG" >/dev/null; then
+  printf 'Cursor provisioning wrote a credential into Codex config\n' >&2
+  exit 1
+fi
+
+# Deprovision commits the exact restore before client reload. Force that reload
+# to fail, verify the generic/secret-free partial failure, then prove a retry is
+# idempotent and succeeds without reintroducing managed state.
+CURSOR_DEPROVISION_FAIL_STDOUT="$TMP/cursor-deprovision-fail.stdout"
+CURSOR_DEPROVISION_FAIL_STDERR="$TMP/cursor-deprovision-fail.stderr"
+if env "${cursor_env[@]}" GPT_SWITCH_TEST_CURSOR_STOP_FAILURE=1 \
+    "$HELPER" deprovision-cursor staging-node \
+    >"$CURSOR_DEPROVISION_FAIL_STDOUT" 2>"$CURSOR_DEPROVISION_FAIL_STDERR"; then
+  printf 'Cursor deprovision unexpectedly succeeded after client reload failure\n' >&2
+  exit 1
+fi
+grep -F 'Cursor deprovisioning failed on staging-node; remote details were withheld' \
+  "$CURSOR_DEPROVISION_FAIL_STDERR" >/dev/null
+if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
+    "$CURSOR_DEPROVISION_FAIL_STDOUT" "$CURSOR_DEPROVISION_FAIL_STDERR" >/dev/null; then
+  printf 'Cursor deprovision failure exposed a credential in user-visible output\n' >&2
+  exit 1
+fi
+cmp -s "$CURSOR_REMOTE_CONFIG_ORIGINAL" "$CURSOR_REMOTE_CONFIG"
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_CONFIG")" = 644 ]
+[ ! -e "$CURSOR_RUNTIME" ]
+[ ! -e "$CURSOR_BACKUP" ]
+[ ! -e "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-xdg" ]
+[ ! -e "$STATE/.controller-lock" ]
+if find "$STATE" -maxdepth 1 -name '.cursor-*' -print -quit | grep -q .; then
+  printf 'Cursor deprovision failure left a controller staging file\n' >&2
+  exit 1
+fi
+
+CURSOR_DEPROVISION_STDOUT="$TMP/cursor-deprovision.stdout"
+CURSOR_DEPROVISION_STDERR="$TMP/cursor-deprovision.stderr"
+env "${cursor_env[@]}" "$HELPER" deprovision-cursor staging-node \
+  >"$CURSOR_DEPROVISION_STDOUT" 2>"$CURSOR_DEPROVISION_STDERR"
+grep -Fx 'device=staging-node cursor=deprovisioned result=ok version=2.2.0' \
+  "$CURSOR_DEPROVISION_STDOUT" >/dev/null
+[ ! -s "$CURSOR_DEPROVISION_STDERR" ]
+cmp -s "$CURSOR_REMOTE_CONFIG_ORIGINAL" "$CURSOR_REMOTE_CONFIG"
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_CONFIG")" = 644 ]
+if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
+    "$CURSOR_SSH_ARGS" "$CURSOR_DEPROVISION_STDOUT" "$CURSOR_DEPROVISION_STDERR" >/dev/null; then
+  printf 'Cursor deprovision retry leaked a credential through argv or user-visible output\n' >&2
+  exit 1
+fi
+if find "$CURSOR_REMOTE_HOME" -type f \
+    -exec grep -F -l -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" {} + | grep -q .; then
+  printf 'Cursor deprovision left a persisted credential on the remote host\n' >&2
+  exit 1
+fi
+[ "$(wc -l <"$CURSOR_REMOTE_STOP_CALLS" | tr -d ' ')" -eq 3 ]
 
 auth_before=$(shasum -a 256 "$CODEX/auth.json" | awk '{print $1}')
 profiles_before=$(find "$STATE/profiles" -type f -name '*.auth.json' -exec shasum -a 256 {} + | sort)
@@ -998,7 +1384,7 @@ if grep -E 'password-value|passphrase-value' "$STATE/config.json" "$SSH_ARGS" >/
 fi
 
 version=$("$HELPER" --version)
-[ "$version" = "2.1.3" ]
+[ "$version" = "2.2.0" ]
 
 FAKE_SECURITY="$TMP/fake-security"
 SECURITY_ARGS="$TMP/security-args"

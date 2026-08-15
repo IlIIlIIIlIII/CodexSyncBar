@@ -62,6 +62,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginRequiresApproval = false
     @Published private(set) var launchAtLoginStatusText = "확인 중…"
     @Published private(set) var isReadmeDemo = false
+    @Published private(set) var cursorBridgePreferences: CursorBridgePreferences
+    @Published private(set) var cursorBridgeStatus: CursorBridgeStatus = .stopped
+    @Published private(set) var isCursorProviderActive = false
+    @Published private(set) var isManagingCursorProvider = false
+    @Published private(set) var cursorBridgeError: String?
+    @Published private(set) var cursorModelCatalog = CursorModelCatalog(cliOutput: "")
+    @Published private(set) var isLoadingCursorModels = false
+    @Published private(set) var cursorModelCatalogError: String?
+    @Published private(set) var hasCursorAPIKey = false
 
     private let usageService: UsageService
     private let switchService: SwitchService
@@ -70,6 +79,11 @@ final class AppModel: ObservableObject {
     private let menuBarUsagePreferencesStore: MenuBarUsagePreferencesStore
     private let weeklyAnchorStore: WeeklyAnchorStore
     private let weeklyAnchorService: WeeklyUsageAnchorService
+    private let cursorBridgePreferencesStore: CursorBridgePreferencesStore
+    private let codexConfigService: CodexConfigService
+    private let codexCursorModelCatalogService: CodexCursorModelCatalogService
+    private let cursorBridgeService: CursorBridgeService
+    private let cursorAPIKeyStore: CursorAPIKeyStoring
     private let secretStore: SSHSecretStoring
     private let controllerMutationLock = ControllerMutationLock()
     private var usagePollingTask: Task<Void, Never>?
@@ -103,6 +117,45 @@ final class AppModel: ObservableObject {
         let usageDisplayPreferencesStore = UsageDisplayPreferencesStore()
         let menuBarUsagePreferencesStore = MenuBarUsagePreferencesStore()
         let weeklyAnchorStore = WeeklyAnchorStore()
+        let cursorBridgePreferencesStore = CursorBridgePreferencesStore()
+        let codexConfigService = CodexConfigService()
+        let codexCursorModelCatalogService = CodexCursorModelCatalogService()
+        let cursorBridgeService = CursorBridgeService()
+        let cursorAPIKeyStore = SystemCursorAPIKeyStore()
+        let initialCursorAPIKeyState: (isStored: Bool, error: String?) = {
+            guard readmeDemoFixture == nil else { return (false, nil) }
+            do { return (try cursorAPIKeyStore.read() != nil, nil) }
+            catch { return (false, error.localizedDescription) }
+        }()
+        let initialCursorState: (
+            preferences: CursorBridgePreferences,
+            error: String?,
+            providerActive: Bool) = {
+                guard readmeDemoFixture == nil else {
+                    return (CursorBridgePreferences(), nil, false)
+                }
+                var preferences = CursorBridgePreferences()
+                var providerActive = false
+                var errors: [String] = []
+                do { preferences = try cursorBridgePreferencesStore.load() }
+                catch { errors.append(error.localizedDescription) }
+                do {
+                    if let active = try codexConfigService.activeCursorProviderConfiguration() {
+                        providerActive = true
+                        let loadedPreferences = preferences
+                        preferences.model = active.model
+                        preferences.port = active.port
+                        preferences.bridgeToken = active.bridgeToken
+                        if preferences != loadedPreferences {
+                            do { try cursorBridgePreferencesStore.save(preferences) }
+                            catch { errors.append(error.localizedDescription) }
+                        }
+                    }
+                } catch {
+                    errors.append(error.localizedDescription)
+                }
+                return (preferences, errors.isEmpty ? nil : errors.joined(separator: " "), providerActive)
+            }()
         let loadedConfiguration: AppConfiguration?
         let initialConfigurationError: String?
         if let readmeDemoFixture {
@@ -146,6 +199,19 @@ final class AppModel: ObservableObject {
         self.usageDisplayPreferencesStore = usageDisplayPreferencesStore
         self.menuBarUsagePreferencesStore = menuBarUsagePreferencesStore
         self.weeklyAnchorStore = weeklyAnchorStore
+        self.cursorBridgePreferencesStore = cursorBridgePreferencesStore
+        self.codexConfigService = codexConfigService
+        self.codexCursorModelCatalogService = codexCursorModelCatalogService
+        self.cursorBridgeService = cursorBridgeService
+        self.cursorAPIKeyStore = cursorAPIKeyStore
+        cursorBridgePreferences = initialCursorState.preferences
+        isCursorProviderActive = initialCursorState.providerActive
+        hasCursorAPIKey = initialCursorAPIKeyState.isStored
+        let initialCursorErrors = [initialCursorState.error, initialCursorAPIKeyState.error]
+            .compactMap { $0 }
+        cursorBridgeError = initialCursorErrors.isEmpty
+            ? nil
+            : initialCursorErrors.joined(separator: " ")
         weeklyAnchorService = WeeklyUsageAnchorService(
             authStore: store,
             credentialRefresher: { profileID, failedAccessToken in
@@ -207,6 +273,12 @@ final class AppModel: ObservableObject {
                 }
                 self.banner = AppBanner(style: .error, message: error.localizedDescription)
             }
+        }
+
+        cursorBridgeService.onUnexpectedStatusChange = { [weak self] status in
+            guard let self else { return }
+            self.cursorBridgeStatus = status
+            self.cursorBridgeError = status.detail
         }
 
         if let readmeDemoFixture {
@@ -284,6 +356,7 @@ final class AppModel: ObservableObject {
         }
         hasStarted = true
         refreshLaunchAtLoginState()
+        await reconcileCursorBridgeRuntime()
         // A pre-2.0 installation has no versioned configuration, so legacy
         // node/swap recovery must run before migration. Once config.json
         // exists, durable login/logout recovery always takes priority because
@@ -796,6 +869,7 @@ final class AppModel: ObservableObject {
         guard configurationError == nil, !profileManagementRecoveryNeeded,
               !hasControllerTransaction,
               !isManagingProfiles, !isSwitching, !isMaintainingAuth,
+              !isManagingCursorProvider,
               loginWindowController == nil
         else {
             banner = AppBanner(style: .warning, message: configurationMutationBlockMessage)
@@ -1260,6 +1334,7 @@ final class AppModel: ObservableObject {
         guard configurationError == nil, !profileManagementRecoveryNeeded,
               !hasControllerTransaction,
               !isManagingProfiles, !isSwitching, !isMaintainingAuth,
+              !isManagingCursorProvider,
               let device = configuredDevices.first(where: { $0.id == id })
         else {
             banner = AppBanner(style: .warning, message: configurationMutationBlockMessage)
@@ -1312,9 +1387,25 @@ final class AppModel: ObservableObject {
                 try FileManager.default.removeItem(at: activationIntentURL)
             }
             activationIntentURL = nil
-            banner = AppBanner(
-                style: .success,
-                message: "\(device.displayName) 설치와 계정 동기화를 확인하고 활성화했습니다.")
+            if isCursorProviderActive {
+                do {
+                    guard let apiKey = try cursorAPIKeyStore.read() else {
+                        throw AppError.processFailed("모델 설정에서 Cursor User API Key를 먼저 저장해 주세요.")
+                    }
+                    _ = try await provisionCursor(on: id, apiKey: apiKey)
+                    banner = AppBanner(
+                        style: .success,
+                        message: "\(device.displayName)에 Codex 계정과 Cursor provider를 설치하고 활성화했습니다.")
+                } catch {
+                    banner = AppBanner(
+                        style: .warning,
+                        message: "\(device.displayName)의 Codex 계정 동기화는 완료됐지만 Cursor 설치는 확인이 필요합니다: \(error.localizedDescription)")
+                }
+            } else {
+                banner = AppBanner(
+                    style: .success,
+                    message: "\(device.displayName) 설치와 계정 동기화를 확인하고 활성화했습니다.")
+            }
         } catch {
             var recoveryError: Error?
             if activationIntentURL != nil {
@@ -1710,6 +1801,387 @@ final class AppModel: ObservableObject {
         }
         try FileManager.default.removeItem(at: profileSwapJournalURL)
         return true
+    }
+
+    var cursorBridgeEndpoint: String {
+        "http://127.0.0.1:\(cursorBridgePreferences.port)/v1"
+    }
+
+    var cursorCodexConfigurationPath: String {
+        codexConfigService.configurationURL.path
+    }
+
+    var cursorResolvedNodePath: String? {
+        cursorBridgeService.resolvedNodePath
+    }
+
+    var cursorResolvedAgentPath: String? {
+        cursorBridgeService.resolvedAgentPath
+    }
+
+    func refreshCursorModels(agentPath: String? = nil) async {
+        guard !isLoadingCursorModels, !isReadmeDemo else { return }
+        isLoadingCursorModels = true
+        defer { isLoadingCursorModels = false }
+        do {
+            let normalizedPath = agentPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+            cursorModelCatalog = try await cursorBridgeService.loadModelCatalog(
+                preferredAgentPath: normalizedPath?.isEmpty == false
+                    ? normalizedPath
+                    : cursorBridgePreferences.agentPath)
+            cursorModelCatalogError = nil
+        } catch {
+            cursorModelCatalogError = error.localizedDescription
+        }
+    }
+
+    func reconcileCursorBridgeRuntime() async {
+        guard !isReadmeDemo else { return }
+        if isCursorProviderActive {
+            cursorBridgeStatus = await cursorBridgeService.start(
+                preferences: cursorBridgePreferences)
+        } else {
+            cursorBridgeStatus = await cursorBridgeService.refreshAvailability(
+                preferences: cursorBridgePreferences)
+        }
+        cursorBridgeError = cursorBridgeStatus.detail
+    }
+
+    func enableCursorProvider(
+        model: String,
+        port: Int,
+        agentPath: String?) async
+    {
+        guard cursorManagementCanBegin else { return }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+        let previousPreferences = cursorBridgePreferences
+        let wasActive = isCursorProviderActive
+        var previousCatalogData: Data?
+        var installedCatalog = false
+        var activatedConfiguration = false
+        do {
+            let normalizedPath = agentPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let preferences = try CursorBridgePreferences(
+                port: port,
+                model: model,
+                agentPath: normalizedPath?.isEmpty == true ? nil : normalizedPath,
+                bridgeToken: cursorBridgePreferences.bridgeToken).validated()
+            let catalog = try await cursorBridgeService.loadModelCatalog(
+                preferredAgentPath: preferences.agentPath)
+            guard catalog.variants.contains(where: { $0.slug == preferences.model }) else {
+                throw AppError.processFailed(
+                    "현재 Cursor 계정에서 사용할 수 없는 모델입니다: \(preferences.model)")
+            }
+            cursorModelCatalog = catalog
+            cursorModelCatalogError = nil
+            if !wasActive,
+               let configuredCatalogPath = try codexConfigService.configuredModelCatalogPath(),
+               pathsReferToSameFile(
+                   configuredCatalogPath,
+                   codexCursorModelCatalogService.catalogURL.path)
+            {
+                throw AppError.processFailed(
+                    "기존 Codex 설정이 SyncBar 관리 모델 카탈로그 경로를 이미 사용하고 있어 파일을 덮어쓰지 않았습니다: \(configuredCatalogPath)")
+            }
+            previousCatalogData = try await codexCursorModelCatalogService.install(
+                cursorCatalog: catalog)
+            installedCatalog = true
+            let runtimeStatus = await cursorBridgeService.start(
+                preferences: preferences,
+                forceRestart: true)
+            cursorBridgeStatus = runtimeStatus
+            guard runtimeStatus.isHealthy else {
+                throw AppError.processFailed(cursorBridgeStatusMessage(runtimeStatus))
+            }
+            try cursorBridgePreferencesStore.save(preferences)
+            do {
+                try codexConfigService.activate(
+                    model: preferences.model,
+                    port: preferences.port,
+                    bridgeToken: preferences.bridgeToken,
+                    modelCatalogPath: codexCursorModelCatalogService.catalogURL.path)
+                activatedConfiguration = true
+            } catch {
+                try? cursorBridgePreferencesStore.save(previousPreferences)
+                throw error
+            }
+            cursorBridgePreferences = preferences
+            isCursorProviderActive = true
+            cursorBridgeError = nil
+            var remoteSyncWarning: String?
+            do {
+                if let apiKey = try cursorAPIKeyStore.read() {
+                    let failures = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+                    if !failures.isEmpty {
+                        remoteSyncWarning = " SSH Cursor 동기화 실패: \(failures.joined(separator: ", "))"
+                    }
+                } else if configuredDevices.contains(where: \.enabled) {
+                    remoteSyncWarning = " SSH 장치 자동 설치에는 Cursor User API Key 저장이 필요합니다."
+                }
+            } catch {
+                remoteSyncWarning = " SSH Cursor 동기화를 건너뛰었습니다: \(error.localizedDescription)"
+            }
+            do {
+                try await switchService.reloadLocalCodexConfiguration()
+                banner = AppBanner(
+                    style: remoteSyncWarning == nil ? .success : .warning,
+                    message: "Cursor \(preferences.model) provider를 적용했습니다. 새 Codex 작업부터 사용됩니다.\(remoteSyncWarning ?? "")")
+            } catch {
+                banner = AppBanner(
+                    style: .warning,
+                    message: "Cursor provider는 적용됐지만 Codex 설정 reload에 실패했습니다. Codex 앱을 다시 열어 주세요: \(error.localizedDescription)")
+            }
+        } catch {
+            var failureMessage = error.localizedDescription
+            if installedCatalog, !activatedConfiguration {
+                do {
+                    try codexCursorModelCatalogService.restore(previousCatalogData)
+                } catch {
+                    failureMessage += " 모델 카탈로그 원복에도 실패했습니다: \(error.localizedDescription)"
+                }
+            }
+            cursorBridgeError = failureMessage
+            banner = AppBanner(style: .error, message: "Cursor provider 적용 실패: \(failureMessage)")
+            if wasActive {
+                cursorBridgeStatus = await cursorBridgeService.start(preferences: previousPreferences)
+            } else {
+                await cursorBridgeService.stop()
+                cursorBridgeStatus = cursorBridgeService.status
+            }
+        }
+    }
+
+    func disableCursorProvider() async {
+        guard cursorManagementCanBegin else { return }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+        do {
+            try codexConfigService.deactivate()
+            isCursorProviderActive = false
+            await cursorBridgeService.stop()
+            cursorBridgeStatus = cursorBridgeService.status
+            cursorBridgeError = nil
+            let catalogCleanupWarning: String?
+            do {
+                try codexCursorModelCatalogService.removeManagedCatalog()
+                catalogCleanupWarning = nil
+            } catch {
+                catalogCleanupWarning = error.localizedDescription
+            }
+
+            // The remote provider owns a copy of the Cursor API key in its
+            // private runtime. Removing only the local provider would leave
+            // SSH Codex sessions able to keep consuming the Cursor account,
+            // so deprovision every configured device as part of the same user
+            // action. Remote failures do not roll back the already-committed
+            // local restore; they are surfaced as an explicit cleanup warning.
+            let remoteCleanupFailures = await deprovisionCursorOnConfiguredDevices()
+            let remoteCleanupWarning = remoteCleanupFailures.isEmpty
+                ? nil
+                : "SSH 원격 정리 실패: \(remoteCleanupFailures.joined(separator: ", "))"
+
+            do {
+                try await switchService.reloadLocalCodexConfiguration()
+                let warnings = [catalogCleanupWarning, remoteCleanupWarning].compactMap { $0 }
+                banner = AppBanner(
+                    style: warnings.isEmpty ? .success : .warning,
+                    message: warnings.isEmpty
+                        ? "이 Mac과 등록된 SSH 장치에서 이전 Codex 모델 provider를 복구했습니다. 새 작업부터 적용됩니다."
+                        : "이 Mac의 이전 Codex provider는 복구했지만 추가 정리가 필요합니다: \(warnings.joined(separator: " "))")
+            } catch {
+                let cleanup = [catalogCleanupWarning, remoteCleanupWarning]
+                    .compactMap { $0 }
+                    .joined(separator: " ")
+                banner = AppBanner(
+                    style: .warning,
+                    message: "이 Mac의 이전 provider는 복구됐지만 Codex 설정 reload에 실패했습니다. Codex 앱을 다시 열어 주세요: \(error.localizedDescription)\(cleanup.isEmpty ? "" : " \(cleanup)")")
+            }
+        } catch {
+            cursorBridgeError = error.localizedDescription
+            banner = AppBanner(
+                style: .error,
+                message: "Cursor provider 해제 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func checkCursorBridge() async {
+        guard cursorManagementCanBegin else { return }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+        cursorBridgeStatus = await cursorBridgeService.start(preferences: cursorBridgePreferences)
+        cursorBridgeError = cursorBridgeStatus.detail
+        if cursorBridgeStatus.isHealthy {
+            banner = AppBanner(style: .success, message: "Cursor CLI 브리지 연결이 정상입니다.")
+        } else {
+            banner = AppBanner(
+                style: .warning,
+                message: cursorBridgeStatusMessage(cursorBridgeStatus))
+        }
+    }
+
+    @discardableResult
+    func saveCursorAPIKeyAndSync(_ apiKey: String) async -> Bool {
+        guard cursorManagementCanBegin else { return false }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+        do {
+            try cursorAPIKeyStore.save(apiKey)
+            hasCursorAPIKey = true
+            if isCursorProviderActive {
+                let failures = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+                if !failures.isEmpty {
+                    banner = AppBanner(
+                        style: .warning,
+                        message: "API key는 Keychain에 저장했지만 일부 SSH 장치 동기화에 실패했습니다: \(failures.joined(separator: ", "))")
+                    return true
+                }
+            }
+            banner = AppBanner(
+                style: .success,
+                message: isCursorProviderActive
+                    ? "Cursor API key를 Keychain에 저장하고 활성 SSH 장치에 동기화했습니다."
+                    : "Cursor API key를 Keychain에 저장했습니다. provider를 켜면 SSH 장치에도 동기화됩니다.")
+            return true
+        } catch {
+            banner = AppBanner(style: .error, message: "Cursor API key 저장 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func deleteCursorAPIKey() {
+        guard cursorManagementCanBegin else { return }
+        do {
+            try cursorAPIKeyStore.delete()
+            hasCursorAPIKey = false
+            banner = AppBanner(
+                style: .success,
+                message: "이 Mac의 Cursor API key를 삭제했습니다. 원격 장치의 0600 저장본은 남아 있으므로 ‘이전 Codex 모델로 복구’로 별도 제거해 주세요.")
+        } catch {
+            banner = AppBanner(style: .error, message: "Cursor API key 삭제 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func syncCursorProviderToSSHDevices() async {
+        guard cursorManagementCanBegin else { return }
+        guard isCursorProviderActive else {
+            banner = AppBanner(style: .warning, message: "먼저 Cursor provider를 적용해 주세요.")
+            return
+        }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+        do {
+            guard let apiKey = try cursorAPIKeyStore.read() else {
+                throw AppError.processFailed("Cursor User API Key를 먼저 저장해 주세요.")
+            }
+            let enabledDevices = configuredDevices.filter(\.enabled)
+            guard !enabledDevices.isEmpty else {
+                banner = AppBanner(style: .warning, message: "활성화된 SSH 장치가 없습니다.")
+                return
+            }
+            let failures = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+            if failures.isEmpty {
+                banner = AppBanner(
+                    style: .success,
+                    message: "활성 SSH 장치 \(enabledDevices.count)대에 Cursor provider를 동기화했습니다.")
+            } else {
+                banner = AppBanner(
+                    style: .warning,
+                    message: "일부 SSH 장치 동기화에 실패했습니다: \(failures.joined(separator: ", "))")
+            }
+        } catch {
+            banner = AppBanner(style: .error, message: "SSH Cursor 동기화 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func provisionCursor(
+        on deviceID: String,
+        apiKey: String) async throws -> CursorRemoteProvisioningResult
+    {
+        let catalogModels = cursorModelCatalog.variants.map(\.slug)
+        let models = catalogModels.contains(cursorBridgePreferences.model)
+            ? catalogModels
+            : [cursorBridgePreferences.model] + catalogModels
+        let request = try CursorRemoteProvisioningRequest(
+            apiKey: apiKey,
+            model: cursorBridgePreferences.model,
+            port: cursorBridgePreferences.port,
+            bridgeToken: cursorBridgePreferences.bridgeToken,
+            models: models)
+        return try await switchService.provisionCursor(deviceID: deviceID, request: request)
+    }
+
+    private func provisionCursorOnEnabledDevices(apiKey: String) async -> [String] {
+        var failures: [String] = []
+        for device in configuredDevices.filter(\.enabled) {
+            do {
+                _ = try await provisionCursor(on: device.id, apiKey: apiKey)
+            } catch {
+                failures.append("\(device.displayName)(\(error.localizedDescription))")
+            }
+        }
+        return failures
+    }
+
+    private func deprovisionCursorOnConfiguredDevices() async -> [String] {
+        var failures: [String] = []
+        for device in configuredDevices {
+            do {
+                _ = try await switchService.deprovisionCursor(deviceID: device.id)
+            } catch {
+                failures.append("\(device.displayName)(\(error.localizedDescription))")
+            }
+        }
+        return failures
+    }
+
+    private var cursorManagementCanBegin: Bool {
+        !isManagingCursorProvider
+            && !isReadmeDemo
+            && !isManagingProfiles
+            && !isSwitching
+            && !isMaintainingAuth
+            && !hasControllerTransaction
+            && configurationError == nil
+            && !profileManagementRecoveryNeeded
+    }
+
+    func copyCursorLoginCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("cursor-agent login", forType: .string)
+        showTransientBanner(style: .success, message: "cursor-agent login 명령을 복사했습니다.")
+    }
+
+    func openCursorCLIInstallationGuide() {
+        guard let url = URL(string: "https://cursor.com/docs/cli/installation") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func cursorBridgeStatusMessage(_ status: CursorBridgeStatus) -> String {
+        switch status {
+        case .missingNode:
+            "Node.js를 찾지 못했습니다. Node.js를 설치한 뒤 다시 확인해 주세요."
+        case .missingAgent:
+            "Cursor CLI를 찾지 못했습니다. 설치 후 cursor-agent login을 실행해 주세요."
+        case .unauthenticated:
+            "Cursor CLI 로그인이 필요합니다. 터미널에서 cursor-agent login을 실행해 주세요."
+        case .portConflict:
+            "선택한 localhost 포트를 다른 프로세스가 사용 중입니다."
+        case let .failed(message):
+            message
+        case .stopped:
+            "Cursor 브리지가 중지되어 있습니다."
+        case .starting:
+            "Cursor 브리지를 시작하고 있습니다."
+        case .healthy:
+            "Cursor CLI 브리지 연결이 정상입니다."
+        }
+    }
+
+    private func pathsReferToSameFile(_ first: String, _ second: String) -> Bool {
+        let firstURL = URL(fileURLWithPath: first).standardizedFileURL.resolvingSymlinksInPath()
+        let secondURL = URL(fileURLWithPath: second).standardizedFileURL.resolvingSymlinksInPath()
+        return firstURL.path == secondURL.path
     }
 
     func toggleLaunchAtLogin() {
