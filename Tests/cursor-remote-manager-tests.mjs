@@ -219,7 +219,8 @@ const modelRoutes = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_ROUTES_JSON ?? '
 const nativeModels = JSON.parse(process.env.SYNCBAR_NATIVE_MODELS_JSON ?? 'null');
 if (!bridgeToken || !apiKey || args.some((value) => value.includes(bridgeToken) || value.includes(apiKey))) process.exit(81);
 if (!modelParameters || typeof modelParameters !== 'object') process.exit(85);
-if (!modelRoutes || typeof modelRoutes !== 'object' || !Array.isArray(nativeModels)) process.exit(86);
+if ((modelRoutes !== null && typeof modelRoutes !== 'object') ||
+    (nativeModels !== null && !Array.isArray(nativeModels))) process.exit(86);
 if (!process.env.HOME?.endsWith('/cursor-remote-xdg/home')) process.exit(82);
 if (process.env.AGENT_CLI_CREDENTIAL_STORE !== 'file') process.exit(83);
 const value = (name) => args[args.indexOf(name) + 1];
@@ -1410,6 +1411,10 @@ test("readRuntime migrates legacy model slugs without guessing context", async (
   const fixture = await makeFixture();
   const paths = managerPaths({ home: fixture.home, env: fixture.env });
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  const initialHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(initialHealth.healthy, true);
+  process.kill(initialHealth.pid, "SIGTERM");
+  await waitForPIDExit(initialHealth.pid);
   const legacy = JSON.parse(await readFile(paths.runtime, "utf8"));
   legacy.schemaVersion = 1;
   for (const key of ["catalogPath", "codexModel", "modelRoutes", "nativeModels"]) delete legacy[key];
@@ -1428,6 +1433,13 @@ test("readRuntime migrates legacy model slugs without guessing context", async (
     },
   });
   assert.equal(Object.hasOwn(migrated.modelParameters["gpt-5.6-sol-high-fast"], "context"), false);
+  assert.equal(await providerAuth({ home: fixture.home, env: fixture.env }), fixture.bridgeToken);
+  const restarted = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(restarted.healthy, true);
+  detachedPIDs.add(restarted.pid);
+  const launches = await bridgeLaunches(fixture);
+  assert.equal(launches.at(-1).modelRoutes, null);
+  assert.equal(launches.at(-1).nativeModels, null);
 });
 
 test("provision can use an injected installer URL without putting the API key in installer argv or env", async () => {

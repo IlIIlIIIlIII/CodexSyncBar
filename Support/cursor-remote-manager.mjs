@@ -1750,13 +1750,15 @@ function detachedBridgeEnvironment(runtime, base = process.env) {
     SYNCBAR_CURSOR_BRIDGE_TOKEN: runtime.bridgeToken,
     SYNCBAR_CURSOR_MODELS_JSON: JSON.stringify(runtime.models),
     SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON: JSON.stringify(runtime.modelParameters),
-    SYNCBAR_CURSOR_MODEL_ROUTES_JSON: JSON.stringify(runtime.modelRoutes ?? {}),
     // Cursor's Linux terminal sandbox requires host AppArmor support that is
     // absent on several SSH replicas. The remote bridge still enforces the
     // isolated empty workspace, ask mode, deny-all permissions, no MCP, and
     // fail-closed native-tool event handling.
     SYNCBAR_CURSOR_SANDBOX_MODE: "disabled",
   };
+  if (runtime.modelRoutes && Object.keys(runtime.modelRoutes).length > 0) {
+    environment.SYNCBAR_CURSOR_MODEL_ROUTES_JSON = JSON.stringify(runtime.modelRoutes);
+  }
   if (runtime.nativeModels?.length > 0) {
     environment.SYNCBAR_NATIVE_MODELS_JSON = JSON.stringify(runtime.nativeModels);
   }
