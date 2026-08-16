@@ -4,7 +4,7 @@
   <img src="Resources/AppIcon.png" width="128" alt="Codex SyncBar 아이콘">
 </p>
 
-여러 ChatGPT/Codex 계정을 이 Mac과 SSH 장치에서 한 번에 전환하는 macOS 메뉴 막대 앱입니다. 계정별 사용량과 인증 상태를 확인하고, 독립된 Chrome 로그인 세션을 이용해 필요한 계정만 안전하게 다시 로그인할 수 있습니다.
+여러 ChatGPT/Codex 계정을 이 Mac/Windows PC와 SSH 장치에서 한 번에 전환하는 계정 관리 앱입니다. macOS에서는 SwiftUI 메뉴 막대 앱으로, Windows에서는 .NET 10 + WinUI 3 데스크톱 앱으로 동작합니다. macOS는 계정별 Chrome 로그인 세션을 사용하고, Windows는 사용자가 지정한 기본 브라우저로 로그인합니다.
 
 > 이 프로젝트는 개인용 유틸리티이며 OpenAI의 공식 제품이 아닙니다. ChatGPT 사용량 응답은 공개된 안정 API가 아니므로 OpenAI의 응답 형식이 바뀌면 일부 표시가 일시적으로 동작하지 않을 수 있습니다.
 
@@ -36,9 +36,76 @@
 - 초기화권 수량과 다음 만료 시각을 보기 쉽게 표시합니다.
 - 선택한 계정을 이 Mac과 등록된 SSH 장치에 한 번에 적용합니다.
 - 장치별 연결 상태, 적용 계정, 최근 30일 토큰 사용량과 API 가격 기준 추정 비용을 보여 줍니다.
-- 계정마다 별도의 영구 Chrome 프로필을 사용해 Google 로그인과 패스키·Touch ID를 지원합니다.
+- macOS는 계정마다 별도의 영구 Chrome 프로필을 사용하고, Windows는 기본 브라우저의 Google 로그인·패스키 흐름을 사용합니다.
 - 로그인, 로그아웃, 인증 새로고침, 시작 프로그램 및 SSH 장치 관리는 설정 창에 모아 두었습니다.
 - 실험 기능으로 Cursor CLI 구독 모델을 로컬 Responses 브리지로 Codex의 기존 모델 선택기에 추가합니다. SyncBar 설정에서 Codex에 표시할 Cursor 모델을 고를 수 있고, 각 모델은 기본 모델 단위로 표시됩니다. Codex 앱의 추론 강도·Fast 선택은 실제 Cursor variant로 변환되며 원래 설정으로 복구할 수 있습니다.
+
+## 플랫폼 지원
+
+현재 저장소는 macOS SwiftUI 메뉴 막대 앱과 Windows .NET 10 + WinUI 3 데스크톱 앱을 함께 포함합니다.
+
+Windows 앱은 다음 핵심 흐름을 지원합니다.
+
+- Codex `app-server` 로그인 프로토콜과 Windows 기본 브라우저 로그인
+- 계정별 `auth.json` 보관, 계정 전환, 별칭 편집, 로그아웃·재로그인과 계정 항목 삭제
+- ChatGPT/Codex 5시간·주간·Spark 사용량과 초기화권 표시
+- Windows 로컬 Codex 인증 적용 및 OpenSSH/scp 기반 SSH 장치 동기화
+- 모든 장치의 사전 검증·전환·사후 검증과 실패 시 로컬·원격 rollback
+- 최근 30일 Codex 세션 토큰 집계와 모델별 공개 가격 기준 추정 비용 표시
+- `cursor-agent --list-models`를 이용한 Windows 로컬 Cursor Responses 브리지와 Codex provider `config.toml` 활성화·원복
+- Cursor 모델 exact slug, Thinking 변형, CLI 경로, 설치 안내·로그인 명령 복사와 SSH 원격 provision/deprovision
+- Windows 10/11의 WinUI 3 설정 창과 장치 연결 상태 확인
+- Windows 알림 영역 트레이와 macOS 메뉴 막대식 빠른 보기(좌클릭으로 열기/닫기, 포커스를 잃으면 자동 닫기), 로그인 시 자동 시작, 5분 사용량·30분 장치 상태·1시간 인증 유지·6시간 전체 동기화
+- 계정별 주간 anchor, 선택 계정·전체 새로고침, Codex 실행 중 인증 갱신 지연 및 다음 점검 재시도
+- 중단된 계정 로그아웃·장치 활성화·비밀 삭제·이전 브라우저 세션 정리를 다음 실행에서 복구하는 durable journal
+- Windows DPAPI 기반 SSH 비밀번호·키 암호·Cursor User API Key 저장과 원격 Cursor provision/deprovision
+
+Windows의 Cursor 브리지는 로컬 Cursor CLI(`cursor-agent status`)를 사용하며, Cursor CLI가 설치·로그인되어 있어야 합니다. Windows 토큰 집계는 앱에 포함된 `usage-summary.mjs`를 실행하고, 등록된 SSH 장치는 원격 helper가 없거나 연결할 수 없으면 해당 장치만 실패로 표시합니다. SSH Cursor 원격 provisioning/deprovisioning도 지원하며, Cursor User API Key와 SSH 비밀번호·키 암호는 Windows DPAPI로 사용자 계정에 묶어 저장합니다. SSH 비밀은 OpenSSH 자식 프로세스의 askpass 환경으로만 전달되고 명령 인자나 로그에는 넣지 않습니다. 두 플랫폼은 동일한 계정/장치 개념과 원격 helper 계약을 사용하지만 실제 저장 위치와 인증 세션은 플랫폼별로 분리됩니다.
+
+### Windows에서 빌드하기
+
+필요한 환경은 Windows 10 1809 이상, .NET 10 SDK, Windows App SDK 2.4를 사용하는 WinUI 3 빌드 환경, Node.js, Windows 기본 브라우저, 공식 Codex CLI, Windows OpenSSH 클라이언트입니다. 로그인 URL은 기본 브라우저로 열립니다. Cursor 브리지를 사용할 때는 공식 Cursor CLI와 완료된 `cursor-agent login`도 필요합니다. .NET SDK가 NuGet에서 Windows App SDK 패키지를 복원하므로 별도의 Swift/Xcode 환경은 필요하지 않습니다.
+
+```powershell
+dotnet restore Windows\CodexSyncBar.Windows.sln --runtime win-x64
+dotnet test Windows\CodexSyncBar.Windows.Core.Tests\CodexSyncBar.Windows.Core.Tests.csproj
+dotnet build Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64
+dotnet publish Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --runtime win-x64 --self-contained false
+dotnet run --project Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --no-restore
+```
+
+Visual Studio에서 열 때는 `Windows\CodexSyncBar.Windows.sln`을 사용하고 `x64`, `x86`, `ARM64` 중 대상 장치에 맞는 구성을 선택합니다. RID별 빌드는 해당 런타임으로 복원한 뒤 실행합니다.
+기본 `dotnet run`은 MSIX 프로필을 사용하므로 개발 PC에서는 Windows Developer Mode가 필요합니다. Visual Studio의 `CodexSyncBar.Windows (Unpackaged)` 프로필은 패키지 identity 없이 실행할 때 사용하고, 배포 시에는 Visual Studio의 MSIX 패키징/설치 흐름을 사용합니다.
+이미 실행 중인 이전 Debug/설치본이 있으면 먼저 완전히 종료한 뒤 Release 명령으로 실행해야 최신 로그인 수정이 반영됩니다.
+
+일반 실행 시 큰 관리 창 대신 작업 표시줄 알림 영역 가까이에 빠른 보기가 열립니다. 바깥을 클릭하면 닫히며, 이후에는 SyncBar 트레이 아이콘을 좌클릭해 다시 열거나 닫을 수 있습니다. 빠른 보기에서 계정 선택, 사용량·장치 확인, 새로고침, 전체 장치 계정 전환을 처리하고, 로그인·계정 추가·SSH 설정은 하단의 **전체 관리** 또는 트레이 우클릭 메뉴의 **전체 관리 창 열기**를 사용합니다.
+
+```powershell
+dotnet restore Windows\CodexSyncBar.Windows.sln --runtime win-x86
+dotnet build Windows\CodexSyncBar.Windows.sln --configuration Release --property:Platform=x86 --no-restore
+dotnet restore Windows\CodexSyncBar.Windows.sln --runtime win-arm64
+dotnet build Windows\CodexSyncBar.Windows.sln --configuration Release --property:Platform=ARM64 --no-restore
+```
+
+개발·문서 QA 실행도 macOS 앱과 같은 인자 계약을 제공합니다. `--preview-window`는 QA 화면을 열고, `--login-profile=<양의 정수>`는 해당 계정의 기본 브라우저 로그인 흐름을 바로 시작합니다. README 캡처는 기존 디렉터리에 대한 절대 PNG 경로만 허용합니다.
+
+```powershell
+& .\Windows\CodexSyncBar.Windows\bin\x64\Release\net10.0-windows10.0.26100.0\win-x64\CodexSyncBar.Windows.exe --preview-window
+& .\Windows\CodexSyncBar.Windows\bin\x64\Release\net10.0-windows10.0.26100.0\win-x64\CodexSyncBar.Windows.exe --login-profile=2
+& .\Windows\CodexSyncBar.Windows\bin\x64\Release\net10.0-windows10.0.26100.0\win-x64\CodexSyncBar.Windows.exe --readme-demo=popover --readme-output=C:\Users\Public\codex-syncbar-popover.png
+& .\Windows\CodexSyncBar.Windows\bin\x64\Release\net10.0-windows10.0.26100.0\win-x64\CodexSyncBar.Windows.exe --readme-demo=settings --readme-output=C:\Users\Public\codex-syncbar-settings.png
+```
+
+Windows 앱은 다음 위치를 기본으로 사용합니다.
+
+- 설정과 프로필: `%LOCALAPPDATA%\CodexSyncBar`
+- Codex 활성 인증: `%USERPROFILE%\.codex\auth.json`
+- 로그인·인증 갱신 임시 홈: `%USERPROFILE%\.codex-syncbar\LoginSessions` (WinUI 패키지 파일 가상화 밖에서 Codex CLI와 공유)
+- 로그인 브라우저: Windows 기본 브라우저가 쿠키와 세션을 관리합니다.
+- 이전 버전 격리 Chrome 세션(호환 정리용): `%LOCALAPPDATA%\CodexSyncBar\ChromeProfiles`
+- DPAPI 비밀과 복구 journal: `%LOCALAPPDATA%\CodexSyncBar\secrets`, `%LOCALAPPDATA%\CodexSyncBar\login-transactions`, `%LOCALAPPDATA%\CodexSyncBar\logout-transactions`, `%LOCALAPPDATA%\CodexSyncBar\device-activation-transactions`, `%LOCALAPPDATA%\CodexSyncBar\secret-cleanup-transactions`, `%LOCALAPPDATA%\CodexSyncBar\remote-bootstrap-transactions`
+
+기존에 `%USERPROFILE%\.local\share\gpt-switch\config.json`이 있으면 계정/장치 목록을 먼저 호환 경로로 읽습니다. 상태 루트를 명시하려면 `CODEX_SYNCBAR_STATE_ROOT`를, Codex 홈을 명시하려면 `CODEX_HOME`을 설정하세요.
 
 ## 설치 전 확인
 
@@ -68,7 +135,7 @@ shasum -a 256 -c SHA256SUMS
 
 ### 1. 계정 추가
 
-설정의 **계정** 페이지에서 계정을 추가하면 앱 전용 Chrome 창이 열립니다. 로그인 완료 전까지 기존 `auth.json`은 바뀌지 않습니다. 새 인증이 완전한 Codex 계정이고 다른 슬롯과 중복되지 않는지 확인한 뒤에만 계정 목록에 반영합니다.
+설정의 **계정** 페이지에서 계정을 추가하면 macOS에서는 앱 전용 Chrome 창이, Windows에서는 기본 브라우저가 열립니다. 로그인 완료 전까지 기존 `auth.json`은 바뀌지 않습니다. 새 인증이 완전한 Codex 계정이고 다른 슬롯과 중복되지 않는지 확인한 뒤에만 계정 목록에 반영합니다.
 
 각 계정은 고정된 양의 ID를 사용합니다.
 
@@ -113,7 +180,7 @@ SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.
 
 브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증합니다. 텍스트 요청은 Cursor CLI headless agent로, 이미지나 Computer Use 스크린샷이 포함된 요청은 공식 ACP 이미지 블록으로 전달합니다. Cursor에는 실제 프로젝트 대신 전용 빈 작업공간, ask mode, sandbox와 deny 정책을 전달하고 `--force`/`--yolo`는 사용하지 않습니다. ACP 세션에서도 모델·context·Reasoning/Effort·Thinking·Fast를 선택한 exact variant와 대조하며, native tool이나 권한 요청이 시작되면 응답을 중단합니다. 그래도 Cursor의 사용자 전역 rules·hooks·MCP 설정과 현행 권한 표면을 완전히 격리한다고 보장할 수 없으므로 이 기능은 실험 기능입니다.
 
-Cursor CLI는 raw inference API가 아니라 agent workflow입니다. Cursor 항목의 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 병합 선택기의 기존 Codex 항목은 로컬 브리지가 고정된 공식 OpenAI/ChatGPT endpoint로만 전달하며, Cursor 항목은 Cursor CLI로 보냅니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. `input_file.file_data`는 엄격한 Base64 검증 뒤 텍스트·코드·Markdown·HTML·CSV·JSON·XML, DOCX·PPTX·XLSX·ODT, 이미지, PDF를 처리합니다. Office 문서는 제한된 별도 프로세스에서 텍스트만 추출하고, PDF는 이 Mac에 번들된 PDFKit helper로 텍스트와 최대 16장의 페이지 이미지를 함께 전달합니다. 원본 Base64와 임시 경로는 Cursor 프롬프트에 남기지 않습니다. 브리지 제한은 파일 8개, 파일당 12 MiB, 합계 24 MiB, 추출 텍스트 파일당 2 MiB·합계 4 MiB이며 PDF 페이지 이미지는 일반 이미지와 동일한 16장·24 MiB 한도를 공유합니다. 원격 Linux에는 PDFKit helper가 없으므로 PDF는 명시적으로 거절하지만 텍스트와 Office 문서는 처리할 수 있습니다.
+Cursor CLI는 raw inference API가 아니라 agent workflow입니다. Cursor 항목의 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 병합 선택기의 기존 Codex 항목은 로컬 브리지가 고정된 공식 OpenAI/ChatGPT endpoint로만 전달하며, Cursor 항목은 Cursor CLI로 보냅니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. `input_file.file_data`는 엄격한 Base64 검증 뒤 텍스트·코드·Markdown·HTML·CSV·JSON·XML, DOCX·PPTX·XLSX·ODT, 이미지, PDF를 처리합니다. Office 문서는 제한된 별도 프로세스에서 텍스트만 추출하고, PDF는 macOS의 PDFKit helper 또는 Windows의 self-contained WinRT/PdfPig helper로 텍스트와 최대 16장의 페이지 이미지를 함께 전달합니다. 원본 Base64와 임시 경로는 Cursor 프롬프트에 남기지 않습니다. 브리지 제한은 파일 8개, 파일당 12 MiB, 합계 24 MiB, 추출 텍스트 파일당 2 MiB·합계 4 MiB이며 PDF 페이지 이미지는 일반 이미지와 동일한 16장·24 MiB 한도를 공유합니다. 원격 Linux에는 PDF helper가 없으므로 PDF는 명시적으로 거절하지만 텍스트와 Office 문서는 처리할 수 있습니다.
 
 Cursor 개인 플랜은 월간 사용량·남은 구독 pool을 반환하는 공개 API나 CLI 명령을 제공하지 않습니다. SyncBar는 사용자가 앱 안의 Cursor 페이지에 직접 로그인한 전용 WebKit 프로필로 공식 `cursor.com/dashboard/spending` 화면을 연 뒤, 그 페이지가 사용하는 `/api/usage-summary` 응답만 읽어 Cursor Models·Other Models 잔여량을 표시합니다. 비밀번호나 브라우저 쿠키를 외부로 내보내지 않으며, dashboard 계약이 바뀌면 사용량 조회가 안전하게 실패하고 다시 로그인을 요청합니다. Team/Enterprise의 Admin API는 별도 조직 관리자 키가 필요한 다른 인증 경계이므로 저장된 개인 User API Key로 호출하지 않습니다.
 
@@ -135,6 +202,17 @@ HTML 그래프는 Codex의 outer tool이 visualization 파일을 만든 뒤 반�
 - SSH는 strict host-key checking을 사용하고 agent, X11, 포트 포워딩과 TTY 할당을 차단합니다.
 - 인증 파일 변경은 임시 파일 작성, 권한 검증, 원자적 교체 순서로 진행합니다.
 - 계정 전환은 모든 장치의 사전 점검과 사후 검증을 통과해야 완료됩니다.
+
+### Windows
+
+- 전체 refresh token은 `%LOCALAPPDATA%\CodexSyncBar\profiles\<id>.auth.json`에만 보관하고, SSH 장치에는 `refresh_token`이 빈 access-only 인증만 전달합니다.
+- SSH 비밀번호·개인 키 암호·Cursor User API Key는 Windows DPAPI로 암호화한 사용자 전용 비밀 저장소에 보관합니다. 원격으로 전달할 때는 SSH askpass 또는 stdin으로만 전달합니다.
+- SSH 인증 파일과 설정 파일은 현재 Windows 사용자 소유·비공개 ACL인지 확인하고 재분석 지점(심볼릭 링크)을 거부하며, 저장은 임시 파일과 원자적 교체를 사용합니다. 새 장치는 검증 전까지 자동 동기화 대상이 아닙니다.
+- 원격 부트스트랩은 변경 전 대상 helper·인증·상태를 암호화되지 않은 대신 사용자 전용 ACL로 보호된 로컬 복구 archive에 보관하고, 설치나 연결이 중단되면 같은 SSH endpoint에서 다음 실행 때 이전 상태를 복원합니다. endpoint가 바뀌면 자동 복구하지 않고 경고합니다.
+- 계정 로그아웃은 계정 항목을 유지한 채 모든 활성 장치를 fallback으로 전환하고 원격·로컬 journal을 검증합니다. 계정 항목 삭제는 인증 파일이 없는 상태에서만 수행하며, 중단된 작업은 다음 실행 때 복구를 시도하고 복구 백업을 검증 전에는 삭제하지 않습니다.
+- Codex 프로세스가 실행 중이면 백그라운드 인증 refresh를 미루어 실행 중인 클라이언트와 인증 파일이 경쟁하지 않게 합니다. 명시적인 계정 전환·로그아웃에서는 필요한 프로세스만 안전하게 재시작합니다.
+- Cursor provider 설정은 변경 전 model/provider/catalog와 관리 블록을 기록하며, 외부에서 `config.toml`이 바뀌면 자동 덮어쓰기를 거부합니다.
+- Windows publish에는 `Runtime/PdfExtractor/cursor-file-extractor.exe`가 self-contained helper로 함께 들어가며, 로컬 PDF의 텍스트·페이지 이미지를 macOS PDFKit 경로와 같은 Responses 입력 계약으로 처리합니다.
 
 Chrome 쿠키와 Codex 토큰은 서로 다른 세션입니다. 앱 업데이트나 일시적인 네트워크 오류만으로 삭제되지는 않지만, OpenAI/Google에서 로그아웃했거나 보안 설정 변경·관리자 회수·refresh token 폐기가 발생하면 재로그인이 필요할 수 있습니다.
 
@@ -162,7 +240,7 @@ Chrome 쿠키와 Codex 토큰은 서로 다른 세션입니다. 앱 업데이트
 
 다른 전환·갱신 작업이 끝날 때까지 잠시 기다린 뒤 새로고침하세요. 앱과 shell helper가 같은 잠금을 사용하므로 동시에 인증 파일을 변경하지 않습니다. 비정상 종료된 작업의 잠금은 소유 프로세스와 파일 권한을 확인한 뒤에만 자동 복구합니다.
 
-### Chrome 로그인이 원하는 계정으로 열리지 않는 경우
+### macOS Chrome 로그인이 원하는 계정으로 열리지 않는 경우
 
 설정의 해당 계정에서 Chrome 세션을 로그아웃한 뒤 재로그인하세요. 계정별 Chrome 프로필은 분리되어 있으며 다른 계정의 쿠키를 삭제하지 않습니다.
 
@@ -212,6 +290,8 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - SSH 비밀번호·키 암호: macOS Keychain 서비스 `com.sunggu.codexsyncbar.ssh`
 - Cursor User API Key: macOS Keychain 서비스 `com.sunggu.codexsyncbar.cursor`
 - SSH 원격 Cursor runtime·인증: 원격 `~/.local/share/gpt-switch/cursor-remote-runtime.json` 및 `cursor-remote-xdg/`
+
+Windows에서는 설정과 계정 인증이 `%LOCALAPPDATA%\CodexSyncBar`, 활성 Codex 인증이 `%USERPROFILE%\.codex\auth.json`에 있습니다. 로그인 쿠키와 세션은 Windows 기본 브라우저가 관리하며, 이전 버전의 격리 Chrome 세션은 `%LOCALAPPDATA%\CodexSyncBar\ChromeProfiles`에 남을 수 있습니다. Windows DPAPI 비밀은 앱 상태 루트의 `secrets` 아래에 저장되며, 중단된 원격 부트스트랩 archive는 `remote-bootstrap-transactions` 아래에 보관됩니다. 원격 Cursor 인증은 SSH 장치의 `~/.local/share/gpt-switch` 아래에 별도로 보관됩니다.
 
 앱만 제거하려면 `/Applications/Codex SyncBar.app`을 휴지통으로 옮기면 됩니다. 계정·Chrome 세션·Keychain 항목까지 지우려면 먼저 설정에서 장치와 계정을 정리한 뒤 위 데이터 디렉터리를 삭제하세요. 원격 장치의 파일은 Mac 앱을 삭제하는 것만으로 자동 삭제되지 않습니다.
 
