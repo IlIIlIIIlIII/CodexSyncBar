@@ -517,7 +517,8 @@ input.on('line', (line) => {
     const prompt = message.params.prompt;
     const text = prompt.filter((part) => part?.type === 'text').map((part) => part.text).join('\\n');
     const images = prompt.filter((part) => part?.type === 'image');
-    if (images.length !== 1 || images[0].mimeType !== 'image/png' || images[0].data !== expectedImage) {
+    const expectedImageCount = text.includes('http-acp-image-follow-up') ? 2 : 1;
+    if (images.length !== expectedImageCount || images[0].mimeType !== 'image/png' || images[0].data !== expectedImage) {
       fail('image attachment was not forwarded through ACP');
     }
     writeFileSync(imageObservationPath, Buffer.from(images[0].data, 'base64'), { mode: 0o600 });
@@ -727,6 +728,54 @@ test("prompt builder bounds oversized backend requests", () => {
   assert.throws(
     () => buildCursorPrompt(baseRequest({ input: "x".repeat(8 * 1024 * 1024), tools: [] })),
     (error) => error instanceof BridgeError && error.statusCode === 413 && error.code === "request_too_large",
+  );
+});
+
+test("prompt-only tool descriptions are UTF-8 bounded without changing tool validation", () => {
+  const oversizedDescription = "일반화된 도구 설명 ".repeat(8_000);
+  const request = baseRequest({
+    tools: [{
+      type: "namespace",
+      name: "functions",
+      description: oversizedDescription,
+      tools: [{
+        type: "function",
+        name: "exec",
+        description: oversizedDescription,
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: oversizedDescription },
+          },
+        },
+      }],
+    }],
+  });
+
+  const prompt = buildCursorPrompt(request);
+  const payload = JSON.parse(
+    prompt.match(/<SYNCBAR_BACKEND_REQUEST>\n([\s\S]*?)\n<\/SYNCBAR_BACKEND_REQUEST>/)[1],
+  );
+  const promptTool = payload.available_tools[0];
+  assert.ok(Buffer.byteLength(promptTool.description, "utf8") <= 24 * 1024);
+  assert.ok(Buffer.byteLength(promptTool.tools[0].description, "utf8") <= 24 * 1024);
+  assert.ok(Buffer.byteLength(
+    promptTool.tools[0].parameters.properties.command.description,
+    "utf8",
+  ) <= 24 * 1024);
+  assert.match(promptTool.description, /truncated at the bridge safety limit/);
+  assert.equal(request.tools[0].description, oversizedDescription);
+  assert.deepEqual(
+    parseToolEnvelope(
+      '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","arguments":{"command":"inspect"}}</SYNCBAR_TOOL_CALL>',
+      request,
+    ),
+    {
+      kind: "function",
+      namespace: "functions",
+      name: "exec",
+      arguments: '{"command":"inspect"}',
+    },
   );
 });
 
@@ -1257,12 +1306,10 @@ test("PDF file_data uses the bounded extractor and shares page images with direc
   }
 });
 
-test("unsupported content modalities fail closed while ordinary unknown history is preserved", () => {
+test("audio and video fail closed while bounded resources and unknown history are preserved", () => {
   for (const modality of [
     { type: "input_audio", input_audio: { data: "ZGF0YQ==", format: "wav" } },
     { type: "audio", data: "ZGF0YQ==", mimeType: "audio/wav" },
-    { type: "resource", resource: { uri: "file:///tmp/general.txt", text: "data" } },
-    { type: "resource_link", uri: "file:///tmp/general.txt", name: "general" },
     { type: "input_video", video_url: "data:video/mp4;base64,ZGF0YQ==" },
   ]) {
     assert.throws(
@@ -1276,6 +1323,31 @@ test("unsupported content modalities fail closed while ordinary unknown history 
       modality.type,
     );
   }
+
+  const resources = [
+    { type: "resource", resource: { uri: "file:///tmp/general.txt", text: "reference data" } },
+    { type: "resource_link", uri: "https://example.invalid/reference", name: "general" },
+    {
+      type: "embedded_resource",
+      resource: { uri: "memory://general", mimeType: "text/plain", text: "embedded data" },
+    },
+  ];
+  const resourcePrepared = prepareCursorBackendRequest(baseRequest({
+    input: [{ role: "user", type: "message", content: resources }],
+    tools: [],
+  }));
+  assert.match(resourcePrepared.prompt, /reference data/);
+  assert.match(resourcePrepared.prompt, /example\.invalid/);
+  assert.match(resourcePrepared.prompt, /embedded data/);
+  assert.throws(
+    () => prepareCursorBackendRequest(baseRequest({
+      input: [{ type: "resource", text: "x".repeat(4 * 1024 * 1024) }],
+      tools: [],
+    })),
+    (error) => error instanceof BridgeError &&
+      error.statusCode === 413 &&
+      error.code === "resource_input_too_large",
+  );
 
   const prepared = prepareCursorBackendRequest(baseRequest({
     input: [{ type: "general_history_item", payload: { value: 42 } }],
@@ -1712,6 +1784,60 @@ test("continuation input removes an exact canonical history prefix", () => {
   );
 });
 
+test("continuation input keeps dynamically loaded tools after their history prefix is removed", () => {
+  const dynamicTools = [{
+    type: "namespace",
+    name: "functions",
+    tools: [{
+      type: "function",
+      name: "exec",
+      description: "Run a bounded outer operation.",
+      parameters: { type: "object", properties: { input: { type: "string" } } },
+    }],
+  }];
+  const priorInput = [
+    { role: "user", type: "message", content: "inspect" },
+    { type: "tool_search_output", call_id: "call_search", tools: dynamicTools },
+  ];
+  const priorOutput = [{
+    type: "function_call",
+    call_id: "call_exec",
+    namespace: "functions",
+    name: "exec",
+    arguments: '{"input":"first"}',
+  }];
+  const request = {
+    ...baseRequest({ tools: [] }),
+    input: [
+      ...priorInput,
+      ...priorOutput,
+      { type: "function_call_output", call_id: "call_exec", output: "done" },
+    ],
+  };
+  const continued = continuationRequest(request, {
+    input: priorInput,
+    output: priorOutput,
+    dynamicTools,
+  });
+
+  assert.deepEqual(continued.input, [
+    { type: "function_call_output", call_id: "call_exec", output: "done" },
+  ]);
+  assert.match(buildCursorPrompt(continued), /"name":"exec"/);
+  assert.deepEqual(
+    parseToolEnvelope(
+      '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","arguments":{"input":"again"}}</SYNCBAR_TOOL_CALL>',
+      continued,
+    ),
+    {
+      kind: "function",
+      namespace: "functions",
+      name: "exec",
+      arguments: '{"input":"again"}',
+    },
+  );
+});
+
 test("Cursor session registry expires, bounds, serializes, and clears entries", () => {
   let now = 0;
   const registry = new CursorSessionRegistry({ maxEntries: 2, ttlMs: 10, now: () => now });
@@ -1739,6 +1865,9 @@ test("Cursor session registry expires, bounds, serializes, and clears entries", 
   registry.add("r4", { ...value, clientKey: "task-key" });
   const latest = registry.acquireLatest("task-key", { model: "m", workspace: "/w" });
   assert.equal(latest.responseID, "r4");
+  registry.release("r4", { markContinued: true });
+  const branch = registry.acquire("r4", { model: "m", workspace: "/w" });
+  assert.equal(branch.continued, true);
   registry.release("r4", { consume: true });
   assert.equal(registry.acquireLatest("task-key", { model: "m", workspace: "/w" }), null);
 });
@@ -1754,7 +1883,13 @@ const match = prompt.match(/<SYNCBAR_BACKEND_REQUEST>\\n([\\s\\S]*?)\\n<\\/SYNCB
 const payload = JSON.parse(match[1]);
 const text = JSON.stringify(payload.conversation);
 const resume = args.indexOf('--resume');
-if (text.includes('first turn')) {
+if (text.includes('branch turn')) {
+  if (resume >= 0 || !text.includes('first turn')) process.exit(76);
+  process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'branch-ok',session_id:'session-branch'})+'\\n');
+} else if (text.includes('recovered turn')) {
+  if (resume >= 0 || !text.includes('first turn')) process.exit(77);
+  process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'recovered-ok',session_id:'session-recovered'})+'\\n');
+} else if (text.includes('first turn')) {
   if (resume >= 0) process.exit(72);
   process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:'first-ok'}]}})+'\\n');
   process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'first-ok',session_id:'session-one'})+'\\n');
@@ -1837,8 +1972,6 @@ if (text.includes('first turn')) {
     assert.equal(secondResponse.status, 200, JSON.stringify(second));
     assert.equal(second.output[0].content[0].text, "second-ok");
     assert.equal(second.previous_response_id, first.id);
-    assert.equal(metrics.length, 2);
-    assert.deepEqual(metrics.map((metric) => metric.resumed), [false, true]);
     const unoptimizedPromptBytes = Buffer.byteLength(buildCursorPrompt(baseRequest({
       previous_response_id: first.id,
       input: secondInput,
@@ -1846,6 +1979,48 @@ if (text.includes('first turn')) {
       stream: false,
     })), "utf8");
     assert.ok(metrics[1].prompt_bytes < unoptimizedPromptBytes);
+
+    const branchInput = [
+      ...firstRequest.input,
+      ...first.output,
+      { role: "user", type: "message", content: "branch turn" },
+    ];
+    const branchResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: first.id,
+        input: branchInput,
+        tools: [],
+        stream: false,
+      })),
+    });
+    const branch = await branchResponse.json();
+    assert.equal(branchResponse.status, 200, JSON.stringify(branch));
+    assert.equal(branch.output[0].content[0].text, "branch-ok");
+
+    const recoveredResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: "resp_expired_but_replayable",
+        input: [
+          ...firstRequest.input,
+          ...first.output,
+          { role: "user", type: "message", content: "recovered turn" },
+        ],
+        tools: [],
+        stream: false,
+      })),
+    });
+    const recovered = await recoveredResponse.json();
+    assert.equal(recoveredResponse.status, 200, JSON.stringify(recovered));
+    assert.equal(recovered.output[0].content[0].text, "recovered-ok");
+
+    assert.equal(metrics.length, 4);
+    assert.deepEqual(metrics.map((metric) => metric.resumed), [false, true, false, false]);
+    assert.match(metrics[2].continuation_source, /replay$/);
+    assert.equal(metrics[3].continuation_source, "previous_response_id_replay");
     for (const metric of metrics) {
       assert.equal(metric.event, "cursor_bridge_request");
       assert.equal(metric.usage_available, false);
@@ -1856,6 +2031,142 @@ if (text.includes('first turn')) {
       assert.equal(typeof metric.output_bytes, "number");
       assert.doesNotMatch(JSON.stringify(metric), /first turn|second turn|SYNCBAR_BACKEND_REQUEST/);
     }
+  } finally {
+    await stopBridge(server);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("HTTP continuations preserve tool_search results through a third tool turn", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-http-dynamic-tools-test-"));
+  const workspace = path.join(root, "workspace");
+  const agent = await writeAgentFixture(root, "agent", `#!/usr/bin/env node
+const args = process.argv.slice(2);
+let prompt = '';
+for await (const chunk of process.stdin) prompt += chunk;
+const match = prompt.match(/<SYNCBAR_BACKEND_REQUEST>\\n([\\s\\S]*?)\\n<\\/SYNCBAR_BACKEND_REQUEST>/);
+const payload = JSON.parse(match[1]);
+const conversation = JSON.stringify(payload.conversation);
+const available = JSON.stringify(payload.available_tools);
+const resume = args.indexOf('--resume');
+const resumed = resume >= 0 && args[resume + 1] === 'dynamic-session';
+let result;
+if (conversation.includes('dynamic-turn-1')) {
+  if (resume >= 0 || !available.includes('tool_search')) process.exit(81);
+  result = '<SYNCBAR_TOOL_CALL>{"name":"tool_search","arguments":{"goal":"load execution tool"}}</SYNCBAR_TOOL_CALL>';
+} else if (conversation.includes('tool_search_output')) {
+  if (!resumed || !available.includes('"name":"exec"')) process.exit(82);
+  result = '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","arguments":{"input":"first execution"}}</SYNCBAR_TOOL_CALL>';
+} else if (conversation.includes('function_call_output')) {
+  if (!resumed || !available.includes('"name":"exec"')) process.exit(83);
+  result = '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","arguments":{"input":"second execution"}}</SYNCBAR_TOOL_CALL>';
+} else process.exit(84);
+process.stdout.write(JSON.stringify({type:'result',subtype:'success',result,session_id:'dynamic-session'})+'\\n');
+`);
+  const bridgeToken = "d".repeat(64);
+  const metrics = [];
+  const server = await startBridge({
+    host: "127.0.0.1",
+    port: 0,
+    agentPath: agent,
+    model: "composer-2.5",
+    allowedModels: ["composer-2.5"],
+    workspace,
+    timeoutMs: 5_000,
+    bridgeToken,
+    metricsSink: (metric) => metrics.push(metric),
+  });
+  try {
+    const address = server.address();
+    const url = `http://127.0.0.1:${address.port}/v1/responses`;
+    const headers = { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken };
+    const searchTool = {
+      type: "tool_search",
+      execution: "client",
+      parameters: {
+        type: "object",
+        properties: { goal: { type: "string" } },
+        required: ["goal"],
+        additionalProperties: false,
+      },
+    };
+    const firstRequest = baseRequest({
+      input: [{ role: "user", type: "message", content: "dynamic-turn-1" }],
+      tools: [searchTool],
+      stream: false,
+    });
+    const firstResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(firstRequest),
+    });
+    const first = await firstResponse.json();
+    assert.equal(firstResponse.status, 200, JSON.stringify(first));
+    assert.equal(first.output[0].type, "tool_search_call");
+
+    const dynamicTools = [{
+      type: "namespace",
+      name: "functions",
+      tools: [{
+        type: "function",
+        name: "exec",
+        description: "Run a bounded outer operation.",
+        parameters: { type: "object", properties: { input: { type: "string" } } },
+      }],
+    }];
+    const secondInput = [
+      ...firstRequest.input,
+      ...first.output,
+      {
+        type: "tool_search_output",
+        execution: "client",
+        call_id: first.output[0].call_id,
+        status: "completed",
+        tools: dynamicTools,
+      },
+    ];
+    const secondResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: first.id,
+        input: secondInput,
+        tools: [searchTool],
+        stream: false,
+      })),
+    });
+    const second = await secondResponse.json();
+    assert.equal(secondResponse.status, 200, JSON.stringify(second));
+    assert.equal(second.output[0].type, "function_call");
+    assert.equal(second.output[0].namespace, "functions");
+    assert.equal(second.output[0].name, "exec");
+
+    const thirdInput = [
+      ...secondInput,
+      ...second.output,
+      {
+        type: "function_call_output",
+        call_id: second.output[0].call_id,
+        output: "first execution complete",
+      },
+    ];
+    const thirdResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: second.id,
+        input: thirdInput,
+        tools: [searchTool],
+        stream: false,
+      })),
+    });
+    const third = await thirdResponse.json();
+    assert.equal(thirdResponse.status, 200, JSON.stringify(third));
+    assert.equal(third.output[0].type, "function_call");
+    assert.equal(third.output[0].namespace, "functions");
+    assert.equal(third.output[0].name, "exec");
+    assert.equal(third.output[0].arguments, '{"input":"second execution"}');
+    assert.deepEqual(metrics.map((metric) => metric.resumed), [false, true, true]);
   } finally {
     await stopBridge(server);
     await rm(root, { recursive: true, force: true });
@@ -2404,6 +2715,14 @@ test("HTTP image requests use the ACP transport", async () => {
   try {
     const address = server.address();
     assert.equal(typeof address, "object");
+    const firstImageInput = [{
+      role: "user",
+      type: "message",
+      content: [
+        { type: "input_text", text: "http-acp-image-route" },
+        { type: "input_image", image_url: PNG_DATA_URI },
+      ],
+    }];
     const httpResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: {
@@ -2412,14 +2731,7 @@ test("HTTP image requests use the ACP transport", async () => {
       },
       body: JSON.stringify(baseRequest({
         model: "composer-2.5",
-        input: [{
-          role: "user",
-          type: "message",
-          content: [
-            { type: "input_text", text: "http-acp-image-route" },
-            { type: "input_image", image_url: PNG_DATA_URI },
-          ],
-        }],
+        input: firstImageInput,
         tools: [],
         stream: false,
       })),
@@ -2428,6 +2740,35 @@ test("HTTP image requests use the ACP transport", async () => {
 
     assert.equal(httpResponse.status, 200, JSON.stringify(body));
     assert.equal(body.output[0].content[0].text, "acp-image-route-ok");
+
+    const followUpResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: JSON.stringify(baseRequest({
+        model: "composer-2.5",
+        previous_response_id: body.id,
+        input: [
+          ...firstImageInput,
+          ...body.output,
+          {
+            role: "user",
+            type: "message",
+            content: [
+              { type: "input_text", text: "http-acp-image-follow-up" },
+              { type: "input_image", image_url: JPEG_DATA_URI },
+            ],
+          },
+        ],
+        tools: [],
+        stream: false,
+      })),
+    });
+    const followUpBody = await followUpResponse.json();
+    assert.equal(followUpResponse.status, 200, JSON.stringify(followUpBody));
+    assert.equal(followUpBody.output[0].content[0].text, "acp-image-route-ok");
 
     const fileResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",

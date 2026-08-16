@@ -43,6 +43,9 @@ const MAX_CURSOR_MODEL_ROUTES_JSON_BYTES = 512 * 1024;
 const MAX_NATIVE_MODELS_JSON_BYTES = 128 * 1024;
 const MAX_ACP_JSON_LINE_BYTES = 1024 * 1024;
 const MAX_ACP_OUTPUT_TEXT_BYTES = 8 * 1024 * 1024;
+const MAX_RESOURCE_ITEMS = 64;
+const MAX_RESOURCE_BYTES = 4 * 1024 * 1024;
+const MAX_PROMPT_TOOL_DESCRIPTION_BYTES = 24 * 1024;
 const CURSOR_MODEL_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const CURSOR_REASONING_EFFORTS = new Set([
   "default", "minimal", "none", "low", "medium", "high", "xhigh", "max",
@@ -52,6 +55,7 @@ const OPENAI_API_RESPONSES_URL = new URL("https://api.openai.com/v1/responses");
 const OPENAI_PROXY_TEST_HOOKS = new WeakSet();
 const BRIDGE_REQUEST_TEST_HOOKS = new WeakSet();
 const PREPROCESSED_FILE = Symbol("syncbar-preprocessed-file");
+const PERSISTED_DYNAMIC_TOOLS = Symbol("syncbar-persisted-dynamic-tools");
 const BRIDGE_START = "<SYNCBAR_BACKEND_REQUEST>";
 const BRIDGE_END = "</SYNCBAR_BACKEND_REQUEST>";
 const TOOL_START = "<SYNCBAR_TOOL_CALL>";
@@ -97,13 +101,15 @@ const MIME_BY_EXTENSION = new Map([
 ]);
 const UNSUPPORTED_CONTENT_MODALITY_TYPES = new Set([
   "audio",
-  "embedded_resource",
   "input_audio",
   "input_video",
   "output_audio",
+  "video",
+]);
+const RESOURCE_CONTENT_TYPES = new Set([
+  "embedded_resource",
   "resource",
   "resource_link",
-  "video",
 ]);
 
 const DENY_PATTERNS = [
@@ -161,23 +167,36 @@ function arrayStartsWith(values, prefix) {
 }
 
 export function continuationRequest(request, previous) {
-  if (!previous || !Array.isArray(request?.input)) return request;
+  if (!previous) return request;
+  const persistedDynamicTools = mergedDynamicTools(
+    previous.dynamicTools,
+    dynamicToolsFromInput(request?.input),
+  );
+  if (!Array.isArray(request?.input)) {
+    return requestWithPersistedDynamicTools(request, persistedDynamicTools);
+  }
   const priorInput = Array.isArray(previous.input) ? previous.input : [];
   const priorOutput = Array.isArray(previous.output) ? previous.output : [];
   const combined = [...priorInput, ...priorOutput];
   if (combined.length > 0 && arrayStartsWith(request.input, combined)) {
-    return { ...request, input: request.input.slice(combined.length) };
+    return requestWithPersistedDynamicTools(
+      { ...request, input: request.input.slice(combined.length) },
+      persistedDynamicTools,
+    );
   }
   if (priorInput.length > 0 && arrayStartsWith(request.input, priorInput)) {
     let suffix = request.input.slice(priorInput.length);
     if (priorOutput.length > 0 && arrayStartsWith(suffix, priorOutput)) {
       suffix = suffix.slice(priorOutput.length);
     }
-    return { ...request, input: suffix };
+    return requestWithPersistedDynamicTools(
+      { ...request, input: suffix },
+      persistedDynamicTools,
+    );
   }
   // Responses clients may send only the new turn when previous_response_id is
   // present. Preserve that incremental input unchanged.
-  return request;
+  return requestWithPersistedDynamicTools(request, persistedDynamicTools);
 }
 
 export class CursorSessionRegistry {
@@ -222,6 +241,7 @@ export class CursorSessionRegistry {
       responseID,
       createdAt: this.now(),
       inUse: false,
+      continued: false,
     });
     if (value.clientKey) this.latestByClientKey.set(value.clientKey, responseID);
     this.prune();
@@ -237,15 +257,19 @@ export class CursorSessionRegistry {
   }
 
   acquire(responseID, { model, workspace }) {
+    const entry = this.acquireIfPresent(responseID, { model, workspace });
+    if (entry) return entry;
+    throw new BridgeError(
+      "previous_response_id is unknown or expired",
+      409,
+      "invalid_previous_response",
+    );
+  }
+
+  acquireIfPresent(responseID, { model, workspace }) {
     this.prune();
     const entry = this.entries.get(responseID);
-    if (!entry) {
-      throw new BridgeError(
-        "previous_response_id is unknown or expired",
-        409,
-        "invalid_previous_response",
-      );
-    }
+    if (!entry) return null;
     if (entry.model !== model || entry.workspace !== workspace) {
       throw new BridgeError(
         "previous_response_id belongs to a different Cursor route",
@@ -264,11 +288,14 @@ export class CursorSessionRegistry {
     return entry;
   }
 
-  release(responseID, { consume = false } = {}) {
+  release(responseID, { consume = false, markContinued = false } = {}) {
     const entry = this.entries.get(responseID);
     if (!entry) return;
     if (consume) this.delete(responseID);
-    else entry.inUse = false;
+    else {
+      entry.inUse = false;
+      if (markContinued) entry.continued = true;
+    }
   }
 
   clear() {
@@ -690,10 +717,78 @@ function stableValue(value) {
 }
 
 function stableJSONStringify(value) {
-  return JSON.stringify(stableValue(value))
+  const encoded = JSON.stringify(stableValue(value));
+  return String(encoded)
     .replaceAll("<", "\\u003c")
     .replaceAll(">", "\\u003e")
     .replaceAll("&", "\\u0026");
+}
+
+function dynamicToolsFromInput(input) {
+  if (!Array.isArray(input)) return [];
+  const tools = [];
+  for (const item of input) {
+    if (item?.type === "additional_tools" || item?.type === "tool_search_output") {
+      if (Array.isArray(item.tools)) tools.push(...item.tools);
+    }
+  }
+  return tools;
+}
+
+function mergedDynamicTools(...groups) {
+  const seen = new Set();
+  const tools = [];
+  for (const group of groups) {
+    if (!Array.isArray(group)) continue;
+    for (const tool of group) {
+      const key = stableJSONStringify(tool);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tools.push(tool);
+    }
+  }
+  return tools;
+}
+
+function requestWithPersistedDynamicTools(request, tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return request;
+  return { ...request, [PERSISTED_DYNAMIC_TOOLS]: tools };
+}
+
+function utf8Prefix(value, maximumBytes) {
+  let bytes = 0;
+  let end = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (bytes + characterBytes > maximumBytes) break;
+    bytes += characterBytes;
+    end += character.length;
+  }
+  return value.slice(0, end);
+}
+
+function promptSafeDescription(value) {
+  if (typeof value !== "string" ||
+      Buffer.byteLength(value, "utf8") <= MAX_PROMPT_TOOL_DESCRIPTION_BYTES) {
+    return value;
+  }
+  const notice = "\n[Description truncated at the bridge safety limit. Use the declared schema and runtime catalog or tool search when available.]";
+  const prefixBytes = MAX_PROMPT_TOOL_DESCRIPTION_BYTES - Buffer.byteLength(notice, "utf8");
+  return `${utf8Prefix(value, Math.max(0, prefixBytes))}${notice}`;
+}
+
+function promptSafeToolValue(value, key = null) {
+  if (key === "description" && typeof value === "string") {
+    return promptSafeDescription(value);
+  }
+  if (Array.isArray(value)) return value.map((item) => promptSafeToolValue(item));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([childKey, child]) => [
+      childKey,
+      promptSafeToolValue(child, childKey),
+    ]),
+  );
 }
 
 function validatedTools(tools) {
@@ -761,16 +856,11 @@ function validatedTools(tools) {
 }
 
 function requestTools(request) {
-  const tools = [...validatedTools(request.tools)];
-  if (Array.isArray(request.input)) {
-    for (const item of request.input) {
-      if (item?.type === "additional_tools") {
-        tools.push(...validatedTools(item.tools));
-      } else if (item?.type === "tool_search_output") {
-        tools.push(...validatedTools(item.tools));
-      }
-    }
-  }
+  const tools = [
+    ...validatedTools(request.tools),
+    ...validatedTools(request[PERSISTED_DYNAMIC_TOOLS]),
+    ...validatedTools(dynamicToolsFromInput(request.input)),
+  ];
   const seen = new Set();
   return tools.filter((tool) => {
     const key = stableJSONStringify(tool);
@@ -1767,6 +1857,8 @@ function normalizedRichInput(input, options = {}) {
   const images = [];
   const imageIndexByDataURL = new Map();
   let totalImageBytes = 0;
+  let resourceItems = 0;
+  let totalResourceBytes = 0;
 
   const visit = (value) => {
     if (Array.isArray(value)) return value.map(visit);
@@ -1789,6 +1881,20 @@ function normalizedRichInput(input, options = {}) {
         400,
         "unsupported_input_type",
       );
+    }
+    if (RESOURCE_CONTENT_TYPES.has(value.type)) {
+      resourceItems += 1;
+      totalResourceBytes += Buffer.byteLength(stableJSONStringify(value), "utf8");
+      if (resourceItems > MAX_RESOURCE_ITEMS || totalResourceBytes > MAX_RESOURCE_BYTES) {
+        throw new BridgeError(
+          "Embedded resource input is too large",
+          413,
+          "resource_input_too_large",
+        );
+      }
+      // Resource payloads are untrusted reference data. Preserve their JSON
+      // shape without interpreting nested `type` fields as active modalities.
+      return value;
     }
     if (value.type === "input_image" || value.type === "computer_screenshot") {
       const parsed = parsedImageDataURL(value.image_url);
@@ -1827,7 +1933,11 @@ function normalizedRichInput(input, options = {}) {
 
 function conversationInput(input) {
   if (!Array.isArray(input)) return input;
-  return input.filter((item) => item?.type !== "additional_tools");
+  return input
+    .filter((item) => item?.type !== "additional_tools")
+    .map((item) => item?.type === "tool_search_output"
+      ? promptSafeToolValue(item)
+      : item);
 }
 
 function preparedCursorBackendRequest(request, options = {}) {
@@ -1855,7 +1965,7 @@ function preparedCursorBackendRequest(request, options = {}) {
       source: `attachment://image-${index + 1}`,
     })),
     file_attachments: options.files ?? [],
-    available_tools: tools,
+    available_tools: tools.map((tool) => promptSafeToolValue(tool)),
     unavailable_tool_types: [...new Set(
       allTools
         .filter((tool) => !tools.includes(tool))
@@ -2895,6 +3005,38 @@ function validClientContinuationKey(value) {
     value.length > 0 &&
     value.length <= 512 &&
     !/[\r\n\0]/u.test(value);
+}
+
+function hasReplayableConversationHistory(input) {
+  if (!Array.isArray(input)) return false;
+  return input.some((item) => {
+    if (!item || typeof item !== "object") return false;
+    if (item.role === "assistant") return true;
+    return [
+      "computer_call",
+      "custom_tool_call",
+      "function_call",
+      "reasoning",
+      "tool_search_call",
+    ].includes(item.type);
+  });
+}
+
+function inputMayRequireACP(value) {
+  if (Array.isArray(value)) return value.some(inputMayRequireACP);
+  if (!value || typeof value !== "object") return false;
+  if (RESOURCE_CONTENT_TYPES.has(value.type) ||
+      value.type === "additional_tools" || value.type === "tool_search_output") {
+    return false;
+  }
+  if (["computer_screenshot", "input_file", "input_image"].includes(value.type)) return true;
+  return Object.values(value).some(inputMayRequireACP);
+}
+
+function requireReplayableConversation(input, message) {
+  if (!hasReplayableConversationHistory(input)) {
+    throw new BridgeError(message, 409, "invalid_previous_response");
+  }
 }
 
 function emitCursorRequestMetric(config, metric) {
@@ -4068,6 +4210,7 @@ export function createBridgeServer(config, testHooks) {
         );
       }
       let previousSession = null;
+      let statelessReplay = false;
       if (body.previous_response_id !== undefined && body.previous_response_id !== null) {
         if (typeof body.previous_response_id !== "string" || body.previous_response_id.length === 0) {
           throw new BridgeError(
@@ -4076,12 +4219,21 @@ export function createBridgeServer(config, testHooks) {
             "invalid_previous_response",
           );
         }
-        previousSession = sessionRegistry.acquire(body.previous_response_id, {
+        previousSession = sessionRegistry.acquireIfPresent(body.previous_response_id, {
           model: cursorModel,
           workspace: config.workspace,
         });
-        acquiredPreviousResponseID = body.previous_response_id;
-        continuationSource = "previous_response_id";
+        if (previousSession) {
+          acquiredPreviousResponseID = body.previous_response_id;
+          continuationSource = "previous_response_id";
+        } else {
+          requireReplayableConversation(
+            body.input,
+            "previous_response_id is unknown or expired and the request does not contain replayable history",
+          );
+          statelessReplay = true;
+          continuationSource = "previous_response_id_replay";
+        }
       } else if (validClientContinuationKey(body.prompt_cache_key)) {
         const cachedSession = sessionRegistry.acquireLatest(body.prompt_cache_key, {
           model: cursorModel,
@@ -4097,23 +4249,55 @@ export function createBridgeServer(config, testHooks) {
           }
         }
       }
-      const cursorRequest = continuationRequest(body, previousSession);
+      if (previousSession && (
+        previousSession.continued ||
+        !validCursorSessionID(previousSession.sessionID) ||
+        inputMayRequireACP(body.input)
+      )) {
+        requireReplayableConversation(
+          body.input,
+          "Cursor continuation requires replayable conversation history",
+        );
+        statelessReplay = true;
+        continuationSource = `${continuationSource ?? "session"}_replay`;
+      }
+      const dynamicTools = mergedDynamicTools(
+        previousSession?.dynamicTools,
+        dynamicToolsFromInput(body.input),
+      );
+      const replayRequest = requestWithPersistedDynamicTools(body, dynamicTools);
+      let cursorRequest = statelessReplay
+        ? replayRequest
+        : continuationRequest(body, previousSession);
       const preparationStartedAt = monotonicNow();
-      const prepared = await prepareCursorBackendRequestWithFiles(cursorRequest, {
+      let prepared = await prepareCursorBackendRequestWithFiles(cursorRequest, {
         fileExtractorPath: config.fileExtractorPath ?? defaultPDFExtractorPath(),
         signal: controller.signal,
         onSpawn: (child) => activeChildren.add(child),
         onClose: (child) => activeChildren.delete(child),
       });
-      const preparationMs = Math.max(0, monotonicNow() - preparationStartedAt);
-      const usesACP = prepared.imageCount > 0;
-      if (previousSession && usesACP) {
-        throw new BridgeError(
-          "Cursor image continuations cannot resume a text CLI session",
-          409,
-          "invalid_previous_response",
+      let usesACP = prepared.imageCount > 0;
+      if (previousSession && usesACP && !statelessReplay) {
+        requireReplayableConversation(
+          body.input,
+          "Cursor image continuation requires replayable conversation history",
         );
+        statelessReplay = true;
+        continuationSource = `${continuationSource ?? "session"}_replay`;
+        cursorRequest = replayRequest;
+        prepared = await prepareCursorBackendRequestWithFiles(cursorRequest, {
+          fileExtractorPath: config.fileExtractorPath ?? defaultPDFExtractorPath(),
+          signal: controller.signal,
+          onSpawn: (child) => activeChildren.add(child),
+          onClose: (child) => activeChildren.delete(child),
+        });
+        usesACP = prepared.imageCount > 0;
       }
+      const preparationMs = Math.max(0, monotonicNow() - preparationStartedAt);
+      const resumeChatID = !usesACP && !statelessReplay &&
+          validCursorSessionID(previousSession?.sessionID)
+        ? previousSession.sessionID
+        : null;
       const responseID = `resp_${randomUUID().replaceAll("-", "")}`;
       let streamingResponse;
       if (body.stream !== false) {
@@ -4123,7 +4307,7 @@ export function createBridgeServer(config, testHooks) {
         });
         response.write(": syncbar-cursor-bridge connected\n\n");
         streamingResponse = new StreamingResponseSSE(
-          body,
+          cursorRequest,
           (event) => response.write(sseLine(event)),
           { responseID },
         );
@@ -4139,7 +4323,7 @@ export function createBridgeServer(config, testHooks) {
         agentPath: config.agentPath,
         workspace: config.workspace,
         model: cursorModel,
-        resumeChatID: previousSession?.sessionID ?? null,
+        resumeChatID,
         modelParameters: modelParameters.get(cursorModel),
         sandboxMode: config.sandboxMode,
         prompt: usesACP ? prepared.acpPrompt : prepared.prompt,
@@ -4154,7 +4338,7 @@ export function createBridgeServer(config, testHooks) {
       const result = await execution;
       let completed;
       if (body.stream === false) {
-        completed = buildResponseResult(body, result.text, { responseID });
+        completed = buildResponseResult(cursorRequest, result.text, { responseID });
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify(completed));
       } else {
@@ -4163,24 +4347,25 @@ export function createBridgeServer(config, testHooks) {
       }
       const reusableSessionID = validCursorSessionID(result.metadata.sessionID)
         ? result.metadata.sessionID
-        : previousSession?.sessionID;
-      if (!usesACP && validCursorSessionID(reusableSessionID)) {
-        sessionRegistry.add(responseID, {
-          sessionID: reusableSessionID,
-          model: cursorModel,
-          workspace: config.workspace,
-          input: clone(body.input),
-          output: clone(completed.output),
-          clientKey: validClientContinuationKey(body.prompt_cache_key)
-            ? body.prompt_cache_key
-            : null,
-        });
-      }
+        : resumeChatID;
+      sessionRegistry.add(responseID, {
+        sessionID: !usesACP && validCursorSessionID(reusableSessionID)
+          ? reusableSessionID
+          : null,
+        model: cursorModel,
+        workspace: config.workspace,
+        input: clone(body.input),
+        output: clone(completed.output),
+        dynamicTools: clone(dynamicTools),
+        clientKey: validClientContinuationKey(body.prompt_cache_key)
+          ? body.prompt_cache_key
+          : null,
+      });
       continuationSucceeded = true;
       emitCursorRequestMetric(config, {
         request_id: responseID,
         transport: usesACP ? "acp" : "stream-json",
-        resumed: Boolean(previousSession),
+        resumed: resumeChatID !== null,
         continuation_source: continuationSource,
         preparation_ms: Math.round(preparationMs * 1000) / 1000,
         first_text_delta_ms: result.metadata.firstTextDeltaMs === null
@@ -4213,7 +4398,7 @@ export function createBridgeServer(config, testHooks) {
       if (heartbeat) clearInterval(heartbeat);
       if (acquiredPreviousResponseID) {
         sessionRegistry.release(acquiredPreviousResponseID, {
-          consume: continuationSucceeded,
+          markContinued: continuationSucceeded,
         });
       }
       activeControllers.delete(controller);

@@ -3,6 +3,31 @@ import XCTest
 @testable import CodexSyncBar
 
 final class CodexSyncBarTests: XCTestCase {
+    func testCursorRemoteReconciliationRequiresEverySafeStartupPrecondition() {
+        XCTAssertTrue(CursorRemoteReconciliationPolicy.shouldRun(
+            providerActive: true,
+            hasAPIKey: true,
+            hasEnabledDevices: true,
+            configurationReady: true,
+            isReadmeDemo: false))
+
+        let blockedStates: [(Bool, Bool, Bool, Bool, Bool)] = [
+            (false, true, true, true, false),
+            (true, false, true, true, false),
+            (true, true, false, true, false),
+            (true, true, true, false, false),
+            (true, true, true, true, true),
+        ]
+        for state in blockedStates {
+            XCTAssertFalse(CursorRemoteReconciliationPolicy.shouldRun(
+                providerActive: state.0,
+                hasAPIKey: state.1,
+                hasEnabledDevices: state.2,
+                configurationReady: state.3,
+                isReadmeDemo: state.4))
+        }
+    }
+
     func testReadmeDemoCommandAcceptsKnownScreenAndAbsoluteOutput() {
         let output = URL(fileURLWithPath: "/tmp/readme-popover.png")
 

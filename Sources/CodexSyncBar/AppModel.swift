@@ -29,6 +29,22 @@ private struct SSHDeviceActivationIntent: Codable {
     let originalDevice: SSHDeviceConfiguration
 }
 
+enum CursorRemoteReconciliationPolicy {
+    static func shouldRun(
+        providerActive: Bool,
+        hasAPIKey: Bool,
+        hasEnabledDevices: Bool,
+        configurationReady: Bool,
+        isReadmeDemo: Bool) -> Bool
+    {
+        providerActive
+            && hasAPIKey
+            && hasEnabledDevices
+            && configurationReady
+            && !isReadmeDemo
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var profiles: [AccountProfile]
@@ -93,6 +109,7 @@ final class AppModel: ObservableObject {
     private var maintenanceTask: Task<Void, Never>?
     private var devicePollingTask: Task<Void, Never>?
     private var controllerReconciliationTask: Task<Void, Never>?
+    private var cursorRemoteReconciliationTask: Task<Void, Never>?
     private var bannerDismissTask: Task<Void, Never>?
     private var transientBannerID: UUID?
     private var weeklyAnchorTasks: [Int: Task<Void, Never>] = [:]
@@ -418,6 +435,9 @@ final class AppModel: ObservableObject {
                     style: .error,
                     message: "중단된 계정 작업 복구 필요: \(error.localizedDescription)")
             }
+        }
+        if controllerStateReady {
+            scheduleCursorRemoteReconciliationIfNeeded()
         }
 
         usagePollingTask?.cancel()
@@ -2376,6 +2396,48 @@ final class AppModel: ObservableObject {
             }
         }
         return result
+    }
+
+    private func scheduleCursorRemoteReconciliationIfNeeded() {
+        guard CursorRemoteReconciliationPolicy.shouldRun(
+            providerActive: isCursorProviderActive,
+            hasAPIKey: hasCursorAPIKey,
+            hasEnabledDevices: configuredDevices.contains(where: \.enabled),
+            configurationReady: configurationError == nil
+                && !profileManagementRecoveryNeeded
+                && !hasControllerTransaction,
+            isReadmeDemo: isReadmeDemo),
+            cursorRemoteReconciliationTask == nil
+        else {
+            return
+        }
+
+        cursorRemoteReconciliationTask = Task { [weak self] in
+            await self?.reconcileCursorProviderOnEnabledDevices()
+        }
+    }
+
+    private func reconcileCursorProviderOnEnabledDevices() async {
+        defer { cursorRemoteReconciliationTask = nil }
+        guard cursorManagementCanBegin else { return }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+
+        do {
+            guard let apiKey = try cursorAPIKeyStore.read() else {
+                hasCursorAPIKey = false
+                return
+            }
+            cursorModelCatalog = try await cursorBridgeService.loadModelCatalog(
+                preferredAgentPath: cursorBridgePreferences.agentPath)
+            cursorModelCatalogError = nil
+            let result = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+            if !result.failures.isEmpty {
+                cursorBridgeError = "SSH Cursor 자동 동기화 실패: \(result.failures.joined(separator: ", "))"
+            }
+        } catch {
+            cursorBridgeError = "SSH Cursor 자동 동기화 실패: \(error.localizedDescription)"
+        }
     }
 
     private func deprovisionCursorOnConfiguredDevices() async -> [String] {

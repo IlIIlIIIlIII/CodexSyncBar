@@ -173,9 +173,9 @@ final class CursorModelCatalogTests: XCTestCase {
         let catalog = CursorModelCatalog(cliOutput: """
         gpt-5.4-low - GPT-5.4 1M Low
         gpt-5.4-medium - GPT-5.4 1M
-        gpt-5.4-medium-fast - GPT-5.4 Fast
+        gpt-5.4-medium-fast - GPT-5.4 1M Fast
         gpt-5.4-high - GPT-5.4 1M High
-        gpt-5.4-high-fast - GPT-5.4 High Fast
+        gpt-5.4-high-fast - GPT-5.4 1M High Fast
         """)
 
         let route = try XCTUnwrap(catalog.codexModelRoutes["syncbar-cursor/gpt-5.4"])
@@ -185,6 +185,25 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(route.resolve(effort: .low), "gpt-5.4-low")
         XCTAssertNil(route.resolve(effort: .low, fast: true))
         XCTAssertEqual(route.resolve(effort: .high, fast: true), "gpt-5.4-high-fast")
+    }
+
+    func testCodexPickerOmitsIncompatibleGLMAndMixedContextFastVariants() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        glm-5.2-max - GLM 5.2 Max
+        gpt-5.6-sol-high - GPT-5.6 Sol 1M High
+        gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+        """)
+
+        XCTAssertNotNil(catalog.family(baseSlug: "glm-5.2"))
+        XCTAssertNil(catalog.preferredPickerModelID(forFlatSlug: "glm-5.2-max"))
+        XCTAssertNil(catalog.codexModelRoutes["syncbar-cursor/glm-5.2"])
+
+        let gpt = try XCTUnwrap(
+            catalog.codexModelRoutes["syncbar-cursor/gpt-5.6-sol"])
+        XCTAssertFalse(gpt.supportsFast)
+        XCTAssertEqual(gpt.resolve(effort: .high), "gpt-5.6-sol-high")
+        XCTAssertNil(gpt.resolve(effort: .high, fast: true))
+        XCTAssertNotNil(catalog.family(containingSlug: "gpt-5.6-sol-high-fast"))
     }
 
     func testRejectsDuplicateNativeRouteCoordinates() throws {

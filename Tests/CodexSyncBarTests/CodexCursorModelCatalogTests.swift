@@ -121,6 +121,9 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(gpt["base_instructions"] as? String, "template instructions")
         XCTAssertEqual(gpt["input_modalities"] as? [String], ["text", "image"])
         XCTAssertEqual(gpt["supports_image_detail_original"] as? Bool, true)
+        XCTAssertEqual(gpt["additional_speed_tiers"] as? [String], [])
+        XCTAssertEqual(gpt["context_window"] as? Int, 1_000_000)
+        XCTAssertEqual(gpt["max_context_window"] as? Int, 1_000_000)
 
         XCTAssertEqual(models[5]["display_name"] as? String,
                        "Cursor · Codex 5.3")
@@ -142,7 +145,7 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         XCTAssertEqual((generated["supported_reasoning_levels"] as? [Any])?.count, 0)
     }
 
-    func testCollapsedModelsUseConservativeContextAcrossEveryNativeControlVariant() throws {
+    func testCollapsedModelsKeepStandardOneMillionContextWhenFastContextDiffers() throws {
         let cursor = CursorModelCatalog(cliOutput: """
         gpt-5.6-sol-high - GPT-5.6 Sol 1M High
         gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
@@ -173,10 +176,13 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             95)
         XCTAssertEqual(
             bySlug["syncbar-cursor/gpt-5.6-sol"]?["context_window"] as? Int,
-            272_000)
+            1_000_000)
         XCTAssertEqual(
             bySlug["syncbar-cursor/gpt-5.6-sol"]?["max_context_window"] as? Int,
-            272_000)
+            1_000_000)
+        XCTAssertEqual(
+            bySlug["syncbar-cursor/gpt-5.6-sol"]?["additional_speed_tiers"] as? [String],
+            [])
         XCTAssertEqual(
             bySlug["syncbar-cursor/gpt-5.6-sol"]?["effective_context_window_percent"] as? Int,
             95)

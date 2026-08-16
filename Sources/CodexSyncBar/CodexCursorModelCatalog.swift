@@ -75,7 +75,10 @@ enum CodexCursorModelCatalogBuilder {
                         throw AppError.processFailed(
                             "Codex 모델 ID가 기존 카탈로그와 충돌합니다: \(modelID)")
                     }
-                    let variants = family.variants.filter { $0.thinking == thinking }
+                    let routedSlugs = Set(route.variants.map(\.slug))
+                    let variants = family.variants.filter {
+                        $0.thinking == thinking && routedSlugs.contains($0.slug)
+                    }
                     var model = template
                     model["slug"] = modelID
                     model["display_name"] = pickerDisplayName(

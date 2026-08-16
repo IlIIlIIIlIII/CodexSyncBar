@@ -399,11 +399,13 @@ struct CursorModelCatalog: Equatable, Sendable {
     var pickerPresets: [CursorCodexPickerPreset] {
         var presets: [CursorCodexPickerPreset] = []
         for family in families {
+            guard Self.supportsCodexToolProtocol(family) else { continue }
             let thinkingModes = family.group == .anthropicClaude
                 ? [true]
                 : [false, true]
             for thinking in thinkingModes {
-                let matchingVariants = family.variants.filter { $0.thinking == thinking }
+                let matchingVariants = Self.codexRepresentableVariants(
+                    family.variants.filter { $0.thinking == thinking })
                 // Codex always has a Standard service tier. A Cursor cohort
                 // that only exposes Fast cannot be represented truthfully in
                 // the native picker, so omit it without invalidating the rest
@@ -428,6 +430,30 @@ struct CursorModelCatalog: Equatable, Sendable {
             }
         }
         return presets
+    }
+
+    private static func supportsCodexToolProtocol(_ family: CursorModelFamily) -> Bool {
+        // GLM 5.2 currently treats the bridge's structured outer-tool envelope
+        // as prompt injection. Keep it available in the ordinary Cursor list,
+        // but do not advertise it as a Codex tool-capable backend.
+        family.baseSlug.lowercased() != "glm-5.2"
+    }
+
+    private static func codexRepresentableVariants(
+        _ variants: [CursorModelVariant]) -> [CursorModelVariant]
+    {
+        let standard = variants.filter { !$0.fast }
+        let fast = variants.filter(\.fast)
+        guard !standard.isEmpty, !fast.isEmpty else { return variants }
+
+        let standardContexts = Set(standard.map { $0.context ?? "standard" })
+        let fastContexts = Set(fast.map { $0.context ?? "standard" })
+        guard standardContexts != fastContexts else { return variants }
+
+        // Codex exposes one context window for all service tiers. If Cursor's
+        // Fast cohort has a different context, retaining it would either
+        // overstate Fast or unnecessarily shrink Standard.
+        return standard
     }
 
     var codexModelRoutes: [String: CursorCodexModelRoute] {
