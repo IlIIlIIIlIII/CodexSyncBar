@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { lstat, mkdir, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
@@ -1267,6 +1267,23 @@ function extractedOfficeText(kind, data) {
   return boundedExtractedText(extractedSheets);
 }
 
+function extractorChildEnvironment() {
+  const allowed = [
+    "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+    "PATH", "PATHEXT", "TEMP", "TMP", "SystemRoot",
+    "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
+  ];
+  const environment = Object.fromEntries(
+    allowed.flatMap((key) => typeof process.env[key] === "string"
+      ? [[key, process.env[key]]]
+      : []),
+  );
+  environment.PATH ??= process.platform === "win32" ? "" : "/usr/bin:/bin";
+  environment.LANG ??= "C.UTF-8";
+  environment.NODE_NO_WARNINGS = "1";
+  return environment;
+}
+
 async function runOfficeExtractor(kind, data, options = {}) {
   const scriptPath = fileURLToPath(import.meta.url);
   return await new Promise((resolve, reject) => {
@@ -1277,7 +1294,7 @@ async function runOfficeExtractor(kind, data, options = {}) {
       kind,
     ], {
       cwd: path.dirname(scriptPath),
-      env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", NODE_NO_WARNINGS: "1" },
+      env: extractorChildEnvironment(),
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1373,11 +1390,23 @@ function safePDFExtractorPath(value) {
 }
 
 function defaultPDFExtractorPath() {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "cursor-file-extractor");
+  const executable = process.platform === "win32"
+    ? path.join("PdfExtractor", "cursor-file-extractor.exe")
+    : "cursor-file-extractor";
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), executable);
+}
+
+function sameResolvedPath(left, right) {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
 }
 
 async function runPDFExtractor(data, options = {}) {
   const executable = safePDFExtractorPath(options.fileExtractorPath);
+  const isWindows = process.platform === "win32";
   let stat;
   let parentStat;
   let resolvedPath;
@@ -1391,21 +1420,31 @@ async function runPDFExtractor(data, options = {}) {
     ]);
   }
   catch { throw new BridgeError("PDF extractor is unavailable", 415, "pdf_extractor_unavailable"); }
-  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0 ||
-      !parentStat.isDirectory() || parentStat.isSymbolicLink() || (parentStat.mode & 0o022) !== 0 ||
-      resolvedPath !== path.join(resolvedParent, path.basename(executable)) ||
+  const isWindowsScript = isWindows && /\.(?:cmd|bat)$/iu.test(executable);
+  if (!stat.isFile() || stat.isSymbolicLink() ||
+      (!isWindows && ((stat.mode & 0o111) === 0 || (stat.mode & 0o022) !== 0)) ||
+      (isWindows && !/\.(?:exe|cmd|bat)$/iu.test(executable)) ||
+      !parentStat.isDirectory() || parentStat.isSymbolicLink() ||
+      (!isWindows && (parentStat.mode & 0o022) !== 0) ||
+      !sameResolvedPath(resolvedPath, path.join(resolvedParent, path.basename(executable))) ||
       (typeof process.getuid === "function" &&
         (stat.uid !== process.getuid() || parentStat.uid !== process.getuid()))) {
     throw new BridgeError("PDF extractor path is unsafe", 500, "unsafe_path");
   }
 
   return await new Promise((resolve, reject) => {
-    const child = spawn(executable, ["--detail", options.detail ?? "auto"], {
+    const child = isWindowsScript
+      ? spawnCursorChild(executable, ["--detail", options.detail ?? "auto"], {
+        cwd: path.dirname(executable),
+        env: extractorChildEnvironment(),
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+      : spawn(executable, ["--detail", options.detail ?? "auto"], {
       cwd: path.dirname(executable),
-      env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+      env: extractorChildEnvironment(),
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
-    });
+      });
     options.onSpawn?.(child);
     const stdout = [];
     let stdoutBytes = 0;
@@ -2332,7 +2371,9 @@ function parseNDJSONLine(line, tracker, metadata) {
 
 export function cursorChildEnvironment(source) {
   const allowed = [
-    "HOME", "PATH", "TMPDIR", "USER", "LOGNAME", "SHELL", "TERM",
+    "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+    "PATH", "PATHEXT", "TEMP", "TMP", "SystemRoot",
+    "TMPDIR", "USER", "LOGNAME", "SHELL", "TERM",
     "LANG", "LC_ALL", "LC_CTYPE", "NO_COLOR", "CURSOR_API_KEY",
     // Current Cursor CLI implementation switch; it is intentionally forwarded
     // so remote manager children cannot fall back to the macOS Keychain.
@@ -2346,12 +2387,121 @@ export function cursorChildEnvironment(source) {
 }
 
 function terminateChild(child) {
-  if (!child || child.exitCode !== null || child.killed) return;
-  child.kill("SIGTERM");
+  if (!child || child.exitCode !== null) return;
+  if (process.platform === "win32" && Number.isInteger(child.pid)) {
+    try {
+      const result = spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      if (result.status === 0) return;
+    } catch {
+      // The direct kill below remains the fallback when taskkill is unavailable.
+    }
+  }
+  try { child.kill("SIGTERM"); }
+  catch { /* The process may have exited between the checks above. */ }
   const timer = setTimeout(() => {
-    if (child.exitCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null) {
+      try { child.kill("SIGKILL"); }
+      catch { /* The process may have exited during termination. */ }
+    }
   }, 1500);
   timer.unref();
+}
+
+function waitForChildExit(child, timeoutMs = 1_750) {
+  if (!child || child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(finish, timeoutMs);
+    child.once("close", finish);
+    child.once("error", finish);
+  });
+}
+
+const WINDOWS_CMD_LITERAL_PERCENT = "CODEX_SYNCBAR_LITERAL_PERCENT";
+const WINDOWS_CMD_LITERAL_BANG = "CODEX_SYNCBAR_LITERAL_BANG";
+const WINDOWS_CMD_LITERAL_CARET = "CODEX_SYNCBAR_LITERAL_CARET";
+
+function quoteWindowsCommandArgument(value) {
+  if (typeof value !== "string" || /[\r\n\0]/u.test(value)) {
+    throw new BridgeError(
+      "Cursor CLI command arguments contain an invalid control character",
+      500,
+      "invalid_agent_path",
+    );
+  }
+
+  // cmd.exe parses % before it invokes the batch file, and delayed expansion
+  // can consume !. Put those characters behind environment-variable
+  // references instead of trying to escape them in the command text. The
+  // references are expanded once, after cmd.exe has recognized the command
+  // boundaries, so metacharacters stay part of the argument.
+  let escaped = '"';
+  let backslashes = 0;
+  for (const character of value) {
+    if (character === "\\") {
+      backslashes += 1;
+      continue;
+    }
+
+    if (character === '"') {
+      // Batch files use doubled quotes for a literal quote inside a quoted
+      // argument. This keeps cmd.exe's quote state balanced before %* is
+      // forwarded to the external child process.
+      escaped += "\\".repeat(backslashes * 2);
+      escaped += '""';
+    } else {
+      escaped += "\\".repeat(backslashes);
+      if (character === "^") escaped += `%${WINDOWS_CMD_LITERAL_CARET}%`;
+      else if (character === "%") escaped += `%${WINDOWS_CMD_LITERAL_PERCENT}%`;
+      else if (character === "!") escaped += `%${WINDOWS_CMD_LITERAL_BANG}%`;
+      else escaped += character;
+    }
+    backslashes = 0;
+  }
+
+  // Double trailing backslashes so the closing quote remains a delimiter in
+  // the Windows command-line parser rather than being consumed as escaping.
+  escaped += "\\".repeat(backslashes * 2);
+  return `${escaped}"`;
+}
+
+export function spawnCursorChild(agentPath, args, options = {}) {
+  const isWindowsCommandScript = process.platform === "win32"
+    && /\.(?:cmd|bat)$/iu.test(agentPath);
+  if (!isWindowsCommandScript) {
+    return spawn(agentPath, args, { ...options, shell: false });
+  }
+
+  // Node cannot execute .cmd/.bat files with shell:false on Windows. Keep the
+  // command explicit and escaped instead of enabling a general shell, because
+  // workspace and model values still originate from app configuration.
+  const command = [agentPath, ...args]
+    .map(quoteWindowsCommandArgument)
+    .join(" ");
+  const commandShell = process.env.ComSpec || process.env.COMSPEC || "cmd.exe";
+  const env = {
+    ...(options.env ?? process.env),
+    [WINDOWS_CMD_LITERAL_PERCENT]: "%",
+    [WINDOWS_CMD_LITERAL_BANG]: "!",
+    [WINDOWS_CMD_LITERAL_CARET]: "^",
+  };
+  return spawn(commandShell, ["/d", "/v:off", "/s", "/c", `"${command}"`], {
+    ...options,
+    env,
+    shell: false,
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  });
 }
 
 export function runCursorAgent({
@@ -2378,10 +2528,9 @@ export function runCursorAgent({
     ];
     if (model && model !== "auto") args.push("--model", model);
     args.push("--output-format", "stream-json", "--stream-partial-output");
-    const child = spawn(agentPath, args, {
+    const child = spawnCursorChild(agentPath, args, {
       cwd: workspace,
       env,
-      shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
     onSpawn?.(child);
@@ -2397,20 +2546,23 @@ export function runCursorAgent({
     let stdoutBuffer = "";
     let stderrBytes = 0;
     let settled = false;
-    const finish = (fn) => {
+    const finish = (fn, waitForExit = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
-      fn();
+      if (!waitForExit) {
+        fn();
+        return;
+      }
+      terminateChild(child);
+      waitForChildExit(child).then(fn);
     };
     const abort = () => {
-      terminateChild(child);
-      finish(() => reject(new BridgeError("Cursor request was cancelled", 499, "cancelled")));
+      finish(() => reject(new BridgeError("Cursor request was cancelled", 499, "cancelled")), true);
     };
     const timeout = setTimeout(() => {
-      terminateChild(child);
-      finish(() => reject(new BridgeError("Cursor CLI request timed out", 504, "timeout")));
+      finish(() => reject(new BridgeError("Cursor CLI request timed out", 504, "timeout")), true);
     }, timeoutMs);
     timeout.unref();
     signal?.addEventListener("abort", abort, { once: true });
@@ -2435,22 +2587,20 @@ export function runCursorAgent({
           try {
             onTextDelta(delta);
           } catch {
-            terminateChild(child);
             finish(() => reject(new BridgeError(
               "Cursor response stream could not be delivered",
               500,
               "bridge_error",
-            )));
+            )), true);
             return;
           }
         }
         if (metadata.nativeToolCalls > 0) {
-          terminateChild(child);
           finish(() => reject(new BridgeError(
             `Cursor CLI attempted a blocked native tool (${metadata.nativeToolSubtype})`,
             502,
             "native_tool_blocked",
-          )));
+          )), true);
           return;
         }
       }
@@ -2655,10 +2805,9 @@ export function runCursorACP({
     ];
     if (model && model !== "auto") args.push("--model", model);
     args.push("acp");
-    const child = spawn(agentPath, args, {
+    const child = spawnCursorChild(agentPath, args, {
       cwd: workspace,
       env,
-      shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
     onSpawn?.(child);
@@ -2706,14 +2855,14 @@ export function runCursorACP({
       }
       terminateChild(child);
       cleanup();
-      reject(error);
+      waitForChildExit(child).then(() => reject(error));
     };
     const finishSuccess = () => {
       if (settled) return;
       settled = true;
       terminateChild(child);
       cleanup();
-      resolve({ text: outputText, metadata });
+      waitForChildExit(child).then(() => resolve({ text: outputText, metadata }));
     };
     const abort = () => finishError(new BridgeError("Cursor request was cancelled", 499, "cancelled"));
     const timeout = setTimeout(() => {
@@ -3148,7 +3297,10 @@ async function ensureDirectory(url) {
   if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
     throw new BridgeError(`Bridge directory has the wrong owner: ${url}`, 500, "unsafe_path");
   }
-  if ((stat.mode & 0o022) !== 0) {
+  // Windows does not expose POSIX directory ownership/mode semantics. The
+  // ACL boundary is enforced by the per-user AppData path and Windows file
+  // permissions there; keep the strict mode check for Unix hosts.
+  if (typeof process.getuid === "function" && (stat.mode & 0o022) !== 0) {
     throw new BridgeError(`Bridge directory is writable by another user: ${url}`, 500, "unsafe_path");
   }
 }

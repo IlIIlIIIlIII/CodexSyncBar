@@ -27,6 +27,7 @@ import {
   responseSSEEvents,
   resolveCursorModelRoute,
   runCursorACP,
+  spawnCursorChild,
   startBridge,
   stopBridge,
 } from "../Support/cursor-codex-bridge.mjs";
@@ -112,6 +113,25 @@ function inputFile(filename, contents, mimeType = null, overrides = {}) {
   };
 }
 
+async function writeAgentFixture(root, baseName, source) {
+  if (process.platform !== "win32") {
+    const executable = path.join(root, baseName);
+    await writeFile(executable, source, { mode: 0o700 });
+    await chmod(executable, 0o700);
+    return executable;
+  }
+
+  const script = path.join(root, `${baseName}.cjs`);
+  const command = path.join(root, `${baseName}.cmd`);
+  await writeFile(script, source, { mode: 0o600 });
+  await writeFile(
+    command,
+    `@echo off\r\n"${process.execPath}" "${script}" %*\r\nexit /b %ERRORLEVEL%\r\n`,
+    { mode: 0o600 },
+  );
+  return command;
+}
+
 function officeFixture(kind, text = "fixture text") {
   const markers = {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
@@ -195,7 +215,76 @@ function runProcess(executable, args, { cwd, env, input = "", timeoutMs = 15_000
   });
 }
 
+test("Windows command scripts preserve hostile argument boundaries", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-cmd-arguments-"));
+  try {
+    const script = path.join(root, "echo args.cjs");
+    const command = path.join(root, "echo args.cmd");
+    await writeFile(script, "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n");
+    await writeFile(command, `@echo off\r\nnode "${script}" %*\r\nexit /b %ERRORLEVEL%\r\n`);
+
+    const commandArguments = [
+      "100%PATH% & safe",
+      "a\"b",
+      "bang!value",
+      "caret^value",
+      "trailing\\",
+      "pipe|value",
+      "meta&<>()value",
+      "",
+    ];
+    const child = spawnCursorChild(command, commandArguments, {
+      cwd: root,
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    const [status] = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code, signal) => resolve([code, signal]));
+    });
+
+    assert.equal(status, 0, Buffer.concat(stderr).toString("utf8"));
+    assert.deepEqual(JSON.parse(Buffer.concat(stdout).toString("utf8")), commandArguments);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function createFakePDFExtractor(root) {
+  if (process.platform === "win32") {
+    const script = path.join(root, "cursor-file-extractor.cjs");
+    const executable = path.join(root, "cursor-file-extractor.cmd");
+    const detailPath = path.join(root, "pdf-detail.txt");
+    const output = JSON.stringify({
+      text: "PDF extracted text",
+      page_count: 1,
+      pages: [{ page: 1, mime_type: "image/png", data: PNG_BASE64 }],
+    });
+    await writeFile(script, `
+const { writeFileSync } = require("node:fs");
+const chunks = [];
+process.stdin.on("data", (chunk) => chunks.push(chunk));
+process.stdin.on("end", () => {
+  const args = process.argv.slice(2);
+  if (args[0] !== "--detail") process.exit(81);
+  writeFileSync(${JSON.stringify(detailPath)}, args[1] ?? "", { encoding: "utf8", mode: 0o600 });
+  process.stdout.write(${JSON.stringify(output)});
+});
+`, { mode: 0o600 });
+    await writeFile(
+      executable,
+      `@echo off\r\n"${process.execPath}" "${script}" %*\r\nexit /b %ERRORLEVEL%\r\n`,
+      { mode: 0o600 },
+    );
+    return { executable, detailPath };
+  }
+
   const executable = path.join(root, "cursor-file-extractor");
   const detailPath = path.join(root, "pdf-detail.txt");
   const output = JSON.stringify({
@@ -219,7 +308,6 @@ fi
 }
 
 async function createFakeACPAgent(root) {
-  const fakeAgent = path.join(root, "acp-agent");
   const imageObservationPath = path.join(root, "acp-observed-image.png");
   const source = `#!/usr/bin/env node
 const readline = require('node:readline');
@@ -542,9 +630,7 @@ input.on('line', (line) => {
   fail('unexpected extra ACP request');
 });
 `;
-  await writeFile(fakeAgent, source, { mode: 0o700 });
-  await chmod(fakeAgent, 0o700);
-  return fakeAgent;
+  return await writeAgentFixture(root, "acp-agent", source);
 }
 
 async function runFakeACP(text, model = "composer-2.5", modelParameters) {
@@ -1111,7 +1197,12 @@ test("image file_data uses ACP attachments and shares the image ledger", async (
   );
 });
 
-test("PDF file_data uses the bounded extractor and shares page images with direct images", async () => {
+test("PDF file_data uses the bounded extractor and shares page images with direct images", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("This fixture is a POSIX shell extractor; Windows coverage uses the published self-contained helper smoke test.");
+    return;
+  }
+
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-pdf-file-test-"));
   try {
     const helper = await createFakePDFExtractor(root);
@@ -1619,7 +1710,6 @@ test("ACP bounds cumulative assistant output", async () => {
 test("HTTP bridge invokes an isolated ask-mode CLI and emits Responses SSE", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-bridge-test-"));
   const workspace = path.join(root, "workspace");
-  const fakeAgent = path.join(root, "agent");
   const streamReleasePath = path.join(root, "release-stream");
   const source = `#!/usr/bin/env node
 const { existsSync } = require('node:fs');
@@ -1679,8 +1769,7 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
   process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'hello',session_id:'s1'})+'\\n');
 })().catch(() => process.exit(5));
 `;
-  await writeFile(fakeAgent, source, { mode: 0o700 });
-  await chmod(fakeAgent, 0o700);
+  const fakeAgent = await writeAgentFixture(root, "agent", source);
   const bridgeToken = "a".repeat(64);
   const server = await startBridge({
     host: "127.0.0.1",
@@ -1842,7 +1931,9 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
     const decoder = new TextDecoder();
     let streamedBody = "";
     const readWithTimeout = (milliseconds) => new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Timed out waiting for a streamed delta")), milliseconds);
+      const timer = setTimeout(() => {
+        reject(new Error("Timed out waiting for a streamed delta"));
+      }, milliseconds);
       reader.read().then(
         (value) => {
           clearTimeout(timer);
