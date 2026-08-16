@@ -509,7 +509,17 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
 });
 
 test("legacy reprovision accepts only a valid Codex picker model change and preserves it", async () => {
-  const fixture = await makeFixture();
+  const original = [
+    '# retain this comment',
+    'approval_policy = "on-request"',
+    'model = "gpt-5.6-sol"',
+    'model_provider = "openai"',
+    '',
+    '[marketplaces.openai-bundled]',
+    'last_updated = "2026-08-16T01:00:00Z"',
+    '',
+  ].join("\n");
+  const fixture = await makeFixture({ original });
   const paths = managerPaths({ home: fixture.home, env: fixture.env });
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
 
@@ -521,11 +531,16 @@ test("legacy reprovision accepts only a valid Codex picker model change and pres
   const changedConfig = (await readFile(paths.config, "utf8")).replace(
     'model = "composer-2.5"',
     `model = "${selectedModel}"`,
+  ).replace(
+    'last_updated = "2026-08-16T01:00:00Z"',
+    'last_updated = "2026-08-17T01:00:00Z"',
   );
   await writeFile(paths.config, changedConfig, { mode: 0o600 });
 
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
-  assert.match(await readFile(paths.config, "utf8"), new RegExp(`model = "${selectedModel}"`));
+  const reprovisioned = await readFile(paths.config, "utf8");
+  assert.match(reprovisioned, new RegExp(`model = "${selectedModel}"`));
+  assert.match(reprovisioned, /last_updated = "2026-08-17T01:00:00Z"/);
   const migratedBackup = JSON.parse(await readFile(paths.backup, "utf8"));
   assert.equal(migratedBackup.schemaVersion, 2);
   assert.equal(migratedBackup.installedModel, selectedModel);
@@ -533,19 +548,36 @@ test("legacy reprovision accepts only a valid Codex picker model change and pres
 });
 
 test("deprovision accepts only a valid Codex picker model change and restores the original", async () => {
-  const fixture = await makeFixture();
+  const original = [
+    '# retain this comment',
+    'approval_policy = "on-request"',
+    'model = "gpt-5.6-sol"',
+    'model_provider = "openai"',
+    '',
+    '[marketplaces.openai-bundled]',
+    'last_updated = "2026-08-16T01:00:00Z"',
+    '',
+  ].join("\n");
+  const fixture = await makeFixture({ original });
   const paths = managerPaths({ home: fixture.home, env: fixture.env });
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
   const changedConfig = (await readFile(paths.config, "utf8")).replace(
     'model = "composer-2.5"',
     'model = "gpt-5.6-sol"',
+  ).replace(
+    'last_updated = "2026-08-16T01:00:00Z"',
+    'last_updated = "2026-08-17T01:00:00Z"',
   );
   await writeFile(paths.config, changedConfig, { mode: 0o600 });
 
   assert.deepEqual(await deprovision({ home: fixture.home, env: fixture.env }), {
     provisioned: false,
   });
-  assert.equal(await readFile(paths.config, "utf8"), fixture.original);
+  const restored = await readFile(paths.config, "utf8");
+  assert.match(restored, /model = "gpt-5.6-sol"/);
+  assert.match(restored, /model_provider = "openai"/);
+  assert.match(restored, /last_updated = "2026-08-17T01:00:00Z"/);
+  assert.doesNotMatch(restored, new RegExp(MARKER_BEGIN));
 });
 
 test("a fresh validation failure removes API-key XDG residue and leaves config/runtime untouched", async () => {

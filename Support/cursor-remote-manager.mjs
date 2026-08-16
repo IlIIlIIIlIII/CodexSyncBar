@@ -950,9 +950,9 @@ function decodeBackup(snapshot) {
   };
 }
 
-function strictManagedModelLine(text) {
+function topLevelModelProviderLines(text) {
   const lines = splitLines(text);
-  let found = null;
+  const found = new Map();
   for (let index = 0; index < lines.length; index += 1) {
     const trimmed = lines[index].content.trim();
     if (trimmed.startsWith("[")) break;
@@ -960,25 +960,76 @@ function strictManagedModelLine(text) {
     if (trimmed.includes('\"\"\"') || trimmed.includes("'''")) {
       fail("Top-level multiline TOML cannot be validated safely", "unsupported_config");
     }
-    if (/^["']model["']\s*=/.test(trimmed)) {
+    if (/^["'](?:model|model_provider)["']\s*=/.test(trimmed)) {
       fail("Quoted top-level model keys cannot be validated safely", "unsupported_config");
     }
-    if (!/^model\s*=/.test(trimmed)) continue;
-    if (found) fail("Duplicate top-level model configuration", "unsupported_config");
-    const match = /^model\s*=\s*"([A-Za-z0-9][A-Za-z0-9._:/-]{0,127})"\s*$/.exec(trimmed);
-    if (!match) fail("Top-level model selection is invalid", "unsupported_config");
-    found = { index, model: validatedModel(match[1]) };
+    const match = /^(model|model_provider)\s*=/.exec(trimmed);
+    if (!match) continue;
+    if (found.has(match[1])) fail("Duplicate top-level model configuration", "unsupported_config");
+    found.set(match[1], { index, content: lines[index].content });
   }
-  if (!found) fail("Managed Codex config has no model selection", "unsupported_config");
-  return { lines, ...found };
+  return { lines, found };
 }
 
-function selectedModelFromManagedConfig(configSnapshot, backup, runtime, options = {}) {
+function strictManagedTopLevel(text) {
+  const parsed = topLevelModelProviderLines(text);
+  const modelLine = parsed.found.get("model");
+  const providerLine = parsed.found.get("model_provider");
+  if (!modelLine || !providerLine) {
+    fail("Managed Codex config has missing model settings", "unsupported_config");
+  }
+  const modelMatch = /^model\s*=\s*"([A-Za-z0-9][A-Za-z0-9._:/-]{0,127})"\s*$/.exec(
+    modelLine.content.trim(),
+  );
+  const providerMatch = /^model_provider\s*=\s*"([A-Za-z0-9][A-Za-z0-9._:/-]{0,127})"\s*$/.exec(
+    providerLine.content.trim(),
+  );
+  if (!modelMatch || !providerMatch || providerMatch[1] !== PROVIDER_ID) {
+    fail("Managed Codex model settings are invalid", "unsupported_config");
+  }
+  return { ...parsed, model: validatedModel(modelMatch[1]) };
+}
+
+function restoreOriginalTopLevel(managedText, originalText) {
+  const managed = topLevelModelProviderLines(managedText);
+  const original = topLevelModelProviderLines(originalText);
+  const removals = [];
+  for (const key of ["model", "model_provider"]) {
+    const managedLine = managed.found.get(key);
+    if (!managedLine) fail("Managed Codex config has missing model settings", "unsupported_config");
+    const originalLine = original.found.get(key);
+    if (originalLine) managed.lines[managedLine.index].content = originalLine.content;
+    else removals.push(managedLine.index);
+  }
+  for (const index of removals.sort((a, b) => b - a)) managed.lines.splice(index, 1);
+  return managed.lines.map((line) => line.content + line.ending).join("");
+}
+
+function prefixCandidatesBeforeMarker(currentText) {
+  const first = currentText.indexOf(MARKER_BEGIN);
+  if (first < 0 || first !== currentText.lastIndexOf(MARKER_BEGIN) ||
+      currentText.indexOf(MARKER_END) < first ||
+      currentText.indexOf(MARKER_END) !== currentText.lastIndexOf(MARKER_END)) {
+    fail("Managed Cursor provider marker is missing or duplicated", "cas_mismatch");
+  }
+  const result = [currentText.slice(0, first)];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const previous = result.at(-1);
+    if (previous.endsWith("\r\n")) result.push(previous.slice(0, -2));
+    else if (previous.endsWith("\n")) result.push(previous.slice(0, -1));
+    else break;
+  }
+  return result;
+}
+
+function managedConfigState(configSnapshot, backup, runtime, options = {}) {
   if (!configSnapshot.exists || configSnapshot.mode !== 0o600) {
     fail("Codex config changed after Cursor provisioning", "cas_mismatch");
   }
   const installedModel = backup.installedModel ?? runtime.model;
-  if (configSnapshot.hash === backup.installedSHA256) return installedModel;
+  if (configSnapshot.hash === backup.installedSHA256) {
+    return { selectedModel: installedModel, baseData: backup.originalData };
+  }
   let originalText;
   let currentText;
   try {
@@ -996,14 +1047,19 @@ function selectedModelFromManagedConfig(configSnapshot, backup, runtime, options
     fail("Cursor config backup does not match its managed runtime", "invalid_backup");
   }
 
-  const expected = strictManagedModelLine(expectedText);
-  const current = strictManagedModelLine(currentText);
-  current.lines[current.index].content = expected.lines[expected.index].content;
-  const normalizedCurrent = current.lines.map((line) => line.content + line.ending).join("");
-  if (normalizedCurrent !== expectedText) {
-    fail("Codex config changed after Cursor provisioning", "cas_mismatch");
+  const current = strictManagedTopLevel(currentText);
+  for (const prefix of prefixCandidatesBeforeMarker(currentText)) {
+    const restored = restoreOriginalTopLevel(prefix, originalText);
+    const roundTrip = patchCodexConfig(
+      restored,
+      { ...runtime, model: current.model },
+      options,
+    );
+    if (roundTrip === currentText) {
+      return { selectedModel: current.model, baseData: Buffer.from(restored, "utf8") };
+    }
   }
-  return current.model;
+  fail("Codex config changed after Cursor provisioning", "cas_mismatch");
 }
 
 function candidate(data, mode = 0o600) {
@@ -1294,16 +1350,17 @@ export async function provision(inputValue, options = {}) {
           fail("Cursor runtime changed after provisioning", "cas_mismatch");
         }
         oldRuntime = runtimeFromDisk(decodeJSON(runtimeSnapshot.data, "Cursor remote runtime"));
-        selectedConfigModel = selectedModelFromManagedConfig(
+        const managedState = managedConfigState(
           configSnapshot,
           existingBackup,
           oldRuntime,
           options,
         );
+        selectedConfigModel = managedState.selectedModel;
         original = {
-          exists: existingBackup.originalExisted,
-          data: existingBackup.originalData,
-          hash: existingBackup.originalSHA256,
+          exists: existingBackup.originalExisted || managedState.baseData.length > 0,
+          data: managedState.baseData,
+          hash: sha256(managedState.baseData),
           mode: existingBackup.originalMode,
         };
       } else {
@@ -1608,9 +1665,9 @@ export async function deprovision(options = {}) {
     }
     await dedicatedXDGRootExists(paths);
     const runtime = runtimeFromDisk(decodeJSON(runtimeSnapshot.data, "Cursor remote runtime"));
-    selectedModelFromManagedConfig(configSnapshot, backup, runtime, options);
-    const original = backup.originalExisted
-      ? candidate(backup.originalData, backup.originalMode)
+    const managedState = managedConfigState(configSnapshot, backup, runtime, options);
+    const original = backup.originalExisted || managedState.baseData.length > 0
+      ? candidate(managedState.baseData, backup.originalMode)
       : absentCandidate();
     // Never report deprovisioning success while a credential-bearing bridge
     // can remain on the managed port. Start the trusted runtime when idle so
