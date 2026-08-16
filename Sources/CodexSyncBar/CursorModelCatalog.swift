@@ -343,7 +343,11 @@ struct CursorModelCatalog: Equatable, Sendable {
         for family in families {
             for thinking in [false, true] {
                 let matchingVariants = family.variants.filter { $0.thinking == thinking }
-                guard !matchingVariants.isEmpty,
+                // Codex always has a Standard service tier. A Cursor cohort
+                // that only exposes Fast cannot be represented truthfully in
+                // the native picker, so omit it without invalidating the rest
+                // of the account catalog.
+                guard matchingVariants.contains(where: { !$0.fast }),
                       let defaultVariant = Self.preferredCodexVariant(
                           in: matchingVariants,
                           requiringFastPair: true)
@@ -375,9 +379,10 @@ struct CursorModelCatalog: Equatable, Sendable {
         guard let variant = variants.first(where: { $0.slug == slug }) else {
             return nil
         }
-        return Self.codexModelID(
+        let modelID = Self.codexModelID(
             baseSlug: variant.baseSlug,
             thinking: variant.thinking)
+        return pickerPresets.contains(where: { $0.id == modelID }) ? modelID : nil
     }
 
     func cursorRouteJSON() throws -> String {

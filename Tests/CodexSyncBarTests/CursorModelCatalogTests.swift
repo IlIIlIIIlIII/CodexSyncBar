@@ -159,6 +159,20 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertThrowsError(try catalog.cursorRouteJSON())
     }
 
+    func testFastOnlyCohortIsOmittedWithoutBreakingOtherPickerRoutes() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        future-fast - Future Fast
+        composer-2.5 - Composer 2.5
+        """)
+
+        XCTAssertEqual(catalog.pickerPresets.map(\.id), [
+            "syncbar-cursor/composer-2.5",
+        ])
+        XCTAssertNil(catalog.preferredPickerModelID(forFlatSlug: "future-fast"))
+        XCTAssertNotNil(catalog.preferredPickerModelID(forFlatSlug: "composer-2.5"))
+        XCTAssertNoThrow(try catalog.cursorRouteJSON())
+    }
+
     func testMapsExtraHighAndXHighSpellingsToOneEffortWithoutInventingSlugs() throws {
         let catalog = CursorModelCatalog(cliOutput: """
         gpt-5.5-extra-high - GPT-5.5 1M Extra High
