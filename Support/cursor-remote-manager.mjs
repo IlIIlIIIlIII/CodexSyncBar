@@ -925,21 +925,85 @@ function decodeBackup(snapshot) {
   if (!snapshot.exists) return null;
   if (snapshot.mode !== 0o600) fail("Cursor config backup must have mode 0600", "unsafe_permissions");
   const value = decodeJSON(snapshot.data, "Cursor config backup");
+  const isLegacy = value?.schemaVersion === 1;
+  const isCurrent = value?.schemaVersion === 2;
   if (
-    value?.schemaVersion !== 1 ||
+    (!isLegacy && !isCurrent) ||
     typeof value.originalExisted !== "boolean" ||
     typeof value.originalDataBase64 !== "string" ||
     typeof value.originalSHA256 !== "string" ||
     typeof value.installedSHA256 !== "string" ||
     typeof value.runtimeSHA256 !== "string" ||
-    !Number.isInteger(value.originalMode)
+    !Number.isInteger(value.originalMode) ||
+    (isCurrent && typeof value.installedModel !== "string") ||
+    (isLegacy && Object.hasOwn(value, "installedModel"))
   ) {
     fail("Cursor config backup is invalid", "invalid_backup");
   }
   const originalData = Buffer.from(value.originalDataBase64, "base64");
   const expectedHash = value.originalExisted ? sha256(originalData) : sha256(Buffer.alloc(0));
   if (expectedHash !== value.originalSHA256) fail("Cursor config backup checksum is invalid", "invalid_backup");
-  return { ...value, originalData };
+  return {
+    ...value,
+    installedModel: isCurrent ? validatedModel(value.installedModel) : null,
+    originalData,
+  };
+}
+
+function strictManagedModelLine(text) {
+  const lines = splitLines(text);
+  let found = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const trimmed = lines[index].content.trim();
+    if (trimmed.startsWith("[")) break;
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (trimmed.includes('\"\"\"') || trimmed.includes("'''")) {
+      fail("Top-level multiline TOML cannot be validated safely", "unsupported_config");
+    }
+    if (/^["']model["']\s*=/.test(trimmed)) {
+      fail("Quoted top-level model keys cannot be validated safely", "unsupported_config");
+    }
+    if (!/^model\s*=/.test(trimmed)) continue;
+    if (found) fail("Duplicate top-level model configuration", "unsupported_config");
+    const match = /^model\s*=\s*"([A-Za-z0-9][A-Za-z0-9._:/-]{0,127})"\s*$/.exec(trimmed);
+    if (!match) fail("Top-level model selection is invalid", "unsupported_config");
+    found = { index, model: validatedModel(match[1]) };
+  }
+  if (!found) fail("Managed Codex config has no model selection", "unsupported_config");
+  return { lines, ...found };
+}
+
+function selectedModelFromManagedConfig(configSnapshot, backup, runtime, options = {}) {
+  if (!configSnapshot.exists || configSnapshot.mode !== 0o600) {
+    fail("Codex config changed after Cursor provisioning", "cas_mismatch");
+  }
+  const installedModel = backup.installedModel ?? runtime.model;
+  if (configSnapshot.hash === backup.installedSHA256) return installedModel;
+  let originalText;
+  let currentText;
+  try {
+    originalText = new TextDecoder("utf-8", { fatal: true }).decode(backup.originalData);
+    currentText = new TextDecoder("utf-8", { fatal: true }).decode(configSnapshot.data);
+  } catch {
+    fail("config.toml is not UTF-8", "invalid_config");
+  }
+  const expectedText = patchCodexConfig(
+    originalText,
+    { ...runtime, model: installedModel },
+    options,
+  );
+  if (sha256(Buffer.from(expectedText, "utf8")) !== backup.installedSHA256) {
+    fail("Cursor config backup does not match its managed runtime", "invalid_backup");
+  }
+
+  const expected = strictManagedModelLine(expectedText);
+  const current = strictManagedModelLine(currentText);
+  current.lines[current.index].content = expected.lines[expected.index].content;
+  const normalizedCurrent = current.lines.map((line) => line.content + line.ending).join("");
+  if (normalizedCurrent !== expectedText) {
+    fail("Codex config changed after Cursor provisioning", "cas_mismatch");
+  }
+  return current.model;
 }
 
 function candidate(data, mode = 0o600) {
@@ -1223,15 +1287,19 @@ export async function provision(inputValue, options = {}) {
       const existingBackup = decodeBackup(backupSnapshot);
       let original;
       let oldRuntime = null;
+      let selectedConfigModel = input.model;
       if (existingBackup) {
-        if (configSnapshot.hash !== existingBackup.installedSHA256 || configSnapshot.mode !== 0o600) {
-          fail("Codex config changed after Cursor provisioning", "cas_mismatch");
-        }
         if (!runtimeSnapshot.exists || runtimeSnapshot.hash !== existingBackup.runtimeSHA256 ||
             runtimeSnapshot.mode !== 0o600) {
           fail("Cursor runtime changed after provisioning", "cas_mismatch");
         }
         oldRuntime = runtimeFromDisk(decodeJSON(runtimeSnapshot.data, "Cursor remote runtime"));
+        selectedConfigModel = selectedModelFromManagedConfig(
+          configSnapshot,
+          existingBackup,
+          oldRuntime,
+          options,
+        );
         original = {
           exists: existingBackup.originalExisted,
           data: existingBackup.originalData,
@@ -1264,14 +1332,19 @@ export async function provision(inputValue, options = {}) {
       const runtime = await resolvedRuntime(input, paths, environment, options);
       await validateCursorAgent(runtime, environment);
 
-      const patchedData = Buffer.from(patchCodexConfig(originalText, runtime, options), "utf8");
+      const patchedData = Buffer.from(patchCodexConfig(
+        originalText,
+        { ...runtime, model: selectedConfigModel },
+        options,
+      ), "utf8");
       const runtimeData = privateJSON(runtime);
       const backup = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         originalExisted: original.exists,
         originalDataBase64: original.data.toString("base64"),
         originalSHA256: original.exists ? sha256(original.data) : sha256(Buffer.alloc(0)),
         originalMode: original.exists ? original.mode : 0o600,
+        installedModel: selectedConfigModel,
         installedSHA256: sha256(patchedData),
         runtimeSHA256: sha256(runtimeData),
       };
@@ -1527,9 +1600,6 @@ export async function deprovision(options = {}) {
       }
       fail("Cursor runtime has no trusted config backup", "missing_backup");
     }
-    if (!configSnapshot.exists || configSnapshot.hash !== backup.installedSHA256) {
-      fail("Codex config changed after Cursor provisioning", "cas_mismatch");
-    }
     if (!runtimeSnapshot.exists || runtimeSnapshot.hash !== backup.runtimeSHA256) {
       fail("Cursor runtime changed after provisioning", "cas_mismatch");
     }
@@ -1538,6 +1608,7 @@ export async function deprovision(options = {}) {
     }
     await dedicatedXDGRootExists(paths);
     const runtime = runtimeFromDisk(decodeJSON(runtimeSnapshot.data, "Cursor remote runtime"));
+    selectedModelFromManagedConfig(configSnapshot, backup, runtime, options);
     const original = backup.originalExisted
       ? candidate(backup.originalData, backup.originalMode)
       : absentCandidate();

@@ -478,6 +478,9 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
   assert.equal((await stat(paths.runtime)).mode & 0o777, 0o600);
   assert.equal((await stat(paths.backup)).mode & 0o777, 0o600);
   assert.equal((await stat(paths.config)).mode & 0o777, 0o600);
+  const backup = JSON.parse(await readFile(paths.backup, "utf8"));
+  assert.equal(backup.schemaVersion, 2);
+  assert.equal(backup.installedModel, fixture.input.model);
   assert.equal(runtime.apiKey, fixture.apiKey);
   assert.equal(runtime.bridgeToken, fixture.bridgeToken);
   assert.deepEqual(runtime.modelParameters, fixture.modelParameters);
@@ -503,6 +506,46 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
   assert.doesNotMatch(config, new RegExp(fixture.bridgeToken));
   assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.apiKey));
   assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.bridgeToken));
+});
+
+test("legacy reprovision accepts only a valid Codex picker model change and preserves it", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+
+  const legacyBackup = JSON.parse(await readFile(paths.backup, "utf8"));
+  legacyBackup.schemaVersion = 1;
+  delete legacyBackup.installedModel;
+  await writeFile(paths.backup, `${JSON.stringify(legacyBackup, null, 2)}\n`, { mode: 0o600 });
+  const selectedModel = "gpt-5.6-sol";
+  const changedConfig = (await readFile(paths.config, "utf8")).replace(
+    'model = "composer-2.5"',
+    `model = "${selectedModel}"`,
+  );
+  await writeFile(paths.config, changedConfig, { mode: 0o600 });
+
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  assert.match(await readFile(paths.config, "utf8"), new RegExp(`model = "${selectedModel}"`));
+  const migratedBackup = JSON.parse(await readFile(paths.backup, "utf8"));
+  assert.equal(migratedBackup.schemaVersion, 2);
+  assert.equal(migratedBackup.installedModel, selectedModel);
+  assert.equal((await readRuntime({ home: fixture.home, env: fixture.env })).model, fixture.input.model);
+});
+
+test("deprovision accepts only a valid Codex picker model change and restores the original", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  const changedConfig = (await readFile(paths.config, "utf8")).replace(
+    'model = "composer-2.5"',
+    'model = "gpt-5.6-sol"',
+  );
+  await writeFile(paths.config, changedConfig, { mode: 0o600 });
+
+  assert.deepEqual(await deprovision({ home: fixture.home, env: fixture.env }), {
+    provisioned: false,
+  });
+  assert.equal(await readFile(paths.config, "utf8"), fixture.original);
 });
 
 test("a fresh validation failure removes API-key XDG residue and leaves config/runtime untouched", async () => {
