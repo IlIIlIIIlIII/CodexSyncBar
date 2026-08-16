@@ -2848,21 +2848,88 @@ remote_node_args() {
   remote_ssh "$index" "$command"
 }
 
+resolve_cursor_runtime() {
+  local allow_install="${1:-0}"
+  local agent_candidate agent_resolved node_candidate node_resolved
+
+  agent_candidate="${CURSOR_REMOTE_AGENT_PATH:-$HOME/.local/bin/agent}"
+  if [ ! -x "$agent_candidate" ] && [ "$allow_install" -eq 1 ]; then
+    [ -x /usr/bin/curl ] || die "curl is required to install Cursor Agent"
+    [ -x /bin/bash ] || die "bash is required to install Cursor Agent"
+    # The provisioning JSON remains in the caller's Bash variable while the
+    # public installer owns this pipeline's stdin. The API key is therefore
+    # never exposed to the installer, argv, environment, or a temporary file.
+    if ! /usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --connect-timeout 20 https://cursor.com/install | /bin/bash >/dev/null 2>&1; then
+      die "Cursor Agent installation failed"
+    fi
+  fi
+  [ -x "$agent_candidate" ] || die "Cursor Agent is not installed"
+  agent_resolved=$(realpath "$agent_candidate" 2>/dev/null) || \
+    die "could not resolve Cursor Agent"
+  [ -f "$agent_resolved" ] && [ ! -L "$agent_resolved" ] || \
+    die "Cursor Agent executable is unsafe"
+  [ "$(file_owner_id "$agent_resolved")" = "$(id -u)" ] || \
+    die "Cursor Agent owner is unsafe"
+  case "$(file_mode "$agent_resolved")" in 500|700|755) ;; *) die "Cursor Agent permissions are unsafe" ;; esac
+
+  if [ -n "${CURSOR_REMOTE_NODE_PATH:-}" ]; then
+    node_candidate="$CURSOR_REMOTE_NODE_PATH"
+  elif command -v "$NODE_BIN" >/dev/null 2>&1; then
+    node_candidate=$(command -v "$NODE_BIN")
+  else
+    # The official Cursor package includes the exact Node runtime expected by
+    # its CLI. This removes the former circular dependency where Node was
+    # required to run the manager that installed Cursor (and its bundled Node).
+    node_candidate="$(dirname "$agent_resolved")/node"
+  fi
+  node_resolved=$(realpath "$node_candidate" 2>/dev/null) || \
+    die "could not resolve a Node runtime for Cursor provisioning"
+  [ -x "$node_resolved" ] && [ -f "$node_resolved" ] && [ ! -L "$node_resolved" ] || \
+    die "Cursor provisioning Node runtime is unsafe"
+  [ "$(file_owner_id "$node_resolved")" = "$(id -u)" ] || \
+    [ "$(file_owner_id "$node_resolved")" = 0 ] || \
+    die "Cursor provisioning Node runtime owner is unsafe"
+  case "$(file_mode "$node_resolved")" in 500|555|700|755) ;; *) die "Cursor provisioning Node runtime permissions are unsafe" ;; esac
+
+  CURSOR_REMOTE_AGENT_PATH="$agent_resolved"
+  CURSOR_REMOTE_NODE_PATH="$node_resolved"
+  RESOLVED_CURSOR_NODE="$node_resolved"
+  export CURSOR_REMOTE_AGENT_PATH CURSOR_REMOTE_NODE_PATH
+}
+
 node_cursor_provision() {
+  local payload bytes cursor_node
   validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
-  if "$NODE_BIN" "$CURSOR_REMOTE_MANAGER" provision >/dev/null 2>&1; then
+  payload=$(/usr/bin/head -c 524289) || die "could not read Cursor provisioning request"
+  bytes=${#payload}
+  [ "$bytes" -le 524288 ] || {
+    payload=""
+    die "Cursor provisioning request is too large"
+  }
+  if ! resolve_cursor_runtime 1; then
+    payload=""
+    die "Cursor Agent installation failed"
+  fi
+  cursor_node="$RESOLVED_CURSOR_NODE"
+  if printf '%s' "$payload" | "$cursor_node" "$CURSOR_REMOTE_MANAGER" provision >/dev/null 2>&1; then
+    payload=""
     if ! node_stop_clients >/dev/null 2>&1; then
       die "Cursor provisioning committed but Codex clients could not be stopped"
     fi
     printf 'cursor=provisioned result=ok\n'
     return
   fi
+  payload=""
   die "Cursor provisioning failed; details were withheld to protect credentials"
 }
 
 node_cursor_deprovision() {
+  local cursor_node
   validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
-  if "$NODE_BIN" "$CURSOR_REMOTE_MANAGER" deprovision </dev/null >/dev/null 2>&1; then
+  resolve_cursor_runtime 0 || die "Cursor Agent runtime is unavailable"
+  cursor_node="$RESOLVED_CURSOR_NODE"
+  if "$cursor_node" "$CURSOR_REMOTE_MANAGER" deprovision </dev/null >/dev/null 2>&1; then
     if node_stop_clients >/dev/null 2>&1; then
       printf 'cursor=deprovisioned result=ok\n'
       return

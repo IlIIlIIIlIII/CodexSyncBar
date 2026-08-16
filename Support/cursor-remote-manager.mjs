@@ -869,7 +869,10 @@ async function installerSource(urlString) {
 
 async function installCursorAgent(paths, environment) {
   const source = await installerSource(environment.CURSOR_REMOTE_INSTALL_URL ?? DEFAULT_INSTALL_URL);
-  const shell = environment.CURSOR_REMOTE_SHELL_PATH ?? "/bin/sh";
+  // Cursor's official installer uses Bash conditionals (`[[ ... ]]`). Running
+  // it through a generic /bin/sh succeeds far enough to print "installed" on
+  // Debian/Ubuntu, but can skip or fail the final symlink setup under dash.
+  const shell = environment.CURSOR_REMOTE_SHELL_PATH ?? "/bin/bash";
   // The installer must target the real remote HOME. Do not pass the
   // undocumented credential-store override (or the Cursor API key) here.
   const childEnvironment = {

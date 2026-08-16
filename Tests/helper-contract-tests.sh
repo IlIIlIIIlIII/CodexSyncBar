@@ -801,6 +801,7 @@ CURSOR_SSH_ARGS="$TMP/cursor-ssh-args"
 CURSOR_NODE=$(command -v node)
 mkdir -p "$CURSOR_REMOTE_HOME/.codex" "$CURSOR_REMOTE_PROCESS_BIN"
 chmod 700 "$CURSOR_REMOTE_HOME" "$CURSOR_REMOTE_HOME/.codex" "$CURSOR_REMOTE_PROCESS_BIN"
+ln -s "$CURSOR_NODE" "$CURSOR_REMOTE_HOME/node"
 printf '# keep-this-config-sentinel\r\napproval_policy = "never"\r\nmodel = "gpt-5.6-sol"\r\nmodel_provider = "openai"\r\n\r\n[mcp_servers.keep_me]\r\ncommand = "/usr/bin/true"\r\n' \
   >"$CURSOR_REMOTE_CONFIG_ORIGINAL"
 cp "$CURSOR_REMOTE_CONFIG_ORIGINAL" "$CURSOR_REMOTE_CONFIG"
@@ -873,17 +874,30 @@ for remote_command in "$@"; do :; done
 [ -n "$remote_command" ]
 remote_home="$GPT_SWITCH_TEST_CURSOR_REMOTE_HOME"
 run_remote() {
-  HOME="$remote_home" \
-    PATH="$GPT_SWITCH_TEST_CURSOR_PROCESS_BIN:$remote_home/.local/bin:$PATH" \
-    GPT_SWITCH_STATE_ROOT="$remote_home/.local/share/gpt-switch" \
-    CODEX_HOME="$remote_home/.codex" \
-    GPT_SWITCH_NODE_BIN="$GPT_SWITCH_TEST_CURSOR_NODE" \
-    GPT_SWITCH_CURSOR_BRIDGE_HELPER= \
-    GPT_SWITCH_CURSOR_REMOTE_MANAGER= \
-    CURSOR_REMOTE_NODE_PATH="$GPT_SWITCH_TEST_CURSOR_NODE" \
-    CURSOR_REMOTE_AGENT_PATH="$GPT_SWITCH_TEST_CURSOR_AGENT" \
-    CURSOR_REMOTE_BRIDGE_PATH="$remote_home/.local/lib/gpt-switch/cursor-codex-bridge.mjs" \
-    /bin/bash -c "$remote_command"
+  if [ "${GPT_SWITCH_TEST_CURSOR_USE_BUNDLED_NODE:-0}" = 1 ]; then
+    HOME="$remote_home" \
+      PATH="$GPT_SWITCH_TEST_CURSOR_PROCESS_BIN:$remote_home/.local/bin:$PATH" \
+      GPT_SWITCH_STATE_ROOT="$remote_home/.local/share/gpt-switch" \
+      CODEX_HOME="$remote_home/.codex" \
+      GPT_SWITCH_NODE_BIN="$remote_home/definitely-missing-node" \
+      GPT_SWITCH_CURSOR_BRIDGE_HELPER= \
+      GPT_SWITCH_CURSOR_REMOTE_MANAGER= \
+      CURSOR_REMOTE_AGENT_PATH="$GPT_SWITCH_TEST_CURSOR_AGENT" \
+      CURSOR_REMOTE_BRIDGE_PATH="$remote_home/.local/lib/gpt-switch/cursor-codex-bridge.mjs" \
+      /bin/bash -c "$remote_command"
+  else
+    HOME="$remote_home" \
+      PATH="$GPT_SWITCH_TEST_CURSOR_PROCESS_BIN:$remote_home/.local/bin:$PATH" \
+      GPT_SWITCH_STATE_ROOT="$remote_home/.local/share/gpt-switch" \
+      CODEX_HOME="$remote_home/.codex" \
+      GPT_SWITCH_NODE_BIN="$GPT_SWITCH_TEST_CURSOR_NODE" \
+      GPT_SWITCH_CURSOR_BRIDGE_HELPER= \
+      GPT_SWITCH_CURSOR_REMOTE_MANAGER= \
+      CURSOR_REMOTE_NODE_PATH="$GPT_SWITCH_TEST_CURSOR_NODE" \
+      CURSOR_REMOTE_AGENT_PATH="$GPT_SWITCH_TEST_CURSOR_AGENT" \
+      CURSOR_REMOTE_BRIDGE_PATH="$remote_home/.local/lib/gpt-switch/cursor-codex-bridge.mjs" \
+      /bin/bash -c "$remote_command"
+  fi
 }
 leak_captured_secrets() {
   jq -r '.apiKey, .bridgeToken' >&2
@@ -948,6 +962,7 @@ cursor_env=(
   GPT_SWITCH_TEST_CURSOR_PROCESS_BIN="$CURSOR_REMOTE_PROCESS_BIN"
   GPT_SWITCH_TEST_CURSOR_STOP_CALLS="$CURSOR_REMOTE_STOP_CALLS"
   GPT_SWITCH_TEST_CURSOR_NODE="$CURSOR_NODE"
+  GPT_SWITCH_TEST_CURSOR_USE_BUNDLED_NODE=1
   GPT_SWITCH_TEST_CURSOR_AGENT="$CURSOR_REMOTE_AGENT"
   GPT_SWITCH_TEST_CURSOR_SSH_ARGS="$CURSOR_SSH_ARGS"
 )
