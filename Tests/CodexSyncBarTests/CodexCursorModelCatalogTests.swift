@@ -105,6 +105,9 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         ])
         XCTAssertEqual(models[0]["description"] as? String, "bundled sol")
         XCTAssertEqual(models[1]["description"] as? String, "bundled 5.2")
+        XCTAssertEqual(models[1]["supports_reasoning_summaries"] as? Bool, true)
+        XCTAssertFalse(
+            try XCTUnwrap(models[1]["base_instructions"] as? String).isEmpty)
 
         let grok = models[3]
         XCTAssertEqual(grok["display_name"] as? String, "Cursor · Grok 4.6")
@@ -143,6 +146,32 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         let generated = try XCTUnwrap(models.last)
         XCTAssertEqual(generated["default_reasoning_level"] as? String, "medium")
         XCTAssertEqual((generated["supported_reasoning_levels"] as? [Any])?.count, 0)
+        XCTAssertTrue(models.allSatisfy {
+            ($0["base_instructions"] as? String)?.isEmpty == false
+                && $0["supports_reasoning_summaries"] as? Bool == true
+        })
+    }
+
+    func testPreservesLegacyRequiredCatalogFieldsWhenPresent() throws {
+        let cursor = CursorModelCatalog(cliOutput: "composer-2.5 - Composer 2.5")
+        let template = try JSONSerialization.data(withJSONObject: [
+            "models": [[
+                "slug": "gpt-5.6-sol",
+                "base_instructions": "existing instructions",
+                "supports_reasoning_summaries": false,
+            ]],
+        ])
+
+        let data = try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: cursor,
+            bundledCatalogData: template)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let models = try XCTUnwrap(root["models"] as? [[String: Any]])
+
+        XCTAssertTrue(models.allSatisfy {
+            $0["base_instructions"] as? String == "existing instructions"
+                && $0["supports_reasoning_summaries"] as? Bool == false
+        })
     }
 
     func testCollapsedModelsKeepStandardOneMillionContextWhenFastContextDiffers() throws {

@@ -6,6 +6,9 @@ enum CodexCursorModelCatalogBuilder {
     static let maximumModelCount = 512
     static let maximumBundledCatalogBytes = 8 * 1_024 * 1_024
     static let maximumGeneratedCatalogBytes = 16 * 1_024 * 1_024
+    private static let legacyBaseInstructions = """
+    You are Codex, an AI coding agent. Follow system, developer, and user instructions in priority order. Use only the tools and permissions provided by the host. Work carefully, preserve user data, and clearly report the result.
+    """
 
     static func bundledModelSlugs(from data: Data) throws -> [String] {
         guard data.count <= maximumBundledCatalogBytes,
@@ -55,7 +58,7 @@ enum CodexCursorModelCatalogBuilder {
             if let priority = model["priority"] as? Int { return priority }
             return (model["priority"] as? NSNumber)?.intValue
         }.max().map { $0 + 1 } ?? 1
-        var models = bundledModels
+        var models = bundledModels.map(addingLegacyRequiredFields)
 
         for section in cursorCatalog.sections {
             for family in section.families {
@@ -80,6 +83,7 @@ enum CodexCursorModelCatalogBuilder {
                         $0.thinking == thinking && routedSlugs.contains($0.slug)
                     }
                     var model = template
+                    model = addingLegacyRequiredFields(to: model)
                     model["slug"] = modelID
                     model["display_name"] = pickerDisplayName(
                         group: section.group,
@@ -125,6 +129,19 @@ enum CodexCursorModelCatalogBuilder {
             throw AppError.processFailed("Codex에 설치할 Cursor 모델 카탈로그가 너무 큽니다.")
         }
         return data
+    }
+
+    private static func addingLegacyRequiredFields(
+        to model: [String: Any]) -> [String: Any]
+    {
+        var model = model
+        if model["base_instructions"] == nil {
+            model["base_instructions"] = legacyBaseInstructions
+        }
+        if model["supports_reasoning_summaries"] == nil {
+            model["supports_reasoning_summaries"] = true
+        }
+        return model
     }
 
     private static func pickerDisplayName(
