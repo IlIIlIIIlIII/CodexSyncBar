@@ -132,6 +132,7 @@ struct PopoverView: View {
         .preferredColorScheme(.dark)
         .task {
             await model.start()
+            await model.refreshCursorAccount()
             await model.refreshUsageIfStale()
         }
     }
@@ -158,7 +159,8 @@ struct PopoverView: View {
     }
 
     private var accountPicker: some View {
-        let columnCount = model.profiles.count == 1 ? 1 : AccountGridLayout.columnCount
+        let accountCount = model.profiles.count + (model.isReadmeDemo ? 0 : 1)
+        let columnCount = accountCount == 1 ? 1 : AccountGridLayout.columnCount
         let columns = Array(
             repeating: GridItem(.flexible(), spacing: 6),
             count: columnCount)
@@ -174,8 +176,64 @@ struct PopoverView: View {
                 .accessibilityLabel("계정 선택, \(profile.alias), \(profile.email)")
                 .accessibilityIdentifier("account-button-\(profile.id)")
             }
+            if !model.isReadmeDemo {
+                Button {
+                    model.openCursorUsageDashboard()
+                } label: {
+                    cursorUsageButtonLabel
+                }
+                .buttonStyle(.plain)
+                .help("Cursor 월간 사용량 대시보드 열기")
+                .accessibilityLabel("Cursor 월간 사용량, 공식 대시보드에서 확인")
+                .accessibilityIdentifier("cursor-usage-account-button")
+            }
         }
         .accessibilityIdentifier("account-grid")
+    }
+
+    private var cursorUsageButtonLabel: some View {
+        let email = model.cursorAccountState.email
+        return HStack(spacing: 7) {
+            ZStack {
+                Circle()
+                    .fill(AppTheme.cyan.opacity(0.18))
+                    .frame(width: 25, height: 25)
+                Text("C")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppTheme.cyan)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Cursor 월간 사용량")
+                    .font(.system(size: 9, weight: .semibold))
+                    .lineLimit(1)
+                Text(email ?? "CLI 로그인 상태 확인")
+                    .font(.system(size: 8))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                HStack(spacing: 3) {
+                    Image(systemName: email == nil
+                        ? "person.crop.circle.badge.exclamationmark"
+                        : "checkmark.shield.fill")
+                    Text(email == nil ? "로그인 필요" : "인증 정상")
+                }
+                .font(.system(size: 7.5, weight: .semibold))
+                .foregroundStyle(email == nil ? AppTheme.yellow : AppTheme.green)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 1)
+            Text("웹 확인 ↗")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(AppTheme.cyan)
+        }
+        .padding(.horizontal, 9)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .background(
+            AppTheme.card,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(AppTheme.cyan.opacity(0.38), lineWidth: 1))
     }
 
     private func accountButtonLabel(_ profile: AccountProfile) -> some View {
