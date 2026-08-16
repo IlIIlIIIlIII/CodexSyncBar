@@ -1677,6 +1677,7 @@ function preparedCursorBackendRequest(request, options = {}) {
     mayCallTool
       ? `When an available external tool is required, return only ${TOOL_START}{\"name\":\"exact tool name\",\"arguments\":{}}${TOOL_END}. For a tool nested in a namespace, also include \"namespace\" with the exact namespace name. For a custom tool, use \"input\" instead of \"arguments\". Request exactly one tool per response.`
       : "No external tool is available for this response. Return the final answer as plain text.",
+    "Minimize model round trips. When one offered orchestration tool can safely perform a bounded sequence of related read-only operations, request that sequence in one call while preserving every tool-specific ordering rule.",
     "For a normal answer, return plain text without protocol tags.",
     "Preserve host-defined inline rendering directives and artifact paths exactly in the final answer.",
     "The backend request is canonical JSON with deterministic key ordering.",
@@ -1803,20 +1804,21 @@ export function cursorEventText(event) {
 }
 
 export function consumeCursorEvent(event, tracker) {
-  if (!event || typeof event !== "object") return;
+  if (!event || typeof event !== "object") return "";
   if (event.type === "assistant") {
     const value = cursorEventText(event);
-    if (!value) return;
+    if (!value) return "";
     if (event.timestamp_ms !== undefined && event.model_call_id === undefined) {
-      tracker.appendDelta(value);
+      return tracker.appendDelta(value);
     } else if (event.model_call_id === undefined && tracker.text.length === 0) {
-      tracker.acceptSnapshot(value);
+      return tracker.acceptSnapshot(value);
     }
-    return;
+    return "";
   }
   if (event.type === "result" && typeof event.result === "string") {
-    tracker.acceptSnapshot(event.result);
+    return tracker.acceptSnapshot(event.result);
   }
+  return "";
 }
 
 function responseBase(request, id, status, output) {
@@ -1982,18 +1984,226 @@ export function responseSSEEvents(response) {
   return events;
 }
 
+function couldStillBeToolEnvelopePrefix(text) {
+  let candidate = text.trimStart();
+  if (candidate.length === 0) return true;
+  if ("```".startsWith(candidate)) return true;
+  if (candidate.startsWith("```")) {
+    candidate = candidate.slice(3);
+    if (candidate.length === 0) return true;
+    const lower = candidate.toLowerCase();
+    if (candidate.length < 4 && "json".startsWith(lower)) return true;
+    if (lower.startsWith("json")) candidate = candidate.slice(4);
+    candidate = candidate.trimStart();
+    if (candidate.length === 0) return true;
+  }
+  return TOOL_START.startsWith(candidate) || candidate.startsWith(TOOL_START);
+}
+
+export class StreamingResponseSSE {
+  constructor(request, emit) {
+    this.request = request;
+    this.emitEvent = emit;
+    this.sequence = 0;
+    this.responseID = `resp_${randomUUID().replaceAll("-", "")}`;
+    this.messageID = `msg_${randomUUID().replaceAll("-", "")}`;
+    this.base = responseBase(request, this.responseID, "in_progress", []);
+    this.choice = normalizedToolChoice(request);
+    this.canCallTool = callableTools(request).length > 0 && this.choice.mode !== "none";
+    this.pendingText = "";
+    this.streamedText = "";
+    this.messageStarted = false;
+    this.started = false;
+    this.completed = false;
+  }
+
+  emit(type, payload) {
+    this.emitEvent({
+      type,
+      data: { type, sequence_number: this.sequence++, ...payload },
+    });
+  }
+
+  start() {
+    if (this.started) return;
+    this.started = true;
+    const created = clone(this.base);
+    this.emit("response.created", { response: created });
+    this.emit("response.in_progress", { response: created });
+  }
+
+  beginMessage() {
+    if (this.messageStarted) return;
+    this.messageStarted = true;
+    this.emit("response.output_item.added", {
+      output_index: 0,
+      item: {
+        id: this.messageID,
+        type: "message",
+        status: "in_progress",
+        role: "assistant",
+        content: [],
+      },
+    });
+    this.emit("response.content_part.added", {
+      item_id: this.messageID,
+      output_index: 0,
+      content_index: 0,
+      part: { type: "output_text", text: "", annotations: [], logprobs: [] },
+    });
+  }
+
+  emitText(delta) {
+    if (!delta) return;
+    this.beginMessage();
+    this.streamedText += delta;
+    this.emit("response.output_text.delta", {
+      item_id: this.messageID,
+      output_index: 0,
+      content_index: 0,
+      delta,
+      logprobs: [],
+    });
+  }
+
+  acceptTextDelta(delta) {
+    if (this.completed || typeof delta !== "string" || delta.length === 0) return;
+    if (this.messageStarted) {
+      this.emitText(delta);
+      return;
+    }
+    this.pendingText += delta;
+    if (!this.canCallTool || (
+      this.choice.mode === "auto" && !couldStillBeToolEnvelopePrefix(this.pendingText)
+    )) {
+      const pending = this.pendingText;
+      this.pendingText = "";
+      this.emitText(pending);
+    }
+  }
+
+  complete(cursorText) {
+    if (this.completed) {
+      throw new BridgeError("Streaming response was already completed", 500, "bridge_error");
+    }
+    this.completed = true;
+    const parsed = parseToolEnvelope(cursorText, this.request);
+    if (!parsed && (this.choice.mode === "required" || this.choice.mode === "specific")) {
+      throw new BridgeError(
+        "Cursor backend did not honor the required tool choice",
+        502,
+        "required_tool_not_called",
+      );
+    }
+    if (parsed) {
+      if (this.messageStarted) {
+        throw new BridgeError(
+          "Cursor CLI changed a streamed text response into a tool call",
+          502,
+          "invalid_agent_stream",
+        );
+      }
+      const finalItem = toolItem(parsed, true);
+      if (finalItem.type === "function_call") {
+        this.emit("response.output_item.added", {
+          output_index: 0,
+          item: { ...finalItem, status: "in_progress", arguments: "" },
+        });
+        if (finalItem.arguments.length > 0) {
+          this.emit("response.function_call_arguments.delta", {
+            item_id: finalItem.id,
+            output_index: 0,
+            delta: finalItem.arguments,
+          });
+        }
+        this.emit("response.function_call_arguments.done", {
+          item_id: finalItem.id,
+          output_index: 0,
+          name: finalItem.name,
+          arguments: finalItem.arguments,
+        });
+      } else {
+        this.emit("response.output_item.added", {
+          output_index: 0,
+          item: { ...finalItem, status: "in_progress", input: "" },
+        });
+        if (finalItem.input.length > 0) {
+          this.emit("response.custom_tool_call_input.delta", {
+            item_id: finalItem.id,
+            output_index: 0,
+            delta: finalItem.input,
+          });
+        }
+        this.emit("response.custom_tool_call_input.done", {
+          item_id: finalItem.id,
+          output_index: 0,
+          input: finalItem.input,
+        });
+      }
+      const response = { ...clone(this.base), status: "completed", output: [finalItem] };
+      this.emit("response.output_item.done", { output_index: 0, item: finalItem });
+      this.emit("response.completed", { response });
+      return response;
+    }
+
+    if (!this.messageStarted) {
+      this.pendingText = "";
+      this.emitText(cursorText);
+    } else if (cursorText.startsWith(this.streamedText)) {
+      this.emitText(cursorText.slice(this.streamedText.length));
+    } else if (cursorText !== this.streamedText) {
+      throw new BridgeError(
+        "Cursor CLI returned text inconsistent with its partial output",
+        502,
+        "invalid_agent_stream",
+      );
+    }
+    this.beginMessage();
+    const part = {
+      type: "output_text",
+      text: cursorText,
+      annotations: [],
+      logprobs: [],
+    };
+    const finalItem = {
+      id: this.messageID,
+      type: "message",
+      status: "completed",
+      role: "assistant",
+      content: [part],
+    };
+    const response = { ...clone(this.base), status: "completed", output: [finalItem] };
+    this.emit("response.output_text.done", {
+      item_id: this.messageID,
+      output_index: 0,
+      content_index: 0,
+      text: cursorText,
+      logprobs: [],
+    });
+    this.emit("response.content_part.done", {
+      item_id: this.messageID,
+      output_index: 0,
+      content_index: 0,
+      part,
+    });
+    this.emit("response.output_item.done", { output_index: 0, item: finalItem });
+    this.emit("response.completed", { response });
+    return response;
+  }
+}
+
 function sseLine(event) {
   return `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
 }
 
 function parseNDJSONLine(line, tracker, metadata) {
-  if (!line.trim()) return;
+  if (!line.trim()) return "";
   let event;
   try {
     event = JSON.parse(line);
   } catch {
     metadata.malformedLines += 1;
-    return;
+    return "";
   }
   if (event?.type === "result") {
     metadata.resultSeen = true;
@@ -2004,7 +2214,7 @@ function parseNDJSONLine(line, tracker, metadata) {
     metadata.nativeToolCalls += 1;
     metadata.nativeToolSubtype = event.subtype ?? "unknown";
   }
-  consumeCursorEvent(event, tracker);
+  return consumeCursorEvent(event, tracker);
 }
 
 export function cursorChildEnvironment(source) {
@@ -2041,6 +2251,7 @@ export function runCursorAgent({
   env,
   onSpawn,
   onClose,
+  onTextDelta,
 }) {
   return new Promise((resolve, reject) => {
     const args = [
@@ -2106,7 +2317,20 @@ export function runCursorAgent({
         if (newline < 0) break;
         const line = stdoutBuffer.slice(0, newline);
         stdoutBuffer = stdoutBuffer.slice(newline + 1);
-        parseNDJSONLine(line, tracker, metadata);
+        const delta = parseNDJSONLine(line, tracker, metadata);
+        if (delta && onTextDelta) {
+          try {
+            onTextDelta(delta);
+          } catch {
+            terminateChild(child);
+            finish(() => reject(new BridgeError(
+              "Cursor response stream could not be delivered",
+              500,
+              "bridge_error",
+            )));
+            return;
+          }
+        }
         if (metadata.nativeToolCalls > 0) {
           terminateChild(child);
           finish(() => reject(new BridgeError(
@@ -2123,7 +2347,22 @@ export function runCursorAgent({
     });
     child.on("close", (code, childSignal) => {
       onClose?.(child);
-      if (stdoutBuffer.trim()) parseNDJSONLine(stdoutBuffer, tracker, metadata);
+      if (settled) return;
+      if (stdoutBuffer.trim()) {
+        const delta = parseNDJSONLine(stdoutBuffer, tracker, metadata);
+        if (delta && onTextDelta) {
+          try {
+            onTextDelta(delta);
+          } catch {
+            finish(() => reject(new BridgeError(
+              "Cursor response stream could not be delivered",
+              500,
+              "bridge_error",
+            )));
+            return;
+          }
+        }
+      }
       finish(() => {
         if (code !== 0) {
           reject(new BridgeError(
@@ -2280,6 +2519,7 @@ export function runCursorACP({
   env,
   onSpawn,
   onClose,
+  onTextDelta,
 }) {
   return new Promise((resolve, reject) => {
     if (!Array.isArray(prompt) || prompt.length < 2 || prompt[0]?.type !== "text") {
@@ -2529,6 +2769,17 @@ export function runCursorACP({
             return;
           }
           outputText += text;
+          if (text && onTextDelta) {
+            try {
+              onTextDelta(text);
+            } catch {
+              finishError(new BridgeError(
+                "Cursor response stream could not be delivered",
+                500,
+                "bridge_error",
+              ));
+            }
+          }
         } else if (update.sessionUpdate === "current_mode_update") {
           currentModeID = update.currentModeId ?? null;
           for (const waiter of [...modeWaiters]) {
@@ -3232,6 +3483,25 @@ export function createBridgeServer(config, testHooks) {
         onClose: (child) => activeChildren.delete(child),
       });
       const usesACP = prepared.imageCount > 0;
+      let streamingResponse;
+      if (body.stream !== false) {
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          Connection: "keep-alive",
+        });
+        response.write(": syncbar-cursor-bridge connected\n\n");
+        streamingResponse = new StreamingResponseSSE(
+          body,
+          (event) => response.write(sseLine(event)),
+        );
+        streamingResponse.start();
+        heartbeat = setInterval(() => {
+          if (!response.writableEnded && !response.destroyed) {
+            response.write(": syncbar-cursor-bridge keep-alive\n\n");
+          }
+        }, 15_000);
+        heartbeat.unref();
+      }
       const execution = (usesACP ? runCursorACP : runCursorAgent)({
         agentPath: config.agentPath,
         workspace: config.workspace,
@@ -3243,28 +3513,16 @@ export function createBridgeServer(config, testHooks) {
         env: cursorChildEnvironment(process.env),
         onSpawn: (child) => activeChildren.add(child),
         onClose: (child) => activeChildren.delete(child),
+        onTextDelta: (delta) => streamingResponse?.acceptTextDelta(delta),
       });
-      if (body.stream !== false) {
-        response.writeHead(200, {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          Connection: "keep-alive",
-        });
-        response.write(": syncbar-cursor-bridge connected\n\n");
-        heartbeat = setInterval(() => {
-          if (!response.writableEnded && !response.destroyed) {
-            response.write(": syncbar-cursor-bridge keep-alive\n\n");
-          }
-        }, 15_000);
-        heartbeat.unref();
-      }
       const result = await execution;
-      const completed = buildResponseResult(body, result.text);
       if (body.stream === false) {
+        const completed = buildResponseResult(body, result.text);
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify(completed));
         return;
       }
-      for (const event of responseSSEEvents(completed)) response.write(sseLine(event));
+      streamingResponse.complete(result.text);
       response.end();
     } catch (error) {
       if (response.writableEnded || response.destroyed) return;

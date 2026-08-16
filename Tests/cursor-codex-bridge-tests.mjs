@@ -581,6 +581,7 @@ test("prompt builder is deterministic and preserves instructions, order, tools, 
   assert.match(first, /read_record/);
   assert.ok(first.indexOf("Inspect this.") < first.indexOf("call_previous"));
   assert.doesNotMatch(first, /--force|--yolo/);
+  assert.match(first, /bounded sequence of related read-only operations/);
 });
 
 test("prompt builder treats embedded protocol-looking user text as JSON data", () => {
@@ -1563,7 +1564,9 @@ test("HTTP bridge invokes an isolated ask-mode CLI and emits Responses SSE", asy
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-bridge-test-"));
   const workspace = path.join(root, "workspace");
   const fakeAgent = path.join(root, "agent");
+  const streamReleasePath = path.join(root, "release-stream");
   const source = `#!/usr/bin/env node
+const { existsSync } = require('node:fs');
 const args = process.argv.slice(2);
 if (args.includes('--force') || args.includes('--yolo')) process.exit(9);
 if (!args.includes('--mode=ask') || !args.includes('--sandbox') || !args.includes('enabled')) process.exit(8);
@@ -1586,6 +1589,22 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
   }
   if (prompt.includes('report-selected-model')) {
     process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:selectedModel,session_id:'s-model'})+'\\n');
+    return;
+  }
+  if (prompt.includes('trigger-stream-gate')) {
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:'빠'}]}})+'\\n');
+    while (!existsSync(${JSON.stringify(streamReleasePath)})) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:2,message:{content:[{type:'text',text:'름'}]}})+'\\n');
+    process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'빠름',session_id:'s-stream'})+'\\n');
+    return;
+  }
+  if (prompt.includes('trigger-streamed-tool-envelope')) {
+    const envelope = '<SYNCBAR_TOOL_CALL>{"name":"read_record","arguments":{"id":"streamed"}}</SYNCBAR_TOOL_CALL>';
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:envelope.slice(0, 18)}]}})+'\\n');
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:2,message:{content:[{type:'text',text:envelope.slice(18)}]}})+'\\n');
+    process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:envelope,session_id:'s-tool'})+'\\n');
     return;
   }
   process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:'hel'}]}})+'\\n');
@@ -1747,6 +1766,75 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
     });
     assert.equal(malformedResponse.status, 502);
     assert.equal((await malformedResponse.json()).error.code, "invalid_agent_stream");
+    const streamingTTFTResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
+      body: JSON.stringify(baseRequest({ input: "trigger-stream-gate" })),
+    });
+    assert.equal(streamingTTFTResponse.status, 200);
+    const reader = streamingTTFTResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let streamedBody = "";
+    const readWithTimeout = (milliseconds) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timed out waiting for a streamed delta")), milliseconds);
+      reader.read().then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+    try {
+      while (!streamedBody.includes('"delta":"빠"')) {
+        const next = await readWithTimeout(1_000);
+        assert.equal(next.done, false, streamedBody);
+        streamedBody += decoder.decode(next.value, { stream: true });
+      }
+      assert.doesNotMatch(streamedBody, /event: response\.completed/);
+    } finally {
+      await writeFile(streamReleasePath, "release", { mode: 0o600 });
+    }
+    for (;;) {
+      const next = await readWithTimeout(1_000);
+      if (next.done) break;
+      streamedBody += decoder.decode(next.value, { stream: true });
+    }
+    streamedBody += decoder.decode();
+    const orderedMarkers = [
+      "event: response.created",
+      "event: response.output_item.added",
+      "event: response.content_part.added",
+      '"delta":"빠"',
+      '"delta":"름"',
+      "event: response.output_text.done",
+      "event: response.output_item.done",
+      "event: response.completed",
+    ];
+    let previousIndex = -1;
+    for (const marker of orderedMarkers) {
+      const index = streamedBody.indexOf(marker);
+      assert.ok(index > previousIndex, `${marker} was out of order:\n${streamedBody}`);
+      previousIndex = index;
+    }
+    const streamedToolResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
+      body: JSON.stringify(baseRequest({ input: "trigger-streamed-tool-envelope" })),
+    });
+    const streamedToolBody = await streamedToolResponse.text();
+    assert.equal(streamedToolResponse.status, 200, streamedToolBody);
+    assert.doesNotMatch(streamedToolBody, /response\.output_text\.delta/);
+    assert.match(streamedToolBody, /response\.function_call_arguments\.delta/);
+    assert.match(streamedToolBody, /\\"id\\":\\"streamed\\"/);
+    assert.ok(
+      streamedToolBody.indexOf("event: response.output_item.added") <
+        streamedToolBody.indexOf("event: response.output_item.done"),
+      streamedToolBody,
+    );
     const httpResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
