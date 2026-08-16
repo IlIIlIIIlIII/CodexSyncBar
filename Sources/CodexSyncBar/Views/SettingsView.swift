@@ -42,6 +42,7 @@ struct SettingsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: SettingsSection? = .accounts
     @State private var accountToLogout: AccountProfile?
+    @State private var accountToDelete: AccountProfile?
     @State private var accountDropTargetID: Int?
     @State private var draggedAccountID: Int?
     @State private var accountDragToken: String?
@@ -112,6 +113,19 @@ struct SettingsView: View {
             }
         } message: {
             Text("다른 로그인 계정을 안전한 폴백으로 사용한 뒤 인증과 전용 Chromium 세션을 정리합니다.")
+        }
+        .alert("Codex 계정을 이 앱에서 삭제할까요?", isPresented: Binding(
+            get: { accountToDelete != nil },
+            set: { if !$0 { accountToDelete = nil } }))
+        {
+            Button("취소", role: .cancel) { accountToDelete = nil }
+            Button("로컬에서 삭제", role: .destructive) {
+                guard let account = accountToDelete else { return }
+                accountToDelete = nil
+                Task { await model.deleteCodexAccount(profileID: account.id) }
+            }
+        } message: {
+            Text("필요하면 다른 로그인 계정으로 모든 장비를 전환한 뒤 인증, 전용 Chromium 세션, SyncBar 계정 항목을 제거합니다. OpenAI·ChatGPT 웹 계정과 구독은 삭제되지 않습니다.")
         }
         .alert("SSH 장치를 제거할까요?", isPresented: Binding(
             get: { deviceToRemove != nil },
@@ -337,6 +351,15 @@ struct SettingsView: View {
                 Button("로그아웃", role: .destructive) { accountToLogout = profile }
                     .disabled(model.profiles.count < 2 || accountActionDisabled)
             }
+
+            Button(role: .destructive) {
+                accountToDelete = profile
+            } label: {
+                Image(systemName: "trash")
+            }
+            .help("Codex 계정을 이 앱에서 삭제")
+            .disabled(model.profiles.count < 2 || accountActionDisabled)
+            .accessibilityIdentifier("delete-codex-account-\(profile.id)")
 
         }
         .padding(.vertical, 7)

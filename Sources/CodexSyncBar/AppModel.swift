@@ -1146,6 +1146,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func deleteCodexAccount(profileID: Int) async {
+        guard profiles.count > 1 else {
+            banner = AppBanner(style: .warning, message: "마지막 Codex 계정은 삭제할 수 없습니다.")
+            return
+        }
+        guard profile(for: profileID) != nil else {
+            banner = AppBanner(style: .error, message: "등록되지 않은 Codex 계정은 삭제할 수 없습니다.")
+            return
+        }
+
+        if await authStore.profileArtifactExists(for: profileID) {
+            await logout(profileID: profileID)
+            guard !(await authStore.profileArtifactExists(for: profileID)) else { return }
+        }
+
+        await removeAccount(profileID: profileID)
+    }
+
     func saveDevice(
         _ draft: SSHDeviceConfiguration,
         password: String,

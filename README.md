@@ -106,6 +106,7 @@ shasum -a 256 -c SHA256SUMS
 7. 원격 호스트에는 공식 Cursor 설치 스크립트로 `agent`를 자동 설치하고 SyncBar 전용 bridge·manager와 격리된 Cursor 인증 저장소를 구성합니다. macOS Cursor 로그인/Keychain 파일을 Linux에 복사하거나 변환하지 않습니다.
 8. **이전 Codex 모델로 복구**를 누르면 SyncBar가 바꾼 로컬 및 연결 가능한 SSH 장치의 최상위 `model`·`model_provider`·`model_catalog_json`과 관리 provider 블록을 원래 값으로 되돌리고, 원격 전용 runtime·Cursor 인증 저장소도 제거합니다. 설정이 외부에서 바뀌었다면 덮어쓰지 않고 해당 장치를 정리 실패로 표시합니다.
 9. 설정의 **Cursor 계정**에서 현재 CLI 로그인 이메일을 확인하고 공식 사용량 대시보드를 열 수 있습니다. **계정 연결 삭제**는 provider 복구, 브리지 중지, `cursor-agent logout`, Keychain API key 및 원격 자격증명 정리를 수행하지만 Cursor.com 웹 계정과 구독 자체는 삭제하지 않습니다.
+10. 설정의 Codex 계정 행에서 휴지통을 누르면, 필요 시 다른 로그인 계정으로 모든 장비를 안전하게 전환하고 로그아웃한 뒤 해당 인증·전용 Chromium 세션·SyncBar 계정 항목을 제거합니다. OpenAI·ChatGPT 웹 계정과 구독 자체는 삭제하지 않으며, 안전한 폴백을 위해 마지막 한 계정은 남겨 둡니다.
 
 SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.toml`을 사용하고, 그렇지 않으면 `~/.codex/config.toml`을 사용합니다. 실제 대상 경로는 설정 화면에 표시합니다.
 
