@@ -143,7 +143,15 @@ final class AppModel: ObservableObject {
                     if let active = try codexConfigService.activeCursorProviderConfiguration() {
                         providerActive = true
                         let loadedPreferences = preferences
-                        preferences.model = active.model
+                        // New Codex picker entries use a synthetic id so the
+                        // bridge can resolve the app's native reasoning/Fast
+                        // controls to an exact Cursor CLI variant. Keep the
+                        // separately stored flat CLI slug as the runtime
+                        // fallback; only migrate legacy activations that still
+                        // stored a flat slug in config.toml.
+                        if !active.model.hasPrefix("syncbar-cursor/") {
+                            preferences.model = active.model
+                        }
                         preferences.port = active.port
                         preferences.bridgeToken = active.bridgeToken
                         if preferences != loadedPreferences {
@@ -1873,6 +1881,12 @@ final class AppModel: ObservableObject {
                 throw AppError.processFailed(
                     "현재 Cursor 계정에서 사용할 수 없는 모델입니다: \(preferences.model)")
             }
+            guard let codexPickerModel = catalog.preferredPickerModelID(
+                forFlatSlug: preferences.model)
+            else {
+                throw AppError.processFailed(
+                    "선택한 Cursor 모델을 Codex 모델 선택기에 연결할 수 없습니다: \(preferences.model)")
+            }
             cursorModelCatalog = catalog
             cursorModelCatalogError = nil
             if !wasActive,
@@ -1897,7 +1911,7 @@ final class AppModel: ObservableObject {
             try cursorBridgePreferencesStore.save(preferences)
             do {
                 try codexConfigService.activate(
-                    model: preferences.model,
+                    model: codexPickerModel,
                     port: preferences.port,
                     bridgeToken: preferences.bridgeToken,
                     modelCatalogPath: codexCursorModelCatalogService.catalogURL.path)
@@ -1926,7 +1940,7 @@ final class AppModel: ObservableObject {
                 try await switchService.reloadLocalCodexConfiguration()
                 banner = AppBanner(
                     style: remoteSyncWarning == nil ? .success : .warning,
-                    message: "Cursor \(preferences.model) provider를 적용했습니다. 새 Codex 작업부터 사용됩니다.\(remoteSyncWarning ?? "")")
+                    message: "Cursor 모델을 Codex 선택기에 추가했습니다. 추론 강도와 Fast는 Codex 앱에서 선택할 수 있습니다. 새 Codex 작업부터 사용됩니다.\(remoteSyncWarning ?? "")")
             } catch {
                 banner = AppBanner(
                     style: .warning,

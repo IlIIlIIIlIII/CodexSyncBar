@@ -71,6 +71,94 @@ final class CursorModelCatalogTests: XCTestCase {
             "claude-4.6-sonnet-medium-thinking")
     }
 
+    func testBuildsCollapsedCodexPickerPresetsAndCompactRouteJSON() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        auto - Auto (default)
+        composer-2.5 - Composer 2.5
+        composer-2.5-fast - Composer 2.5 Fast
+        gpt-5.2-low - GPT-5.2 Low
+        gpt-5.2-low-fast - GPT-5.2 Low Fast
+        gpt-5.2 - GPT-5.2
+        gpt-5.2-fast - GPT-5.2 Fast
+        claude-opus-5-high - Opus 5 1M
+        claude-opus-5-thinking-high - Opus 5 1M Thinking
+        """)
+
+        XCTAssertEqual(catalog.pickerPresets.map(\.id), [
+            "syncbar-cursor/auto",
+            "syncbar-cursor/composer-2.5",
+            "syncbar-cursor/gpt-5.2",
+            "syncbar-cursor/claude-opus-5",
+            "syncbar-cursor/claude-opus-5/thinking",
+        ])
+        XCTAssertEqual(
+            catalog.preferredPickerModelID(forFlatSlug: "gpt-5.2-low-fast"),
+            "syncbar-cursor/gpt-5.2")
+        XCTAssertEqual(
+            catalog.preferredPickerModelID(forFlatSlug: "claude-opus-5-thinking-high"),
+            "syncbar-cursor/claude-opus-5/thinking")
+        XCTAssertNil(catalog.preferredPickerModelID(forFlatSlug: "missing"))
+
+        let gpt = try XCTUnwrap(catalog.codexModelRoutes["syncbar-cursor/gpt-5.2"])
+        XCTAssertEqual(gpt.defaultEffort, .medium)
+        XCTAssertEqual(gpt.supportedEfforts, [.low, .medium])
+        XCTAssertTrue(gpt.supportsFast)
+        XCTAssertEqual(gpt.resolve(effort: .low), "gpt-5.2-low")
+        XCTAssertEqual(gpt.resolve(effort: .medium, fast: true), "gpt-5.2-fast")
+
+        let routeData = try XCTUnwrap(catalog.cursorRouteJSON().data(using: .utf8))
+        let routeRoot = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: routeData) as? [String: Any])
+        let auto = try XCTUnwrap(routeRoot["syncbar-cursor/auto"] as? [String: Any])
+        XCTAssertEqual(auto["default_effort"] as? String, "default")
+        let autoVariants = try XCTUnwrap(auto["variants"] as? [String: [String: String]])
+        XCTAssertEqual(autoVariants["default"]?["standard"], "auto")
+
+        let composer = try XCTUnwrap(
+            routeRoot["syncbar-cursor/composer-2.5"] as? [String: Any])
+        XCTAssertEqual(composer["default_effort"] as? String, "default")
+        let composerVariants = try XCTUnwrap(
+            composer["variants"] as? [String: [String: String]])
+        XCTAssertEqual(composerVariants["default"]?["standard"], "composer-2.5")
+        XCTAssertEqual(composerVariants["default"]?["fast"], "composer-2.5-fast")
+
+        let gptWire = try XCTUnwrap(
+            routeRoot["syncbar-cursor/gpt-5.2"] as? [String: Any])
+        XCTAssertEqual(gptWire["default_effort"] as? String, "medium")
+        let gptVariants = try XCTUnwrap(
+            gptWire["variants"] as? [String: [String: String]])
+        XCTAssertEqual(gptVariants["medium"]?["standard"], "gpt-5.2")
+        XCTAssertEqual(gptVariants["medium"]?["fast"], "gpt-5.2-fast")
+        XCTAssertEqual(gptVariants["low"]?["standard"], "gpt-5.2-low")
+    }
+
+    func testNativeFastReasoningEffortsUseOnlyStandardFastPairs() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        gpt-5.4-low - GPT-5.4 1M Low
+        gpt-5.4-medium - GPT-5.4 1M
+        gpt-5.4-medium-fast - GPT-5.4 Fast
+        gpt-5.4-high - GPT-5.4 1M High
+        gpt-5.4-high-fast - GPT-5.4 High Fast
+        """)
+
+        let route = try XCTUnwrap(catalog.codexModelRoutes["syncbar-cursor/gpt-5.4"])
+        XCTAssertTrue(route.supportsFast)
+        XCTAssertEqual(route.defaultEffort, .medium)
+        XCTAssertEqual(route.supportedEfforts, [.medium, .high])
+        XCTAssertEqual(route.resolve(effort: .low), "gpt-5.4-low")
+        XCTAssertNil(route.resolve(effort: .low, fast: true))
+        XCTAssertEqual(route.resolve(effort: .high, fast: true), "gpt-5.4-high-fast")
+    }
+
+    func testRejectsDuplicateNativeRouteCoordinates() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        gpt-5.5-xhigh - GPT-5.5 Extra High
+        gpt-5.5-extra-high - GPT-5.5 Extra High
+        """)
+
+        XCTAssertThrowsError(try catalog.cursorRouteJSON())
+    }
+
     func testMapsExtraHighAndXHighSpellingsToOneEffortWithoutInventingSlugs() throws {
         let catalog = CursorModelCatalog(cliOutput: """
         gpt-5.5-extra-high - GPT-5.5 1M Extra High

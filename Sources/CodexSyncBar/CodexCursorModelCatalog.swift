@@ -7,6 +7,25 @@ enum CodexCursorModelCatalogBuilder {
     static let maximumBundledCatalogBytes = 8 * 1_024 * 1_024
     static let maximumGeneratedCatalogBytes = 16 * 1_024 * 1_024
 
+    static func bundledModelSlugs(from data: Data) throws -> [String] {
+        guard data.count <= maximumBundledCatalogBytes,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = root["models"] as? [[String: Any]]
+        else {
+            throw AppError.processFailed("Codex 모델 카탈로그 형식이 올바르지 않습니다.")
+        }
+        let slugs = models.compactMap { model -> String? in
+            guard let slug = model["slug"] as? String, !slug.isEmpty else { return nil }
+            return slug
+        }
+        guard slugs.count == models.count,
+              Set(slugs).count == slugs.count
+        else {
+            throw AppError.processFailed("Codex 모델 카탈로그의 모델 ID가 올바르지 않습니다.")
+        }
+        return slugs
+    }
+
     static func build(
         cursorCatalog: CursorModelCatalog,
         bundledCatalogData: Data) throws -> Data
@@ -14,14 +33,10 @@ enum CodexCursorModelCatalogBuilder {
         guard !cursorCatalog.variants.isEmpty else {
             throw AppError.processFailed("Codex에 표시할 Cursor 모델이 없습니다.")
         }
-        guard cursorCatalog.variants.count <= maximumModelCount else {
-            throw AppError.processFailed(
-                "Cursor 모델 수가 안전 한도(\(maximumModelCount)개)를 넘었습니다.")
-        }
         guard bundledCatalogData.count <= maximumBundledCatalogBytes else {
             throw AppError.processFailed("Codex 번들 모델 카탈로그가 너무 큽니다.")
         }
-        guard let root = try JSONSerialization.jsonObject(with: bundledCatalogData) as? [String: Any],
+        guard var root = try JSONSerialization.jsonObject(with: bundledCatalogData) as? [String: Any],
               let bundledModels = root["models"] as? [[String: Any]],
               let template = bundledModels.first(where: { $0["slug"] as? String == "gpt-5.6-sol" })
                 ?? bundledModels.first
@@ -29,44 +44,76 @@ enum CodexCursorModelCatalogBuilder {
             throw AppError.processFailed("Codex 번들 모델 카탈로그 형식이 올바르지 않습니다.")
         }
 
-        var priority = 1
-        var models: [[String: Any]] = []
+        let routes = cursorCatalog.codexModelRoutes
+        guard bundledModels.count + routes.count <= maximumModelCount else {
+            throw AppError.processFailed(
+                "Codex 모델 수가 안전 한도(\(maximumModelCount)개)를 넘었습니다.")
+        }
+
+        var usedSlugs = Set(try bundledModelSlugs(from: bundledCatalogData))
+        var priority = bundledModels.compactMap { model -> Int? in
+            if let priority = model["priority"] as? Int { return priority }
+            return (model["priority"] as? NSNumber)?.intValue
+        }.max().map { $0 + 1 } ?? 1
+        var models = bundledModels
+
         for section in cursorCatalog.sections {
             for family in section.families {
-                for variant in family.variants {
+                for thinking in [false, true] {
+                    let modelID = CursorModelCatalog.codexModelID(
+                        baseSlug: family.baseSlug,
+                        thinking: thinking)
+                    guard let route = routes[modelID] else { continue }
+                    guard CursorModelCatalog.isValidCodexModelID(modelID) else {
+                        throw AppError.processFailed(
+                            "Codex에 표시할 Cursor 모델 ID가 너무 길거나 올바르지 않습니다: \(modelID)")
+                    }
+                    guard usedSlugs.insert(modelID).inserted else {
+                        throw AppError.processFailed(
+                            "Codex 모델 ID가 기존 카탈로그와 충돌합니다: \(modelID)")
+                    }
+                    let variants = family.variants.filter { $0.thinking == thinking }
                     var model = template
-                    model["slug"] = variant.slug
+                    model["slug"] = modelID
                     model["display_name"] = pickerDisplayName(
                         group: section.group,
-                        variant: variant)
+                        familyName: family.displayName,
+                        thinking: thinking)
                     model["description"] = "Cursor 구독을 로컬 Cursor CLI 브리지로 사용하는 모델입니다."
                     model["visibility"] = "list"
                     model["supported_in_api"] = true
                     model["priority"] = priority
                     model["availability_nux"] = NSNull()
                     model["upgrade"] = NSNull()
-                    model["additional_speed_tiers"] = []
-                    model["service_tiers"] = []
+                    model["additional_speed_tiers"] = route.supportsFast ? ["fast"] : []
+                    model["service_tiers"] = route.supportsFast ? [[
+                        "id": "priority",
+                        "name": "Fast",
+                        "description": "Cursor CLI Fast 변형을 사용합니다.",
+                    ]] : []
                     model["input_modalities"] = ["text", "image"]
                     model["supports_image_detail_original"] = true
-                    if variant.context == "1m" {
-                        model["context_window"] = 1_000_000
-                        model["max_context_window"] = 1_000_000
-                    }
+                    applyConservativeContext(
+                        variants: variants,
+                        to: &model)
                     model["supports_parallel_tool_calls"] = false
                     model["supports_search_tool"] = false
                     model["experimental_supported_tools"] = []
                     model["support_verbosity"] = false
-                    let reasoning = reasoningMetadata(for: variant.effort)
-                    model["default_reasoning_level"] = reasoning.defaultEffort
-                    model["supported_reasoning_levels"] = reasoning.supported
+                    model["default_reasoning_level"] = route.defaultEffort.rawValue
+                    let advertisesReasoning = variants.contains { $0.effort != .default }
+                    model["supported_reasoning_levels"] = advertisesReasoning
+                        ? reasoningMetadata(for: route.supportedEfforts)
+                        : []
                     models.append(model)
                     priority += 1
                 }
             }
         }
+
+        root["models"] = models
         let data = try JSONSerialization.data(
-            withJSONObject: ["models": models],
+            withJSONObject: root,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) + Data([0x0A])
         guard data.count <= maximumGeneratedCatalogBytes else {
             throw AppError.processFailed("Codex에 설치할 Cursor 모델 카탈로그가 너무 큽니다.")
@@ -76,7 +123,8 @@ enum CodexCursorModelCatalogBuilder {
 
     private static func pickerDisplayName(
         group: CursorModelGroup,
-        variant: CursorModelVariant) -> String
+        familyName: String,
+        thinking: Bool) -> String
     {
         let prefix = switch group {
         case .automatic: "Cursor · Auto"
@@ -90,25 +138,48 @@ enum CodexCursorModelCatalogBuilder {
         case .other: "Cursor · 기타"
         }
         if group == .automatic { return prefix }
-        return "\(prefix) · \(variant.displayName)"
+        var name = familyName
+        if group == .cursor, name.lowercased().hasPrefix("cursor ") {
+            name.removeFirst("cursor ".count)
+        }
+        let base = "\(prefix) · \(name)"
+        return thinking ? "\(base) · Thinking" : base
     }
 
-    private static func reasoningMetadata(for effort: CursorModelEffort) -> (
-        defaultEffort: String,
-        supported: [[String: String]])
+    private static func reasoningMetadata(
+        for efforts: [CursorModelEffort]) -> [[String: String]]
     {
-        guard effort != .default else { return ("medium", []) }
-        let description = switch effort {
-        case .none: "Reasoning disabled by this Cursor model variant"
-        case .minimal: "Minimal reasoning"
-        case .low: "Low reasoning"
-        case .medium: "Medium reasoning"
-        case .default: "Cursor model default"
-        case .high: "High reasoning"
-        case .xhigh: "Extra high reasoning"
-        case .max: "Maximum reasoning"
+        efforts.map { effort in
+            let description = switch effort {
+            case .none: "Reasoning disabled"
+            case .minimal: "Minimal reasoning"
+            case .low: "Low reasoning"
+            case .medium: "Medium reasoning"
+            case .default: "Cursor model default"
+            case .high: "High reasoning"
+            case .xhigh: "Extra high reasoning"
+            case .max: "Maximum reasoning"
+            }
+            return ["effort": effort.rawValue, "description": description]
         }
-        return (effort.rawValue, [["effort": effort.rawValue, "description": description]])
+    }
+
+    private static func applyConservativeContext(
+        variants: [CursorModelVariant],
+        to model: inout [String: Any])
+    {
+        if variants.allSatisfy({ $0.context == "1m" }) {
+            model["context_window"] = 1_000_000
+            model["max_context_window"] = 1_000_000
+            return
+        }
+
+        let conservativeWindow = 272_000
+        let templateWindow = (model["context_window"] as? NSNumber)?.intValue
+        let contextWindow = min(templateWindow ?? conservativeWindow, conservativeWindow)
+        let templateMaximum = (model["max_context_window"] as? NSNumber)?.intValue
+        model["context_window"] = contextWindow
+        model["max_context_window"] = min(templateMaximum ?? contextWindow, conservativeWindow)
     }
 }
 
@@ -193,6 +264,9 @@ final class CodexCursorModelCatalogService {
             }
             return bundledCatalogOverride
         }
+        if let cachedCatalog = try loadCodexModelCache() {
+            return cachedCatalog
+        }
         guard let codex = resolveCodex() else {
             throw AppError.processFailed("Codex 실행 파일을 찾지 못해 모델 선택기 카탈로그를 만들 수 없습니다.")
         }
@@ -254,6 +328,50 @@ final class CodexCursorModelCatalogService {
             throw AppError.processFailed("Codex 번들 모델 카탈로그가 너무 큽니다.")
         }
         return output
+    }
+
+    private func loadCodexModelCache() throws -> Data? {
+        let cacheURL = home.appendingPathComponent(
+            ".codex/models_cache.json",
+            isDirectory: false)
+        guard pathEntryExists(cacheURL) else { return nil }
+
+        let descriptor = cacheURL.path.withCString {
+            open($0, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard descriptor >= 0 else {
+            throw AppError.processFailed("Codex 모델 캐시 파일을 안전하게 열 수 없습니다.")
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+
+        var info = stat()
+        guard fstat(descriptor, &info) == 0,
+              (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_uid == getuid(),
+              (info.st_mode & 0o022) == 0,
+              info.st_size >= 0,
+              info.st_size <= CodexCursorModelCatalogBuilder.maximumBundledCatalogBytes
+        else {
+            try? handle.close()
+            throw AppError.processFailed("Codex 모델 캐시 파일이 안전한 읽기 전용 파일이 아닙니다.")
+        }
+
+        let data: Data
+        do {
+            data = try handle.readToEnd() ?? Data()
+            try handle.close()
+        } catch {
+            try? handle.close()
+            throw AppError.processFailed(
+                "Codex 모델 캐시 파일을 읽지 못했습니다: \(error.localizedDescription)")
+        }
+        guard data.count == Int(info.st_size),
+              data.count <= CodexCursorModelCatalogBuilder.maximumBundledCatalogBytes
+        else {
+            throw AppError.processFailed("Codex 모델 캐시 파일 크기가 읽는 중 변경되었습니다.")
+        }
+        _ = try CodexCursorModelCatalogBuilder.bundledModelSlugs(from: data)
+        return data
     }
 
     private func resolveCodex() -> URL? {

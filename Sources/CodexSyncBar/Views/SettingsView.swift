@@ -563,34 +563,19 @@ struct SettingsView: View {
                         }
                     }
 
-                    if let family = selectedCursorFamily,
-                       let variant = selectedCursorVariant
+                    if let variant = selectedCursorVariant
                     {
                         HStack(spacing: 12) {
-                            Text("Reasoning")
+                            Text("옵션")
                                 .font(.system(size: 11, weight: .semibold))
                                 .frame(width: 74, alignment: .leading)
-                            Picker("", selection: cursorEffortBinding) {
-                                ForEach(family.availableEfforts(
-                                    fast: variant.fast,
-                                    thinking: variant.thinking))
-                                { effort in
-                                    Text(effort.displayName).tag(effort)
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(width: 132)
-                            .accessibilityLabel("Cursor reasoning 정도")
-                            .accessibilityIdentifier("cursor-reasoning-picker")
-
                             Toggle("Thinking", isOn: cursorThinkingBinding)
                                 .toggleStyle(.checkbox)
                                 .disabled(!canToggleCursorThinking)
                                 .accessibilityIdentifier("cursor-thinking-toggle")
-                            Toggle("Fast", isOn: cursorFastBinding)
-                                .toggleStyle(.checkbox)
-                                .disabled(!canToggleCursorFast)
-                                .accessibilityIdentifier("cursor-fast-toggle")
+                            Text("추론 강도와 Fast는 Codex 앱에서 선택")
+                                .font(.system(size: 9))
+                                .foregroundStyle(AppTheme.muted)
                             Spacer()
                         }
 
@@ -630,7 +615,7 @@ struct SettingsView: View {
                             .foregroundStyle(AppTheme.yellow)
                             .textSelection(.enabled)
                     }
-                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. OpenAI GPT와 OpenAI Codex는 별도 그룹이며, Context·Reasoning·Thinking·Fast 조합에 대응하는 실제 slug만 적용됩니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다. Codex 선택기에도 `Cursor · GPT`와 `Cursor · Codex` 접두어로 구분됩니다.")
+                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. Codex 모델 선택기에는 Cursor 모델이 기본 모델 단위로 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 고르면 실제 Cursor variant로 변환됩니다. Thinking은 별도 Cursor 모델 항목으로 표시됩니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다.")
                         .font(.system(size: 9))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -745,36 +730,6 @@ struct SettingsView: View {
             })
     }
 
-    private var cursorEffortBinding: Binding<CursorModelEffort> {
-        Binding(
-            get: { selectedCursorVariant?.effort ?? .default },
-            set: { effort in
-                guard let family = selectedCursorFamily,
-                      let variant = selectedCursorVariant,
-                      let slug = family.resolve(
-                          effort: effort,
-                          fast: variant.fast,
-                          thinking: variant.thinking)
-                else { return }
-                cursorModelDraft = slug
-            })
-    }
-
-    private var cursorFastBinding: Binding<Bool> {
-        Binding(
-            get: { selectedCursorVariant?.fast ?? false },
-            set: { fast in
-                guard let family = selectedCursorFamily,
-                      let variant = selectedCursorVariant,
-                      let slug = family.resolve(
-                          effort: variant.effort,
-                          fast: fast,
-                          thinking: variant.thinking)
-                else { return }
-                cursorModelDraft = slug
-            })
-    }
-
     private var cursorThinkingBinding: Binding<Bool> {
         Binding(
             get: { selectedCursorVariant?.thinking ?? false },
@@ -788,16 +743,6 @@ struct SettingsView: View {
                 else { return }
                 cursorModelDraft = slug
             })
-    }
-
-    private var canToggleCursorFast: Bool {
-        guard let family = selectedCursorFamily,
-              let variant = selectedCursorVariant
-        else { return false }
-        return family.resolve(
-            effort: variant.effort,
-            fast: !variant.fast,
-            thinking: variant.thinking) != nil
     }
 
     private var canToggleCursorThinking: Bool {

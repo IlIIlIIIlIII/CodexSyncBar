@@ -47,7 +47,8 @@ final class CursorBridgeTests: XCTestCase {
         let environment = try CursorBridgeService.sidecarEnvironment(
             inheriting: ["PRESERVED": "yes"],
             bridgeToken: testCursorBridgeToken,
-            modelCatalog: catalog)
+            modelCatalog: catalog,
+            nativeModelSlugs: ["gpt-5.6-sol"])
 
         XCTAssertEqual(environment["PRESERVED"], "yes")
         XCTAssertEqual(environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"], testCursorBridgeToken)
@@ -69,6 +70,10 @@ final class CursorBridgeTests: XCTestCase {
                 effort: .high,
                 fast: true,
                 thinking: false))
+        let nativeData = try XCTUnwrap(
+            environment["SYNCBAR_NATIVE_MODELS_JSON"]?.data(using: .utf8))
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: nativeData), ["gpt-5.6-sol"])
+        XCTAssertNotNil(environment["SYNCBAR_CURSOR_MODEL_ROUTES_JSON"])
     }
 
     func testCodexCursorConfigRoundTripsExactlyAndPreservesCRLF() throws {
@@ -92,8 +97,9 @@ final class CursorBridgeTests: XCTestCase {
 
         XCTAssertTrue(try CodexCursorConfigEditor.isActive(patch.text))
         XCTAssertTrue(patch.text.contains("base_url = \"http://127.0.0.1:32125/v1\"\r\n"))
+        XCTAssertTrue(patch.text.contains("requires_openai_auth = true"))
         XCTAssertTrue(patch.text.contains(
-            "http_headers = { \"X-SyncBar-Bridge-Token\" = \"\(defaultToken)\" }"))
+            "http_headers = { \"X-SyncBar-Bridge-Token\" = \"\(defaultToken)\", originator = \"codex_cli_rs\" }"))
         XCTAssertTrue(patch.text.contains(
             "model_catalog_json = \"/managed/cursor-catalog.json\"\r\n"))
         XCTAssertEqual(

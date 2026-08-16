@@ -213,10 +213,12 @@ final class CursorBridgeService {
         ]
         let environment: [String: String]
         do {
+            let nativeModelSlugs = try managedNativeModelSlugs()
             environment = try Self.sidecarEnvironment(
                 inheriting: ProcessInfo.processInfo.environment,
                 bridgeToken: preferences.bridgeToken,
-                modelCatalog: modelCatalog)
+                modelCatalog: modelCatalog,
+                nativeModelSlugs: nativeModelSlugs)
         } catch {
             status = .failed("Cursor 모델 설정을 만들지 못했습니다: \(error.localizedDescription)")
             return status
@@ -311,7 +313,8 @@ final class CursorBridgeService {
     static func sidecarEnvironment(
         inheriting base: [String: String],
         bridgeToken: String,
-        modelCatalog: CursorModelCatalog) throws -> [String: String]
+        modelCatalog: CursorModelCatalog,
+        nativeModelSlugs: [String] = []) throws -> [String: String]
     {
         var environment = base
         environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"] = bridgeToken
@@ -320,7 +323,63 @@ final class CursorBridgeService {
             as: UTF8.self)
         environment["SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON"] =
             try modelCatalog.acpModelParametersJSON()
+        environment["SYNCBAR_CURSOR_MODEL_ROUTES_JSON"] =
+            try modelCatalog.cursorRouteJSON()
+        if nativeModelSlugs.isEmpty {
+            environment.removeValue(forKey: "SYNCBAR_NATIVE_MODELS_JSON")
+        } else {
+            environment["SYNCBAR_NATIVE_MODELS_JSON"] = String(
+                decoding: try JSONEncoder().encode(nativeModelSlugs),
+                as: UTF8.self)
+        }
         return environment
+    }
+
+    private func managedNativeModelSlugs() throws -> [String] {
+        let catalogURL = home.appendingPathComponent(
+            ".local/share/gpt-switch/cursor-codex-model-catalog.json")
+        var info = stat()
+        let result = catalogURL.path.withCString { lstat($0, &info) }
+        if result != 0 {
+            guard errno == ENOENT else {
+                throw AppError.processFailed(
+                    "Codex 모델 카탈로그를 확인하지 못했습니다: \(String(cString: strerror(errno)))")
+            }
+            return []
+        }
+        guard (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_uid == getuid(),
+              (info.st_mode & 0o077) == 0,
+              info.st_size >= 0,
+              info.st_size <= 16 * 1_024 * 1_024
+        else {
+            throw AppError.processFailed("Codex 모델 카탈로그 파일이 안전하지 않습니다.")
+        }
+        let data = try Data(contentsOf: catalogURL)
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = root["models"] as? [[String: Any]]
+        else {
+            throw AppError.processFailed("Codex 모델 카탈로그 형식이 올바르지 않습니다.")
+        }
+        var seen = Set<String>()
+        let slugs = try models.compactMap { model -> String? in
+            guard let slug = model["slug"] as? String else {
+                throw AppError.processFailed("Codex 모델 카탈로그에 ID가 없는 항목이 있습니다.")
+            }
+            if slug.hasPrefix("syncbar-cursor/") { return nil }
+            guard slug.range(
+                of: #"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"#,
+                options: .regularExpression) != nil,
+                seen.insert(slug).inserted
+            else {
+                throw AppError.processFailed("Codex 기본 모델 ID가 올바르지 않습니다: \(slug)")
+            }
+            return slug
+        }
+        guard slugs.count <= 512 else {
+            throw AppError.processFailed("Codex 기본 모델 수가 안전 한도를 초과했습니다.")
+        }
+        return slugs
     }
 
     private var bridgeWorkspaceURL: URL {

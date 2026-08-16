@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -13,13 +14,17 @@ import {
   buildCursorPrompt,
   buildResponseResult,
   consumeCursorEvent,
+  createOpenAIProxyTestHooks,
   cursorChildEnvironment,
   parseCursorModelAllowlist,
   parseCursorModelParameters,
+  parseCursorModelRoutes,
+  parseNativeModelAllowlist,
   parseToolEnvelope,
   prepareCursorBackendRequest,
   prepareCursorBackendRequestWithFiles,
   responseSSEEvents,
+  resolveCursorModelRoute,
   runCursorACP,
   startBridge,
   stopBridge,
@@ -763,6 +768,136 @@ test("Cursor ACP model parameters use the strict flat-slug schema and allowlist"
   );
 });
 
+test("Cursor picker routes strictly resolve native reasoning and Fast selections", () => {
+  const allowedModels = new Set([
+    "composer-2.5",
+    "composer-2.5-fast",
+    "gpt-5.6-sol-low",
+    "gpt-5.6-sol-low-fast",
+    "gpt-5.6-sol-medium",
+    "gpt-5.6-sol-medium-fast",
+    "vendor.custom/model:preview",
+  ]);
+  const routes = parseCursorModelRoutes(JSON.stringify({
+    "syncbar-cursor/composer-2.5": {
+      default_effort: "default",
+      variants: {
+        default: { standard: "composer-2.5", fast: "composer-2.5-fast" },
+      },
+    },
+    "syncbar-cursor/gpt-5.6-sol": {
+      default_effort: "medium",
+      variants: {
+        low: { standard: "gpt-5.6-sol-low", fast: "gpt-5.6-sol-low-fast" },
+        medium: { standard: "gpt-5.6-sol-medium", fast: "gpt-5.6-sol-medium-fast" },
+      },
+    },
+    "syncbar-cursor/vendor.custom/model:preview": {
+      default_effort: "default",
+      variants: { default: { standard: "vendor.custom/model:preview" } },
+    },
+  }), allowedModels);
+
+  assert.deepEqual(resolveCursorModelRoute({
+    model: "syncbar-cursor/gpt-5.6-sol",
+    reasoning: { effort: "low" },
+    service_tier: "priority",
+  }, routes), {
+    pickerModel: "syncbar-cursor/gpt-5.6-sol",
+    effort: "low",
+    fast: true,
+    flatModel: "gpt-5.6-sol-low-fast",
+  });
+  assert.equal(resolveCursorModelRoute({
+    model: "syncbar-cursor/gpt-5.6-sol",
+  }, routes)?.flatModel, "gpt-5.6-sol-medium");
+  assert.deepEqual(resolveCursorModelRoute({
+    model: "syncbar-cursor/composer-2.5",
+    reasoning: { effort: "medium" },
+    service_tier: "priority",
+  }, routes), {
+    pickerModel: "syncbar-cursor/composer-2.5",
+    effort: "default",
+    fast: true,
+    flatModel: "composer-2.5-fast",
+  });
+  assert.equal(resolveCursorModelRoute({ model: "gpt-5.6-sol-medium" }, routes), null);
+
+  for (const request of [
+    { model: "syncbar-cursor/gpt-5.6-sol", reasoning: "high" },
+    { model: "syncbar-cursor/gpt-5.6-sol", reasoning: { effort: "high" } },
+    { model: "syncbar-cursor/gpt-5.6-sol", service_tier: "flex" },
+  ]) {
+    assert.throws(
+      () => resolveCursorModelRoute(request, routes),
+      (error) => error instanceof BridgeError &&
+        ["invalid_request", "unsupported_model_variant"].includes(error.code),
+    );
+  }
+
+  const invalidRoutes = [
+    "not-json",
+    "[]",
+    "{}",
+    JSON.stringify({
+      "gpt-5.6-sol": {
+        default_effort: "medium",
+        variants: { medium: { standard: "gpt-5.6-sol-medium" } },
+      },
+    }),
+    JSON.stringify({
+      "syncbar-cursor/gpt-5.6-sol": {
+        default_effort: null,
+        variants: { medium: { standard: "gpt-5.6-sol-medium" } },
+      },
+    }),
+    JSON.stringify({
+      "syncbar-cursor/gpt-5.6-sol": {
+        default_effort: "high",
+        variants: { medium: { standard: "gpt-5.6-sol-medium" } },
+      },
+    }),
+    JSON.stringify({
+      "syncbar-cursor/gpt-5.6-sol": {
+        default_effort: "medium",
+        variants: { medium: { standard: "outside-allowlist" } },
+      },
+    }),
+    JSON.stringify({
+      "syncbar-cursor/gpt-5.6-sol": {
+        default_effort: "medium",
+        variants: { medium: { standard: "gpt-5.6-sol-medium", extra: "bad" } },
+      },
+    }),
+  ];
+  for (const rawValue of invalidRoutes) {
+    assert.throws(
+      () => parseCursorModelRoutes(rawValue, allowedModels),
+      (error) => error instanceof BridgeError && error.code === "invalid_model_routes",
+    );
+  }
+});
+
+test("native model allowlist is exact, bounded, and separate from Cursor picker IDs", () => {
+  assert.deepEqual([...parseNativeModelAllowlist(undefined)], []);
+  assert.deepEqual(
+    [...parseNativeModelAllowlist(JSON.stringify(["gpt-5.6-sol", "codex-auto-review"]))],
+    ["gpt-5.6-sol", "codex-auto-review"],
+  );
+  for (const rawValue of [
+    "not-json",
+    "[]",
+    JSON.stringify(["gpt-5.6-sol", "gpt-5.6-sol"]),
+    JSON.stringify(["syncbar-cursor/gpt-5.6-sol"]),
+    JSON.stringify(["unsafe model"]),
+  ]) {
+    assert.throws(
+      () => parseNativeModelAllowlist(rawValue),
+      (error) => error instanceof BridgeError && error.code === "invalid_native_model_allowlist",
+    );
+  }
+});
+
 test("Responses image parts become ordered ACP image blocks without base64 in the text prompt", () => {
   const prepared = prepareCursorBackendRequest(baseRequest({
     input: [
@@ -1467,7 +1602,22 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
     port: 0,
     agentPath: fakeAgent,
     model: "composer-2.5",
-    allowedModels: ["composer-2.5", "gpt-5.6-sol-high-fast"],
+    allowedModels: [
+      "composer-2.5",
+      "gpt-5.6-sol-high-fast",
+      "gpt-5.6-sol-low",
+      "gpt-5.6-sol-low-fast",
+      "gpt-5.6-sol-medium",
+    ],
+    modelRoutes: {
+      "syncbar-cursor/gpt-5.6-sol": {
+        default_effort: "medium",
+        variants: {
+          low: { standard: "gpt-5.6-sol-low", fast: "gpt-5.6-sol-low-fast" },
+          medium: { standard: "gpt-5.6-sol-medium" },
+        },
+      },
+    },
     workspace,
     timeoutMs: 5000,
     bridgeToken,
@@ -1544,6 +1694,22 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
       alternateModelBody.output[0].content[0].text,
       "gpt-5.6-sol-high-fast",
     );
+    const routedModelResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
+      body: JSON.stringify(baseRequest({
+        model: "syncbar-cursor/gpt-5.6-sol",
+        reasoning: { effort: "low" },
+        service_tier: "priority",
+        input: "report-selected-model",
+        tools: [],
+        stream: false,
+      })),
+    });
+    const routedModelBody = await routedModelResponse.json();
+    assert.equal(routedModelResponse.status, 200, JSON.stringify(routedModelBody));
+    assert.equal(routedModelBody.model, "syncbar-cursor/gpt-5.6-sol");
+    assert.equal(routedModelBody.output[0].content[0].text, "gpt-5.6-sol-low-fast");
     const textFileResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
@@ -1729,6 +1895,227 @@ test("HTTP image requests use the ACP transport", async () => {
     await stopBridge(server);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("native Codex models proxy only to branded official-upstream test targets", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-native-proxy-test-"));
+  const workspace = path.join(root, "workspace");
+  const bridgeToken = "d".repeat(64);
+  const observed = [];
+  let redirectedRequests = 0;
+  let cancelledUpstream;
+  const cancelledUpstreamPromise = new Promise((resolve) => {
+    cancelledUpstream = resolve;
+  });
+  const upstream = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+    observed.push({ path: request.url, headers: request.headers, rawBody });
+    if (request.url === "/redirected") {
+      redirectedRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"redirected":true}');
+      return;
+    }
+    if (request.url === "/chatgpt/responses") {
+      response.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "7",
+        "x-request-id": "chatgpt-request-id",
+        "x-private-upstream": "must-not-pass",
+        "set-cookie": "must-not-pass=1",
+      });
+      response.end('{"error":{"message":"rate limited"}}');
+      return;
+    }
+    const parsed = JSON.parse(rawBody);
+    if (parsed.input === "redirect") {
+      response.writeHead(302, { location: "/redirected", "content-type": "text/plain" });
+      response.end("redirect refused");
+      return;
+    }
+    if (parsed.input === "cancel-upstream") {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write("data: first\n\n");
+      const keepAlive = setInterval(() => response.write(": keep-alive\n\n"), 25);
+      response.on("close", () => {
+        clearInterval(keepAlive);
+        cancelledUpstream();
+      });
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "x-openai-request-id": "api-request-id",
+    });
+    response.write("event: response.created\ndata: {\"type\":\"response.created\"}\n\n");
+    setTimeout(() => response.end("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"), 10);
+  });
+  await new Promise((resolve, reject) => {
+    upstream.once("error", reject);
+    upstream.listen(0, "127.0.0.1", resolve);
+  });
+  const upstreamAddress = upstream.address();
+  assert.equal(typeof upstreamAddress, "object");
+  const hooks = createOpenAIProxyTestHooks({
+    chatGPTURL: `http://127.0.0.1:${upstreamAddress.port}/chatgpt/responses`,
+    apiURL: `http://127.0.0.1:${upstreamAddress.port}/api/responses`,
+  });
+  const server = await startBridge({
+    host: "127.0.0.1",
+    port: 0,
+    agentPath: "/unused/cursor-agent",
+    model: "composer-2.5",
+    allowedModels: ["composer-2.5", "gpt-5.6-sol"],
+    nativeModels: ["gpt-5.6-sol"],
+    workspace,
+    timeoutMs: 5_000,
+    bridgeToken,
+  }, hooks);
+  try {
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    const chatGPTBody = JSON.stringify(baseRequest({
+      model: "gpt-5.6-sol",
+      input: "chatgpt-proxy",
+      tools: [],
+    }));
+    const chatGPTResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer chatgpt-access-token",
+        "chatgpt-account-id": "account-fixture",
+        "content-type": "application/json",
+        cookie: "browser-cookie=must-not-pass",
+        referer: "https://example.test/private",
+        "sec-fetch-site": "same-origin",
+        "x-codex-turn-metadata": '{"turn":"fixture"}',
+        "openai-beta": "responses_multi_agent=v1",
+        "x-secret-fixture": "must-not-pass",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: chatGPTBody,
+    });
+    assert.equal(chatGPTResponse.status, 429);
+    assert.equal(chatGPTResponse.headers.get("retry-after"), "7");
+    assert.equal(chatGPTResponse.headers.get("x-request-id"), "chatgpt-request-id");
+    assert.equal(chatGPTResponse.headers.get("x-private-upstream"), null);
+    assert.equal(chatGPTResponse.headers.get("set-cookie"), null);
+    assert.equal(await chatGPTResponse.text(), '{"error":{"message":"rate limited"}}');
+
+    const chatGPTObserved = observed.at(-1);
+    assert.equal(chatGPTObserved.path, "/chatgpt/responses");
+    assert.equal(chatGPTObserved.rawBody, chatGPTBody);
+    assert.equal(chatGPTObserved.headers.authorization, "Bearer chatgpt-access-token");
+    assert.equal(chatGPTObserved.headers["chatgpt-account-id"], "account-fixture");
+    assert.equal(chatGPTObserved.headers["x-codex-turn-metadata"], '{"turn":"fixture"}');
+    assert.equal(chatGPTObserved.headers["openai-beta"], "responses_multi_agent=v1");
+    for (const stripped of [
+      "cookie", "referer", "sec-fetch-site", "x-secret-fixture", "x-syncbar-bridge-token",
+    ]) {
+      assert.equal(chatGPTObserved.headers[stripped], undefined, stripped);
+    }
+
+    const apiResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer openai-api-key",
+        "content-type": "application/json",
+        "openai-organization": "org-fixture",
+        "openai-project": "project-fixture",
+        "x-client-request-id": "client-request-fixture",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: JSON.stringify(baseRequest({ model: "gpt-5.6-sol", input: "api-proxy", tools: [] })),
+    });
+    assert.equal(apiResponse.status, 200);
+    assert.equal(apiResponse.headers.get("x-openai-request-id"), "api-request-id");
+    assert.match(await apiResponse.text(), /response\.completed/);
+    const apiObserved = observed.at(-1);
+    assert.equal(apiObserved.path, "/api/responses");
+    assert.equal(apiObserved.headers.authorization, "Bearer openai-api-key");
+    assert.equal(apiObserved.headers["chatgpt-account-id"], undefined);
+    assert.equal(apiObserved.headers["openai-organization"], "org-fixture");
+    assert.equal(apiObserved.headers["openai-project"], "project-fixture");
+    assert.equal(apiObserved.headers["x-client-request-id"], "client-request-fixture");
+
+    const missingUpstreamAuth = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: JSON.stringify(baseRequest({ model: "gpt-5.6-sol", tools: [] })),
+    });
+    assert.equal(missingUpstreamAuth.status, 401);
+    assert.equal((await missingUpstreamAuth.json()).error.code, "missing_upstream_authentication");
+
+    const redirectResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        authorization: "Bearer openai-api-key",
+        "content-type": "application/json",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: JSON.stringify(baseRequest({ model: "gpt-5.6-sol", input: "redirect", tools: [] })),
+    });
+    assert.equal(redirectResponse.status, 302);
+    assert.equal(redirectResponse.headers.get("location"), null);
+    assert.equal(redirectedRequests, 0);
+
+    const cancellation = new AbortController();
+    const cancellingFetch = fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer openai-api-key",
+        "content-type": "application/json",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: JSON.stringify(baseRequest({
+        model: "gpt-5.6-sol",
+        input: "cancel-upstream",
+        tools: [],
+      })),
+      signal: cancellation.signal,
+    });
+    const cancellingResponse = await cancellingFetch;
+    assert.equal(cancellingResponse.status, 200);
+    cancellation.abort();
+    await Promise.race([
+      cancelledUpstreamPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("upstream was not cancelled")), 1_000)),
+    ]);
+  } finally {
+    await stopBridge(server);
+    await new Promise((resolve) => upstream.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenAI proxy targets cannot be injected through ordinary bridge configuration", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-proxy-hook-test-"));
+  await assert.rejects(
+    () => startBridge({
+      host: "127.0.0.1",
+      port: 0,
+      agentPath: "/unused/cursor-agent",
+      model: "composer-2.5",
+      allowedModels: ["composer-2.5"],
+      nativeModels: ["gpt-5.6-sol"],
+      workspace: path.join(root, "workspace"),
+      timeoutMs: 5_000,
+      bridgeToken: "e".repeat(64),
+      chatGPTURL: "http://127.0.0.1:1/unsafe",
+      apiURL: "http://127.0.0.1:1/unsafe",
+    }, {
+      chatGPTURL: "http://127.0.0.1:1/unsafe",
+      apiURL: "http://127.0.0.1:1/unsafe",
+    }),
+    (error) => error instanceof BridgeError && error.code === "invalid_test_configuration",
+  );
+  await rm(root, { recursive: true, force: true });
 });
 
 test("installed Codex image input round-trips through Responses and Cursor ACP", {

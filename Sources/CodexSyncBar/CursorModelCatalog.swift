@@ -119,6 +119,92 @@ struct CursorACPModelParameters: Codable, Equatable, Sendable {
     let thinking: Bool
 }
 
+struct CursorCodexModelRouteVariant: Codable, Equatable, Sendable {
+    let slug: String
+    let effort: CursorModelEffort?
+    let fast: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case slug
+        case effort
+        case fast
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(slug, forKey: .slug)
+        if let effort {
+            try container.encode(effort, forKey: .effort)
+        } else {
+            try container.encodeNil(forKey: .effort)
+        }
+        try container.encode(fast, forKey: .fast)
+    }
+}
+
+struct CursorCodexModelRoute: Codable, Equatable, Sendable {
+    let baseSlug: String
+    let thinking: Bool
+    let defaultEffort: CursorModelEffort
+    let variants: [CursorCodexModelRouteVariant]
+
+    var supportedEfforts: [CursorModelEffort] {
+        let normal = Set(variants.lazy
+            .filter { !$0.fast }
+            .compactMap { $0.effort ?? defaultEffort })
+        let fast = Set(variants.lazy
+            .filter(\.fast)
+            .compactMap { $0.effort ?? defaultEffort })
+        let paired = normal.intersection(fast)
+        let available = paired.isEmpty ? normal : paired
+        return CursorModelEffort.allCases
+            .filter { $0 != .default && available.contains($0) }
+    }
+
+    var supportsFast: Bool {
+        !supportedFastEfforts.isEmpty
+    }
+
+    func resolve(effort: CursorModelEffort? = nil, fast: Bool = false) -> String? {
+        let requestedEffort = effort ?? defaultEffort
+        return variants.first(where: { variant in
+            (variant.effort ?? defaultEffort) == requestedEffort
+                && variant.fast == fast
+        })?.slug
+    }
+
+    private var supportedFastEfforts: Set<CursorModelEffort> {
+        let normal = Set(variants.lazy
+            .filter { !$0.fast }
+            .compactMap { $0.effort ?? defaultEffort })
+        let fast = Set(variants.lazy
+            .filter(\.fast)
+            .compactMap { $0.effort ?? defaultEffort })
+        return normal.intersection(fast)
+    }
+}
+
+struct CursorCodexPickerPreset: Equatable, Identifiable, Sendable {
+    let id: String
+    let baseSlug: String
+    let thinking: Bool
+    let defaultEffort: CursorModelEffort
+    let variants: [CursorModelVariant]
+
+    var route: CursorCodexModelRoute {
+        CursorCodexModelRoute(
+            baseSlug: baseSlug,
+            thinking: thinking,
+            defaultEffort: defaultEffort,
+            variants: variants.map { variant in
+                CursorCodexModelRouteVariant(
+                    slug: variant.slug,
+                    effort: variant.effort == .default ? nil : variant.effort,
+                    fast: variant.fast)
+            })
+    }
+}
+
 struct CursorModelFamily: Codable, Equatable, Identifiable, Sendable {
     let baseSlug: String
     let displayName: String
@@ -252,6 +338,102 @@ struct CursorModelCatalog: Equatable, Sendable {
         variants.first { $0.slug == slug }?.selection
     }
 
+    var pickerPresets: [CursorCodexPickerPreset] {
+        var presets: [CursorCodexPickerPreset] = []
+        for family in families {
+            for thinking in [false, true] {
+                let matchingVariants = family.variants.filter { $0.thinking == thinking }
+                guard !matchingVariants.isEmpty,
+                      let defaultVariant = Self.preferredCodexVariant(
+                          in: matchingVariants,
+                          requiringFastPair: true)
+                        ?? Self.preferredCodexVariant(in: matchingVariants)
+                else {
+                    continue
+                }
+                let defaultEffort = Self.codexEffort(for: defaultVariant.effort)
+                presets.append(CursorCodexPickerPreset(
+                    id: Self.codexModelID(
+                        baseSlug: family.baseSlug,
+                        thinking: thinking),
+                    baseSlug: family.baseSlug,
+                    thinking: thinking,
+                    defaultEffort: defaultEffort,
+                    variants: matchingVariants))
+            }
+        }
+        return presets
+    }
+
+    var codexModelRoutes: [String: CursorCodexModelRoute] {
+        Dictionary(uniqueKeysWithValues: pickerPresets.map { preset in
+            (preset.id, preset.route)
+        })
+    }
+
+    func preferredPickerModelID(forFlatSlug slug: String) -> String? {
+        guard let variant = variants.first(where: { $0.slug == slug }) else {
+            return nil
+        }
+        return Self.codexModelID(
+            baseSlug: variant.baseSlug,
+            thinking: variant.thinking)
+    }
+
+    func cursorRouteJSON() throws -> String {
+        var object: [String: Any] = [:]
+        for preset in pickerPresets {
+            guard Self.isValidCodexModelID(preset.id) else {
+                throw AppError.processFailed(
+                    "Codex에 표시할 Cursor 모델 ID가 너무 길거나 올바르지 않습니다: \(preset.id)")
+            }
+            let usesDefaultSentinel = preset.variants.allSatisfy {
+                $0.effort == .default
+            }
+            let wireDefaultEffort: CursorModelEffort = usesDefaultSentinel
+                ? .default
+                : preset.defaultEffort
+            var variantsByEffort: [String: [String: String]] = [:]
+            for variant in preset.route.variants {
+                let effort = variant.effort ?? wireDefaultEffort
+                let tier = variant.fast ? "fast" : "standard"
+                if variantsByEffort[effort.rawValue]?[tier] != nil {
+                    throw AppError.processFailed(
+                        "Cursor 모델 경로가 중복됩니다: \(preset.id) \(effort.rawValue) \(tier)")
+                }
+                variantsByEffort[effort.rawValue, default: [:]][tier] = variant.slug
+            }
+            object[preset.id] = [
+                "default_effort": wireDefaultEffort.rawValue,
+                "variants": variantsByEffort,
+            ]
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func codexModelRoutesJSON() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(
+            decoding: try encoder.encode(codexModelRoutes),
+            as: UTF8.self)
+    }
+
+    static func codexModelID(baseSlug: String, thinking: Bool) -> String {
+        let suffix = thinking ? "/thinking" : ""
+        return "syncbar-cursor/\(baseSlug)\(suffix)"
+    }
+
+    static func isValidCodexModelID(_ modelID: String) -> Bool {
+        modelID.utf8.count <= 128
+            && modelID.range(
+                of: #"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"#,
+                options: .regularExpression) != nil
+    }
+
     var acpModelParametersBySlug: [String: CursorACPModelParameters] {
         Dictionary(uniqueKeysWithValues: variants.map { variant in
             (
@@ -277,6 +459,33 @@ struct CursorModelCatalog: Equatable, Sendable {
         case "claude-4-sonnet": "claude-sonnet-4"
         default: baseSlug
         }
+    }
+
+    private static func preferredCodexVariant(
+        in variants: [CursorModelVariant],
+        requiringFastPair: Bool = false) -> CursorModelVariant?
+    {
+        let fastEfforts = Set(variants.lazy
+            .filter(\.fast)
+            .map { codexEffort(for: $0.effort) })
+        let preferredEfforts: [CursorModelEffort] = [
+            .default, .medium, .high, .low, .none, .minimal, .xhigh, .max,
+        ]
+        for effort in preferredEfforts {
+            if let variant = variants.first(where: {
+                $0.effort == effort && !$0.fast
+                    && (!requiringFastPair
+                        || fastEfforts.contains(codexEffort(for: $0.effort)))
+            }) {
+                return variant
+            }
+        }
+        if requiringFastPair { return nil }
+        return variants.first(where: { !$0.fast }) ?? variants.first
+    }
+
+    private static func codexEffort(for effort: CursorModelEffort) -> CursorModelEffort {
+        effort == .default ? .medium : effort
     }
 
     func acpModelParametersJSON() throws -> String {

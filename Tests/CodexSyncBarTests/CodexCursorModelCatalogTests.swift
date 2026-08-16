@@ -44,26 +44,42 @@ private final class CodexModelListProbeState: @unchecked Sendable {
 }
 
 final class CodexCursorModelCatalogTests: XCTestCase {
-    func testBuildsPrefixedPickerEntriesAndKeepsGPTSeparateFromCodex() throws {
+    func testPreservesBundledModelsAndBuildsCollapsedNativePickerEntries() throws {
         let cursor = CursorModelCatalog(cliOutput: """
+        gpt-5.6-sol-low - GPT-5.6 Sol 1M Low
+        gpt-5.6-sol-low-fast - GPT-5.6 Sol Low Fast
+        gpt-5.6-sol-medium - GPT-5.6 Sol 1M
+        gpt-5.6-sol-medium-fast - GPT-5.6 Sol Fast
         gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
         gpt-5.3-codex-low - Codex 5.3 Low
         composer-2.5 - Composer 2.5
+        cursor-grok-4.6-high - Cursor Grok 4.6
+        cursor-grok-4.6-high-fast - Cursor Grok 4.6 Fast
         """)
         let template = try JSONSerialization.data(withJSONObject: [
-            "models": [[
-                "slug": "gpt-5.6-sol",
-                "display_name": "GPT-5.6-Sol",
-                "description": "template",
-                "default_reasoning_level": "low",
-                "supported_reasoning_levels": [],
-                "shell_type": "shell_command",
-                "visibility": "list",
-                "supported_in_api": true,
-                "priority": 1,
-                "base_instructions": "template instructions",
-                "context_window": 100_000,
-            ]],
+            "client_version": "preserved",
+            "models": [
+                [
+                    "slug": "gpt-5.6-sol",
+                    "display_name": "GPT-5.6-Sol",
+                    "description": "bundled sol",
+                    "default_reasoning_level": "low",
+                    "supported_reasoning_levels": [],
+                    "shell_type": "shell_command",
+                    "visibility": "list",
+                    "supported_in_api": true,
+                    "priority": 1,
+                    "base_instructions": "template instructions",
+                    "context_window": 272_000,
+                    "max_context_window": 272_000,
+                ],
+                [
+                    "slug": "gpt-5.2",
+                    "display_name": "GPT-5.2",
+                    "description": "bundled 5.2",
+                    "priority": 2,
+                ],
+            ],
         ])
 
         let data = try CodexCursorModelCatalogBuilder.build(
@@ -78,21 +94,36 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             JSONSerialization.jsonObject(with: data) as? [String: Any])
         let models = try XCTUnwrap(root["models"] as? [[String: Any]])
 
+        XCTAssertEqual(root["client_version"] as? String, "preserved")
         XCTAssertEqual(models.map { $0["slug"] as? String }, [
-            "composer-2.5",
-            "gpt-5.6-sol-high-fast",
-            "gpt-5.3-codex-low",
+            "gpt-5.6-sol",
+            "gpt-5.2",
+            "syncbar-cursor/composer-2.5",
+            "syncbar-cursor/cursor-grok-4.6",
+            "syncbar-cursor/gpt-5.6-sol",
+            "syncbar-cursor/gpt-5.3-codex",
         ])
-        XCTAssertEqual(models[1]["display_name"] as? String,
-                       "Cursor · GPT · GPT-5.6 Sol High Fast")
-        XCTAssertEqual(models[2]["display_name"] as? String,
-                       "Cursor · Codex · Codex 5.3 Low")
-        XCTAssertEqual(models[1]["default_reasoning_level"] as? String, "high")
-        let levels = try XCTUnwrap(models[1]["supported_reasoning_levels"] as? [[String: String]])
-        XCTAssertEqual(levels.first?["effort"], "high")
-        XCTAssertEqual(models[1]["base_instructions"] as? String, "template instructions")
-        XCTAssertEqual(models[1]["input_modalities"] as? [String], ["text", "image"])
-        XCTAssertEqual(models[1]["supports_image_detail_original"] as? Bool, true)
+        XCTAssertEqual(models[0]["description"] as? String, "bundled sol")
+        XCTAssertEqual(models[1]["description"] as? String, "bundled 5.2")
+
+        let grok = models[3]
+        XCTAssertEqual(grok["display_name"] as? String, "Cursor · Grok 4.6")
+        XCTAssertEqual(grok["additional_speed_tiers"] as? [String], ["fast"])
+        let grokTiers = try XCTUnwrap(grok["service_tiers"] as? [[String: String]])
+        XCTAssertEqual(grokTiers.first?["id"], "priority")
+
+        let gpt = models[4]
+        XCTAssertEqual(gpt["display_name"] as? String,
+                       "Cursor · GPT · GPT-5.6 Sol")
+        XCTAssertEqual(gpt["default_reasoning_level"] as? String, "medium")
+        let levels = try XCTUnwrap(gpt["supported_reasoning_levels"] as? [[String: String]])
+        XCTAssertEqual(levels.compactMap { $0["effort"] }, ["low", "medium"])
+        XCTAssertEqual(gpt["base_instructions"] as? String, "template instructions")
+        XCTAssertEqual(gpt["input_modalities"] as? [String], ["text", "image"])
+        XCTAssertEqual(gpt["supports_image_detail_original"] as? Bool, true)
+
+        XCTAssertEqual(models[5]["display_name"] as? String,
+                       "Cursor · Codex · Codex 5.3")
     }
 
     func testDefaultCursorVariantDoesNotAdvertiseChangeableReasoning() throws {
@@ -106,14 +137,17 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             bundledCatalogData: template)
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let models = try XCTUnwrap(root["models"] as? [[String: Any]])
-        XCTAssertEqual(models[0]["default_reasoning_level"] as? String, "medium")
-        XCTAssertEqual((models[0]["supported_reasoning_levels"] as? [Any])?.count, 0)
+        let generated = try XCTUnwrap(models.last)
+        XCTAssertEqual(generated["default_reasoning_level"] as? String, "medium")
+        XCTAssertEqual((generated["supported_reasoning_levels"] as? [Any])?.count, 0)
     }
 
-    func testOneMillionContextOverridesCatalogWindowsOnlyForMatchingVariants() throws {
+    func testCollapsedModelsUseConservativeContextAcrossEveryNativeControlVariant() throws {
         let cursor = CursorModelCatalog(cliOutput: """
         gpt-5.6-sol-high - GPT-5.6 Sol 1M High
         gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+        claude-opus-5-high - Opus 5 1M
+        claude-opus-5-max - Opus 5 1M Max
         """)
         let template = try JSONSerialization.data(withJSONObject: [
             "models": [[
@@ -133,16 +167,25 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             (model["slug"] as? String).map { ($0, model) }
         })
 
-        XCTAssertEqual(bySlug["gpt-5.6-sol-high"]?["context_window"] as? Int, 1_000_000)
-        XCTAssertEqual(bySlug["gpt-5.6-sol-high"]?["max_context_window"] as? Int, 1_000_000)
+        XCTAssertEqual(bySlug["gpt-5.6-sol"]?["context_window"] as? Int, 272_000)
         XCTAssertEqual(
-            bySlug["gpt-5.6-sol-high"]?["effective_context_window_percent"] as? Int,
+            bySlug["gpt-5.6-sol"]?["effective_context_window_percent"] as? Int,
             95)
-        XCTAssertEqual(bySlug["gpt-5.6-sol-high-fast"]?["context_window"] as? Int, 272_000)
-        XCTAssertEqual(bySlug["gpt-5.6-sol-high-fast"]?["max_context_window"] as? Int, 272_000)
         XCTAssertEqual(
-            bySlug["gpt-5.6-sol-high-fast"]?["effective_context_window_percent"] as? Int,
+            bySlug["syncbar-cursor/gpt-5.6-sol"]?["context_window"] as? Int,
+            272_000)
+        XCTAssertEqual(
+            bySlug["syncbar-cursor/gpt-5.6-sol"]?["max_context_window"] as? Int,
+            272_000)
+        XCTAssertEqual(
+            bySlug["syncbar-cursor/gpt-5.6-sol"]?["effective_context_window_percent"] as? Int,
             95)
+        XCTAssertEqual(
+            bySlug["syncbar-cursor/claude-opus-5"]?["context_window"] as? Int,
+            1_000_000)
+        XCTAssertEqual(
+            bySlug["syncbar-cursor/claude-opus-5"]?["max_context_window"] as? Int,
+            1_000_000)
     }
 
     func testRejectsAnUnboundedCursorModelCatalog() throws {
@@ -157,6 +200,54 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         XCTAssertThrowsError(try CodexCursorModelCatalogBuilder.build(
             cursorCatalog: cursor,
             bundledCatalogData: template))
+    }
+
+    func testExtractsBundledModelSlugsAndRejectsDuplicateIDs() throws {
+        let valid = try JSONSerialization.data(withJSONObject: [
+            "models": [
+                ["slug": "gpt-5.6-sol"],
+                ["slug": "gpt-5.2"],
+            ],
+        ])
+        XCTAssertEqual(
+            try CodexCursorModelCatalogBuilder.bundledModelSlugs(from: valid),
+            ["gpt-5.6-sol", "gpt-5.2"])
+
+        let duplicate = try JSONSerialization.data(withJSONObject: [
+            "models": [
+                ["slug": "gpt-5.2"],
+                ["slug": "gpt-5.2"],
+            ],
+        ])
+        XCTAssertThrowsError(
+            try CodexCursorModelCatalogBuilder.bundledModelSlugs(from: duplicate))
+    }
+
+    func testRejectsSyntheticIDsThatCollideOrExceedCodexSlugLimit() throws {
+        let collisionID = CursorModelCatalog.codexModelID(
+            baseSlug: "gpt-5.2",
+            thinking: false)
+        let collisionTemplate = try JSONSerialization.data(withJSONObject: [
+            "models": [
+                ["slug": "gpt-5.6-sol"],
+                ["slug": collisionID],
+            ],
+        ])
+        XCTAssertThrowsError(try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: CursorModelCatalog(cliOutput: "gpt-5.2 - GPT-5.2"),
+            bundledCatalogData: collisionTemplate))
+
+        let longBase = "m" + String(repeating: "x", count: 113)
+        let longCatalog = CursorModelCatalog(cliOutput: "\(longBase) - Long Model")
+        let template = try JSONSerialization.data(withJSONObject: [
+            "models": [["slug": "gpt-5.6-sol"]],
+        ])
+        XCTAssertFalse(CursorModelCatalog.isValidCodexModelID(
+            CursorModelCatalog.codexModelID(baseSlug: longBase, thinking: false)))
+        XCTAssertThrowsError(try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: longCatalog,
+            bundledCatalogData: template))
+        XCTAssertThrowsError(try longCatalog.cursorRouteJSON())
     }
 
     @MainActor
@@ -201,6 +292,80 @@ final class CodexCursorModelCatalogTests: XCTestCase {
     }
 
     @MainActor
+    func testServicePrefersSafeCodexModelCacheOverBundledProbe() async throws {
+        let fileManager = FileManager.default
+        let home = fileManager.temporaryDirectory
+            .appendingPathComponent("codex-model-cache-\(UUID().uuidString)", isDirectory: true)
+        let codexHome = home.appendingPathComponent(".codex", isDirectory: true)
+        try fileManager.createDirectory(
+            at: codexHome,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        defer { try? fileManager.removeItem(at: home) }
+
+        let cacheURL = codexHome.appendingPathComponent("models_cache.json")
+        let cache = try JSONSerialization.data(withJSONObject: [
+            "client_version": "cached",
+            "models": [[
+                "slug": "cached-codex-model",
+                "display_name": "Cached Codex Model",
+                "priority": 7,
+                "context_window": 272_000,
+                "max_context_window": 272_000,
+            ]],
+        ])
+        try cache.write(to: cacheURL)
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o644],
+            ofItemAtPath: cacheURL.path)
+
+        let service = CodexCursorModelCatalogService(home: home)
+        _ = try await service.install(cursorCatalog: CursorModelCatalog(
+            cliOutput: "composer-2.5 - Composer 2.5"))
+
+        let output = try Data(contentsOf: service.catalogURL)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: output) as? [String: Any])
+        let models = try XCTUnwrap(root["models"] as? [[String: Any]])
+        XCTAssertEqual(root["client_version"] as? String, "cached")
+        XCTAssertEqual(models.first?["slug"] as? String, "cached-codex-model")
+        XCTAssertEqual(models.last?["slug"] as? String, "syncbar-cursor/composer-2.5")
+    }
+
+    @MainActor
+    func testServiceRejectsUnsafeOrInvalidExistingCodexModelCache() async throws {
+        let fileManager = FileManager.default
+        let home = fileManager.temporaryDirectory
+            .appendingPathComponent("unsafe-codex-model-cache-\(UUID().uuidString)", isDirectory: true)
+        let codexHome = home.appendingPathComponent(".codex", isDirectory: true)
+        try fileManager.createDirectory(
+            at: codexHome,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        defer { try? fileManager.removeItem(at: home) }
+
+        let cacheURL = codexHome.appendingPathComponent("models_cache.json")
+        try Data("{}".utf8).write(to: cacheURL)
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o666],
+            ofItemAtPath: cacheURL.path)
+        let service = CodexCursorModelCatalogService(home: home)
+        let cursor = CursorModelCatalog(cliOutput: "composer-2.5 - Composer 2.5")
+        do {
+            _ = try await service.install(cursorCatalog: cursor)
+            XCTFail("Unsafe model cache should fail closed")
+        } catch {}
+
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: cacheURL.path)
+        do {
+            _ = try await service.install(cursorCatalog: cursor)
+            XCTFail("Invalid model cache should fail closed")
+        } catch {}
+    }
+
+    @MainActor
     func testDesktopCodexModelListAcceptsGeneratedCatalogWhenInstalled() async throws {
         let application = NSWorkspace.shared.urlForApplication(
             withBundleIdentifier: "com.openai.codex")
@@ -218,6 +383,9 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         defer { try? fileManager.removeItem(at: home) }
 
         let cursor = CursorModelCatalog(cliOutput: """
+        gpt-5.6-sol-medium - GPT-5.6 Sol 1M
+        gpt-5.6-sol-medium-fast - GPT-5.6 Sol Fast
+        gpt-5.6-sol-high - GPT-5.6 Sol 1M High
         gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
         gpt-5.3-codex-low - Codex 5.3 Low
         composer-2.5 - Composer 2.5
@@ -297,19 +465,25 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         let response = probeState.response()
         let result = try XCTUnwrap(response?["result"] as? [String: Any])
         let models = try XCTUnwrap(result["data"] as? [[String: Any]])
-        XCTAssertEqual(models.compactMap { $0["id"] as? String }, [
-            "composer-2.5",
-            "gpt-5.6-sol-high-fast",
-            "gpt-5.3-codex-low",
-        ])
-        XCTAssertEqual(models[1]["displayName"] as? String,
-                       "Cursor · GPT · GPT-5.6 Sol High Fast")
-        XCTAssertEqual(models[2]["displayName"] as? String,
-                       "Cursor · Codex · Codex 5.3 Low")
-        XCTAssertEqual(models[1]["defaultReasoningEffort"] as? String, "high")
+        let byID = Dictionary(uniqueKeysWithValues: models.compactMap { model in
+            (model["id"] as? String).map { ($0, model) }
+        })
+        XCTAssertNotNil(byID["gpt-5.6-sol"])
+        XCTAssertNotNil(byID["gpt-5.2"])
+        XCTAssertNotNil(byID["syncbar-cursor/composer-2.5"])
+        XCTAssertEqual(
+            byID["syncbar-cursor/gpt-5.6-sol"]?["displayName"] as? String,
+            "Cursor · GPT · GPT-5.6 Sol")
+        XCTAssertEqual(
+            byID["syncbar-cursor/gpt-5.3-codex"]?["displayName"] as? String,
+            "Cursor · Codex · Codex 5.3")
+        XCTAssertEqual(
+            byID["syncbar-cursor/gpt-5.6-sol"]?["defaultReasoningEffort"] as? String,
+            "medium")
         let reasoning = try XCTUnwrap(
-            models[1]["supportedReasoningEfforts"] as? [[String: Any]])
-        XCTAssertEqual(reasoning.first?["reasoningEffort"] as? String, "high")
+            byID["syncbar-cursor/gpt-5.6-sol"]?["supportedReasoningEfforts"]
+                as? [[String: Any]])
+        XCTAssertEqual(reasoning.count, 2)
     }
 
     private static func jsonLines(_ objects: [[String: Any]]) throws -> Data {

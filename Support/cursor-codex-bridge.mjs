@@ -4,8 +4,10 @@ import { spawn } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { lstat, mkdir, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
@@ -35,9 +37,17 @@ const MAX_CONCURRENT_REQUESTS = 4;
 const MAX_CURSOR_MODEL_COUNT = 512;
 const MAX_CURSOR_MODELS_JSON_BYTES = 128 * 1024;
 const MAX_CURSOR_MODEL_PARAMETERS_JSON_BYTES = 512 * 1024;
+const MAX_CURSOR_MODEL_ROUTES_JSON_BYTES = 512 * 1024;
+const MAX_NATIVE_MODELS_JSON_BYTES = 128 * 1024;
 const MAX_ACP_JSON_LINE_BYTES = 1024 * 1024;
 const MAX_ACP_OUTPUT_TEXT_BYTES = 8 * 1024 * 1024;
 const CURSOR_MODEL_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+const CURSOR_REASONING_EFFORTS = new Set([
+  "default", "minimal", "none", "low", "medium", "high", "xhigh", "max",
+]);
+const CHATGPT_RESPONSES_URL = new URL("https://chatgpt.com/backend-api/codex/responses");
+const OPENAI_API_RESPONSES_URL = new URL("https://api.openai.com/v1/responses");
+const OPENAI_PROXY_TEST_HOOKS = new WeakSet();
 const PREPROCESSED_FILE = Symbol("syncbar-preprocessed-file");
 const BRIDGE_START = "<SYNCBAR_BACKEND_REQUEST>";
 const BRIDGE_END = "</SYNCBAR_BACKEND_REQUEST>";
@@ -146,6 +156,13 @@ function validatedCursorModelSlug(value) {
     );
   }
   return value;
+}
+
+function isCursorPickerModel(value) {
+  if (typeof value !== "string" || !value.startsWith("syncbar-cursor/")) return false;
+  let baseSlug = value.slice("syncbar-cursor/".length);
+  if (baseSlug.endsWith("/thinking")) baseSlug = baseSlug.slice(0, -"/thinking".length);
+  return CURSOR_MODEL_SLUG_PATTERN.test(baseSlug);
 }
 
 export function parseCursorModelAllowlist(rawValue, configuredModel) {
@@ -287,6 +304,198 @@ export function parseCursorModelParameters(rawValue, allowedModels) {
   return result;
 }
 
+function parsedBoundedJSONObject(rawValue, maximumBytes, code, label) {
+  if (typeof rawValue !== "string" ||
+      rawValue.length === 0 ||
+      Buffer.byteLength(rawValue, "utf8") > maximumBytes) {
+    throw new BridgeError(`${label} are missing or too large`, 500, code);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    throw new BridgeError(`${label} must be valid JSON`, 500, code);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new BridgeError(`${label} must be a JSON object`, 500, code);
+  }
+  return parsed;
+}
+
+export function parseCursorModelRoutes(rawValue, allowedModels) {
+  if (rawValue === undefined || rawValue === null || rawValue === "") return new Map();
+  const parsed = parsedBoundedJSONObject(
+    rawValue,
+    MAX_CURSOR_MODEL_ROUTES_JSON_BYTES,
+    "invalid_model_routes",
+    "Cursor model routes",
+  );
+  const entries = Object.entries(parsed);
+  if (entries.length === 0 || entries.length > MAX_CURSOR_MODEL_COUNT) {
+    throw new BridgeError(
+      "Cursor model routes must be a non-empty bounded object",
+      500,
+      "invalid_model_routes",
+    );
+  }
+  const flatModels = allowedModels instanceof Set
+    ? allowedModels
+    : new Set(Array.isArray(allowedModels) ? allowedModels : []);
+  const result = new Map();
+  for (const [pickerModel, value] of entries) {
+    if (!isCursorPickerModel(pickerModel) ||
+        !value || typeof value !== "object" || Array.isArray(value) ||
+        Object.keys(value).some((key) => key !== "default_effort" && key !== "variants") ||
+        typeof value.default_effort !== "string" ||
+        !CURSOR_REASONING_EFFORTS.has(value.default_effort) ||
+        !value.variants || typeof value.variants !== "object" || Array.isArray(value.variants)) {
+      throw new BridgeError(
+        `Cursor model route is invalid for ${pickerModel}`,
+        500,
+        "invalid_model_routes",
+      );
+    }
+    const variants = Object.entries(value.variants);
+    if (variants.length === 0 || variants.length > CURSOR_REASONING_EFFORTS.size ||
+        !Object.hasOwn(value.variants, value.default_effort)) {
+      throw new BridgeError(
+        `Cursor model route variants are invalid for ${pickerModel}`,
+        500,
+        "invalid_model_routes",
+      );
+    }
+    const parsedVariants = new Map();
+    for (const [effort, variant] of variants) {
+      if (!CURSOR_REASONING_EFFORTS.has(effort) ||
+          !variant || typeof variant !== "object" || Array.isArray(variant) ||
+          Object.keys(variant).some((key) => key !== "standard" && key !== "fast") ||
+          typeof variant.standard !== "string" ||
+          !CURSOR_MODEL_SLUG_PATTERN.test(variant.standard) ||
+          !flatModels.has(variant.standard) ||
+          (Object.hasOwn(variant, "fast") &&
+            (typeof variant.fast !== "string" ||
+              !CURSOR_MODEL_SLUG_PATTERN.test(variant.fast) ||
+              !flatModels.has(variant.fast)))) {
+        throw new BridgeError(
+          `Cursor model route variant is invalid for ${pickerModel}/${effort}`,
+          500,
+          "invalid_model_routes",
+        );
+      }
+      parsedVariants.set(effort, Object.freeze({
+        standard: variant.standard,
+        ...(Object.hasOwn(variant, "fast") ? { fast: variant.fast } : {}),
+      }));
+    }
+    result.set(pickerModel, Object.freeze({
+      defaultEffort: value.default_effort,
+      variants: parsedVariants,
+    }));
+  }
+  return result;
+}
+
+export function parseNativeModelAllowlist(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === "") return new Set();
+  if (typeof rawValue !== "string" ||
+      Buffer.byteLength(rawValue, "utf8") > MAX_NATIVE_MODELS_JSON_BYTES) {
+    throw new BridgeError(
+      "Native model allowlist is missing or too large",
+      500,
+      "invalid_native_model_allowlist",
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(rawValue);
+  } catch {
+    throw new BridgeError(
+      "Native model allowlist must be valid JSON",
+      500,
+      "invalid_native_model_allowlist",
+    );
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_CURSOR_MODEL_COUNT) {
+    throw new BridgeError(
+      "Native model allowlist must be a non-empty bounded array",
+      500,
+      "invalid_native_model_allowlist",
+    );
+  }
+  const result = new Set();
+  for (const value of parsed) {
+    if (typeof value !== "string" ||
+        !CURSOR_MODEL_SLUG_PATTERN.test(value) ||
+        isCursorPickerModel(value) ||
+        result.has(value)) {
+      throw new BridgeError(
+        "Native model allowlist contains an invalid or duplicate model",
+        500,
+        "invalid_native_model_allowlist",
+      );
+    }
+    result.add(value);
+  }
+  return result;
+}
+
+export function resolveCursorModelRoute(request, modelRoutes) {
+  const route = modelRoutes instanceof Map ? modelRoutes.get(request?.model) : null;
+  if (!route) return null;
+  const reasoning = request.reasoning;
+  if (reasoning !== undefined && reasoning !== null &&
+      (!reasoning || typeof reasoning !== "object" || Array.isArray(reasoning))) {
+    throw new BridgeError("reasoning must be an object", 400, "invalid_request");
+  }
+  let requestedEffort = reasoning?.effort ?? route.defaultEffort;
+  if (typeof requestedEffort !== "string" || !CURSOR_REASONING_EFFORTS.has(requestedEffort)) {
+    throw new BridgeError(
+      "Requested reasoning effort is not supported by the Cursor model",
+      400,
+      "unsupported_model_variant",
+    );
+  }
+  // Codex keeps a task-level reasoning selection and sends it even for models
+  // that do not expose reasoning variants (for example Cursor Auto/Composer).
+  // A default-only route represents that exact non-reasoning model, so the
+  // unrelated task preference must not make an otherwise valid request fail.
+  if (!route.variants.has(requestedEffort) &&
+      route.variants.size === 1 &&
+      route.variants.has("default")) {
+    requestedEffort = "default";
+  }
+  const variant = route.variants.get(requestedEffort);
+  if (!variant) {
+    throw new BridgeError(
+      "Requested reasoning effort is not supported by the Cursor model",
+      400,
+      "unsupported_model_variant",
+    );
+  }
+  const serviceTier = request.service_tier ?? "default";
+  const wantsFast = serviceTier === "priority" || serviceTier === "fast";
+  if (!["default", "auto", "priority", "fast"].includes(serviceTier)) {
+    throw new BridgeError(
+      "Requested service tier is not supported by the Cursor model",
+      400,
+      "unsupported_model_variant",
+    );
+  }
+  if (wantsFast && !variant.fast) {
+    throw new BridgeError(
+      "Fast mode is not available for the selected Cursor reasoning effort",
+      400,
+      "unsupported_model_variant",
+    );
+  }
+  return Object.freeze({
+    pickerModel: request.model,
+    effort: requestedEffort,
+    fast: wantsFast,
+    flatModel: wantsFast ? variant.fast : variant.standard,
+  });
+}
+
 function configuredCursorModels(config) {
   if (config.allowedModels === undefined) {
     return parseCursorModelAllowlist(undefined, config.model);
@@ -294,15 +503,44 @@ function configuredCursorModels(config) {
   const values = config.allowedModels instanceof Set
     ? [...config.allowedModels]
     : config.allowedModels;
-  return parseCursorModelAllowlist(JSON.stringify(values), config.model);
+  const fallbackModel = Array.isArray(values) && values.includes(config.model)
+    ? config.model
+    : values?.[0];
+  return parseCursorModelAllowlist(JSON.stringify(values), fallbackModel);
 }
 
 function configuredCursorModelParameters(config, allowedModels) {
   if (config.modelParameters === undefined || config.modelParameters === null) return new Map();
+  if (config.modelParameters instanceof Map && config.modelParameters.size === 0) return new Map();
   const values = config.modelParameters instanceof Map
     ? Object.fromEntries(config.modelParameters)
     : config.modelParameters;
   return parseCursorModelParameters(JSON.stringify(values), allowedModels);
+}
+
+function configuredCursorModelRoutes(config, allowedModels) {
+  if (config.modelRoutes === undefined || config.modelRoutes === null) return new Map();
+  if (config.modelRoutes instanceof Map && config.modelRoutes.size === 0) return new Map();
+  if (config.modelRoutes instanceof Map) {
+    const values = Object.fromEntries([...config.modelRoutes].map(([pickerModel, route]) => [
+      pickerModel,
+      {
+        default_effort: route.defaultEffort ?? route.default_effort,
+        variants: route.variants instanceof Map
+          ? Object.fromEntries(route.variants)
+          : route.variants,
+      },
+    ]));
+    return parseCursorModelRoutes(JSON.stringify(values), allowedModels);
+  }
+  return parseCursorModelRoutes(JSON.stringify(config.modelRoutes), allowedModels);
+}
+
+function configuredNativeModels(config) {
+  if (config.nativeModels === undefined || config.nativeModels === null) return new Set();
+  if (config.nativeModels instanceof Set && config.nativeModels.size === 0) return new Set();
+  const values = config.nativeModels instanceof Set ? [...config.nativeModels] : config.nativeModels;
+  return parseNativeModelAllowlist(JSON.stringify(values));
 }
 
 function stableValue(value) {
@@ -2615,15 +2853,56 @@ function parseArguments(argv) {
   if (!/^[a-f0-9]{64}$/.test(config.bridgeToken)) {
     throw new BridgeError("Missing or invalid bridge authentication token", 500, "invalid_token");
   }
-  config.allowedModels = parseCursorModelAllowlist(
-    process.env.SYNCBAR_CURSOR_MODELS_JSON,
-    config.model,
-  );
+  const rawRoutes = process.env.SYNCBAR_CURSOR_MODEL_ROUTES_JSON;
+  const rawAllowedModels = process.env.SYNCBAR_CURSOR_MODELS_JSON;
+  let flatFallback = config.model;
+  if (rawRoutes) {
+    try {
+      const values = JSON.parse(rawAllowedModels ?? "null");
+      if (Array.isArray(values) && values.length > 0 && !values.includes(flatFallback)) {
+        flatFallback = values[0];
+      }
+    } catch {
+      // The strict parser below owns the user-facing configuration error.
+    }
+  }
+  config.allowedModels = parseCursorModelAllowlist(rawAllowedModels, flatFallback);
   config.modelParameters = parseCursorModelParameters(
     process.env.SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON,
     config.allowedModels,
   );
+  config.modelRoutes = parseCursorModelRoutes(rawRoutes, config.allowedModels);
+  config.nativeModels = parseNativeModelAllowlist(process.env.SYNCBAR_NATIVE_MODELS_JSON);
+  validateModelRoutingConfiguration(
+    config.model,
+    config.allowedModels,
+    config.modelRoutes,
+    config.nativeModels,
+  );
   return config;
+}
+
+function validateModelRoutingConfiguration(defaultModel, flatModels, modelRoutes, nativeModels) {
+  for (const pickerModel of modelRoutes.keys()) {
+    if (flatModels.has(pickerModel) || nativeModels.has(pickerModel)) {
+      throw new BridgeError(
+        "Cursor, picker, and native model allowlists must not overlap",
+        500,
+        "invalid_model_routing",
+      );
+    }
+  }
+  // A provider model id may also be an exact Cursor CLI slug. Direct requests
+  // for that id remain native (checked first by the HTTP router), while the
+  // namespaced syncbar-cursor/* entry can safely resolve to the same flat slug.
+  // This occurs with models such as gpt-5.2 in some Codex baseline catalogs.
+  if (!flatModels.has(defaultModel) && !modelRoutes.has(defaultModel) && !nativeModels.has(defaultModel)) {
+    throw new BridgeError(
+      "Configured default model is not routable",
+      500,
+      "invalid_model_routing",
+    );
+  }
 }
 
 function hasValidBridgeToken(request, configuredToken) {
@@ -2656,16 +2935,206 @@ async function readJSONBody(request) {
     if (bytes > MAX_BODY_BYTES) throw new BridgeError("Request body is too large", 413, "request_too_large");
     chunks.push(chunk);
   }
+  const rawBody = Buffer.concat(chunks);
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return { body: JSON.parse(rawBody.toString("utf8")), rawBody };
   } catch {
     throw new BridgeError("Request body must be valid JSON", 400, "invalid_json");
   }
 }
 
-export function createBridgeServer(config) {
+function validatedLoopbackTestURL(value) {
+  let target;
+  try {
+    target = new URL(value);
+  } catch {
+    throw new TypeError("OpenAI proxy test target must be a valid URL");
+  }
+  if (target.protocol !== "http:" ||
+      !["127.0.0.1", "[::1]"].includes(target.hostname) ||
+      target.username || target.password || target.search || target.hash) {
+    throw new TypeError("OpenAI proxy test target must be an uncredentialed loopback HTTP URL");
+  }
+  return target.toString();
+}
+
+export function createOpenAIProxyTestHooks({ chatGPTURL, apiURL }) {
+  const hooks = Object.freeze({
+    chatGPTURL: validatedLoopbackTestURL(chatGPTURL),
+    apiURL: validatedLoopbackTestURL(apiURL),
+  });
+  OPENAI_PROXY_TEST_HOOKS.add(hooks);
+  return hooks;
+}
+
+function openAIProxyTargets(testHooks) {
+  if (testHooks === undefined || testHooks === null) {
+    return { chatGPT: CHATGPT_RESPONSES_URL, api: OPENAI_API_RESPONSES_URL };
+  }
+  if (!OPENAI_PROXY_TEST_HOOKS.has(testHooks)) {
+    throw new BridgeError("Invalid OpenAI proxy test hooks", 500, "invalid_test_configuration");
+  }
+  return {
+    chatGPT: new URL(testHooks.chatGPTURL),
+    api: new URL(testHooks.apiURL),
+  };
+}
+
+const OPENAI_REQUEST_HEADERS = new Set([
+  "accept",
+  "authorization",
+  "chatgpt-account-id",
+  "conversation_id",
+  "openai-beta",
+  "openai-model",
+  "openai-organization",
+  "openai-project",
+  "originator",
+  "session_id",
+  "traceparent",
+  "tracestate",
+  "user-agent",
+  "version",
+  "x-client-request-id",
+  "x-codex-beta-features",
+  "x-codex-inference-call-id",
+  "x-codex-installation-id",
+  "x-codex-parent-thread-id",
+  "x-codex-routing-hint",
+  "x-codex-turn-metadata",
+  "x-codex-turn-state",
+  "x-codex-window-id",
+  "x-oai-attestation",
+  "x-openai-internal-codex-residency",
+  "x-openai-internal-codex-responses-lite",
+  "x-openai-fedramp",
+  "x-openai-memgen-request",
+  "x-openai-product-sku",
+  "x-openai-subagent",
+  "x-reasoning-included",
+  "x-responsesapi-include-timing-metrics",
+]);
+
+function safeHeaderValue(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+    return value;
+  }
+  return null;
+}
+
+function openAIRequestHeaders(request, rawBody, bridgeToken) {
+  const authorization = request.headers.authorization;
+  const bridgeAuthorization = `Bearer ${bridgeToken}`;
+  if (typeof authorization !== "string" ||
+      authorization.length === 0 ||
+      authorization.length > 16 * 1024 ||
+      authorization === bridgeAuthorization) {
+    throw new BridgeError(
+      "OpenAI authentication is required for native Codex models",
+      401,
+      "missing_upstream_authentication",
+    );
+  }
+  const headers = {
+    "content-type": "application/json",
+    "content-length": String(rawBody.length),
+  };
+  for (const name of OPENAI_REQUEST_HEADERS) {
+    const value = safeHeaderValue(request.headers[name]);
+    if (value !== null) headers[name] = value;
+  }
+  return headers;
+}
+
+function openAIResponseHeaders(headers) {
+  const result = {};
+  const exact = new Set([
+    "cache-control",
+    "content-encoding",
+    "content-length",
+    "content-type",
+    "openai-processing-ms",
+    "retry-after",
+    "server-timing",
+    "www-authenticate",
+    "x-openai-request-id",
+    "x-request-id",
+  ]);
+  for (const [name, rawValue] of Object.entries(headers)) {
+    const value = safeHeaderValue(rawValue);
+    if (value === null) continue;
+    if (exact.has(name) ||
+        name.startsWith("x-ratelimit-") ||
+        name.startsWith("x-codex-") ||
+        name === "x-openai-authorization-error") {
+      result[name] = value;
+    }
+  }
+  return result;
+}
+
+async function proxyOpenAIResponse({
+  request,
+  response,
+  rawBody,
+  bridgeToken,
+  timeoutMs,
+  signal,
+  targets,
+}) {
+  const hasChatGPTAccount = typeof request.headers["chatgpt-account-id"] === "string" &&
+    request.headers["chatgpt-account-id"].length > 0;
+  const target = hasChatGPTAccount ? targets.chatGPT : targets.api;
+  const transport = target.protocol === "https:" ? https : http;
+  const headers = openAIRequestHeaders(request, rawBody, bridgeToken);
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      callback();
+    };
+    const upstreamRequest = transport.request(target, {
+      method: "POST",
+      headers,
+      signal,
+    }, (upstreamResponse) => {
+      response.writeHead(
+        upstreamResponse.statusCode ?? 502,
+        openAIResponseHeaders(upstreamResponse.headers),
+      );
+      pipeline(upstreamResponse, response, { signal }).then(
+        () => finish(resolve),
+        (error) => finish(() => reject(error)),
+      );
+    });
+    upstreamRequest.setTimeout(timeoutMs, () => {
+      upstreamRequest.destroy(new BridgeError("OpenAI upstream timed out", 504, "upstream_timeout"));
+    });
+    upstreamRequest.on("error", (error) => {
+      finish(() => {
+        if (error instanceof BridgeError) {
+          reject(error);
+        } else if (signal.aborted) {
+          reject(new BridgeError("OpenAI request was cancelled", 499, "cancelled"));
+        } else {
+          reject(new BridgeError("OpenAI upstream request failed", 502, "upstream_error"));
+        }
+      });
+    });
+    upstreamRequest.end(rawBody);
+  });
+}
+
+export function createBridgeServer(config, testHooks) {
   const allowedModels = configuredCursorModels(config);
   const modelParameters = configuredCursorModelParameters(config, allowedModels);
+  const modelRoutes = configuredCursorModelRoutes(config, allowedModels);
+  const nativeModels = configuredNativeModels(config);
+  validateModelRoutingConfiguration(config.model, allowedModels, modelRoutes, nativeModels);
+  const proxyTargets = openAIProxyTargets(testHooks);
   const activeControllers = new Set();
   const activeChildren = new Set();
   const server = http.createServer(async (request, response) => {
@@ -2727,10 +3196,31 @@ export function createBridgeServer(config) {
     });
     let heartbeat;
     try {
-      const body = await readJSONBody(request);
-      if (typeof body.model !== "string" || !allowedModels.has(body.model)) {
+      const { body, rawBody } = await readJSONBody(request);
+      if (typeof body.model !== "string") {
         throw new BridgeError(
-          "Requested model is not in the configured Cursor model allowlist",
+          "Requested model is not configured for this bridge",
+          400,
+          "model_mismatch",
+        );
+      }
+      if (nativeModels.has(body.model)) {
+        await proxyOpenAIResponse({
+          request,
+          response,
+          rawBody,
+          bridgeToken: config.bridgeToken,
+          timeoutMs: config.timeoutMs,
+          signal: controller.signal,
+          targets: proxyTargets,
+        });
+        return;
+      }
+      const routedModel = resolveCursorModelRoute(body, modelRoutes);
+      const cursorModel = routedModel?.flatModel ?? body.model;
+      if (!allowedModels.has(cursorModel)) {
+        throw new BridgeError(
+          "Requested model is not configured for this bridge",
           400,
           "model_mismatch",
         );
@@ -2745,8 +3235,8 @@ export function createBridgeServer(config) {
       const execution = (usesACP ? runCursorACP : runCursorAgent)({
         agentPath: config.agentPath,
         workspace: config.workspace,
-        model: body.model,
-        modelParameters: modelParameters.get(body.model),
+        model: cursorModel,
+        modelParameters: modelParameters.get(cursorModel),
         prompt: usesACP ? prepared.acpPrompt : prepared.prompt,
         timeoutMs: config.timeoutMs,
         signal: controller.signal,
@@ -2834,9 +3324,9 @@ export async function stopBridge(server) {
   ]);
 }
 
-export async function startBridge(config) {
+export async function startBridge(config, testHooks) {
   await prepareWorkspace(config.workspace);
-  const server = createBridgeServer(config);
+  const server = createBridgeServer(config, testHooks);
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(config.port, config.host, resolve);
