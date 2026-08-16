@@ -38,7 +38,7 @@
 - 장치별 연결 상태, 적용 계정, 최근 30일 토큰 사용량과 API 가격 기준 추정 비용을 보여 줍니다.
 - 계정마다 별도의 영구 Chrome 프로필을 사용해 Google 로그인과 패스키·Touch ID를 지원합니다.
 - 로그인, 로그아웃, 인증 새로고침, 시작 프로그램 및 SSH 장치 관리는 설정 창에 모아 두었습니다.
-- 실험 기능으로 Cursor CLI 구독 모델을 로컬 Responses 브리지로 Codex의 기존 모델 선택기에 추가합니다. Cursor 모델은 기본 모델 단위로 표시되고 Codex 앱의 추론 강도·Fast 선택을 실제 Cursor variant로 변환하며, 원래 설정으로 복구할 수 있습니다.
+- 실험 기능으로 Cursor CLI 구독 모델을 로컬 Responses 브리지로 Codex의 기존 모델 선택기에 추가합니다. SyncBar 설정에서 Codex에 표시할 Cursor 모델을 고를 수 있고, 각 모델은 기본 모델 단위로 표시됩니다. Codex 앱의 추론 강도·Fast 선택은 실제 Cursor variant로 변환되며 원래 설정으로 복구할 수 있습니다.
 
 ## 설치 전 확인
 

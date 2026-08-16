@@ -50,6 +50,8 @@ struct SettingsView: View {
     @State private var cursorModelDraft: String
     @State private var cursorPortDraft: String
     @State private var cursorAgentPathDraft: String
+    @State private var cursorExposedModelIDsDraft: Set<String>
+    @State private var cursorExposureDraftInitialized = false
     @State private var cursorAPIKeyDraft = ""
 
     init(model: AppModel, readmeDetailOnly: Bool = false) {
@@ -58,6 +60,8 @@ struct SettingsView: View {
         _cursorModelDraft = State(initialValue: model.cursorBridgePreferences.model)
         _cursorPortDraft = State(initialValue: String(model.cursorBridgePreferences.port))
         _cursorAgentPathDraft = State(initialValue: model.cursorBridgePreferences.agentPath ?? "")
+        _cursorExposedModelIDsDraft = State(initialValue: Set(
+            model.cursorBridgePreferences.exposedModelIDs ?? []))
     }
 
     private var settingsMutationDisabled: Bool {
@@ -591,6 +595,62 @@ struct SettingsView: View {
                         }
                     }
 
+                    if !model.cursorModelCatalog.pickerPresets.isEmpty {
+                        HStack(spacing: 10) {
+                            Text("Codex 노출")
+                                .font(.system(size: 11, weight: .semibold))
+                                .frame(width: 74, alignment: .leading)
+                            Menu {
+                                Button("전체 선택") {
+                                    cursorExposedModelIDsDraft = availableCursorExposureIDs
+                                }
+                                Button("기본 모델만") {
+                                    if let modelID = selectedCursorPickerID {
+                                        cursorExposedModelIDsDraft = [modelID]
+                                    }
+                                }
+                                Divider()
+                                ForEach(model.cursorModelCatalog.sections) { section in
+                                    Section(section.group.displayName) {
+                                        ForEach(section.families) { family in
+                                            if let modelID = cursorExposureModelID(
+                                                for: family,
+                                                thinking: false)
+                                            {
+                                                Toggle(
+                                                    family.displayName,
+                                                    isOn: cursorExposureBinding(for: modelID))
+                                                    .disabled(modelID == selectedCursorPickerID)
+                                            }
+                                            if let modelID = cursorExposureModelID(
+                                                for: family,
+                                                thinking: true)
+                                            {
+                                                Toggle(
+                                                    "\(family.displayName) · Thinking",
+                                                    isOn: cursorExposureBinding(for: modelID))
+                                                    .disabled(modelID == selectedCursorPickerID)
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text("\(cursorExposedModelIDsDraft.count)/\(availableCursorExposureIDs.count)개 표시")
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .accessibilityLabel("Codex에 표시할 Cursor 모델")
+                            .accessibilityIdentifier("cursor-exposed-models-menu")
+                        }
+                        Text("기본 모델은 항상 표시됩니다. 기존 OpenAI 모델은 이 설정과 관계없이 유지됩니다.")
+                            .font(.system(size: 9))
+                            .foregroundStyle(AppTheme.muted)
+                            .padding(.leading, 84)
+                    }
+
                     HStack(spacing: 10) {
                         Text("포트")
                             .font(.system(size: 11, weight: .semibold))
@@ -615,7 +675,7 @@ struct SettingsView: View {
                             .foregroundStyle(AppTheme.yellow)
                             .textSelection(.enabled)
                     }
-                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. Codex 모델 선택기에는 Cursor 모델이 기본 모델 단위로 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 고르면 실제 Cursor variant로 변환됩니다. Thinking은 별도 Cursor 모델 항목으로 표시됩니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다.")
+                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. 선택한 Cursor 모델만 Codex 모델 선택기에 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 고르면 실제 Cursor variant로 변환됩니다. Thinking은 별도 Cursor 모델 항목으로 선택할 수 있습니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다.")
                         .font(.system(size: 9))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -686,14 +746,21 @@ struct SettingsView: View {
                     Button(model.isCursorProviderActive ? "설정 업데이트" : "Codex 기본 모델로 사용") {
                         guard let port = Int(cursorPortDraft) else { return }
                         Task {
+                            let exposedModelIDs = model.cursorModelCatalog.pickerPresets.isEmpty
+                                ? nil
+                                : cursorExposedModelIDsDraft.sorted()
                             await model.enableCursorProvider(
                                 model: cursorModelDraft,
                                 port: port,
-                                agentPath: cursorAgentPathDraft)
+                                agentPath: cursorAgentPathDraft,
+                                exposedModelIDs: exposedModelIDs)
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(settingsMutationDisabled || Int(cursorPortDraft) == nil)
+                    .disabled(
+                        settingsMutationDisabled
+                            || Int(cursorPortDraft) == nil
+                            || !cursorExposureSelectionIsValid)
                     .accessibilityIdentifier("cursor-provider-enable-button")
                 }
             }
@@ -703,6 +770,15 @@ struct SettingsView: View {
             cursorModelDraft = model.cursorBridgePreferences.model
             cursorPortDraft = String(model.cursorBridgePreferences.port)
             cursorAgentPathDraft = model.cursorBridgePreferences.agentPath ?? ""
+            synchronizeCursorExposureDraft(reset: true)
+        }
+        .onChange(of: model.cursorModelCatalog) { _ in
+            synchronizeCursorExposureDraft()
+        }
+        .onChange(of: cursorModelDraft) { _ in
+            if let modelID = selectedCursorPickerID {
+                cursorExposedModelIDsDraft.insert(modelID)
+            }
         }
         .task {
             if model.cursorModelCatalog.families.isEmpty {
@@ -753,6 +829,68 @@ struct SettingsView: View {
             effort: variant.effort,
             fast: variant.fast,
             thinking: !variant.thinking) != nil
+    }
+
+    private var availableCursorExposureIDs: Set<String> {
+        Set(model.cursorModelCatalog.pickerPresets.map(\.id))
+    }
+
+    private var selectedCursorPickerID: String? {
+        model.cursorModelCatalog.preferredPickerModelID(forFlatSlug: cursorModelDraft)
+    }
+
+    private var cursorExposureSelectionIsValid: Bool {
+        let available = availableCursorExposureIDs
+        guard !available.isEmpty else { return true }
+        guard !cursorExposedModelIDsDraft.isEmpty,
+              cursorExposedModelIDsDraft.isSubset(of: available)
+        else { return false }
+        guard let selectedCursorPickerID else { return false }
+        return cursorExposedModelIDsDraft.contains(selectedCursorPickerID)
+    }
+
+    private func cursorExposureModelID(
+        for family: CursorModelFamily,
+        thinking: Bool) -> String?
+    {
+        let modelID = CursorModelCatalog.codexModelID(
+            baseSlug: family.baseSlug,
+            thinking: thinking)
+        return availableCursorExposureIDs.contains(modelID) ? modelID : nil
+    }
+
+    private func cursorExposureBinding(for modelID: String) -> Binding<Bool> {
+        Binding(
+            get: { cursorExposedModelIDsDraft.contains(modelID) },
+            set: { isExposed in
+                if isExposed {
+                    cursorExposedModelIDsDraft.insert(modelID)
+                } else if modelID != selectedCursorPickerID {
+                    cursorExposedModelIDsDraft.remove(modelID)
+                }
+            })
+    }
+
+    private func synchronizeCursorExposureDraft(reset: Bool = false) {
+        let available = availableCursorExposureIDs
+        guard !available.isEmpty else { return }
+        if reset || !cursorExposureDraftInitialized {
+            if let stored = model.cursorBridgePreferences.exposedModelIDs {
+                cursorExposedModelIDsDraft = Set(stored).intersection(available)
+            } else {
+                cursorExposedModelIDsDraft = available
+            }
+            cursorExposureDraftInitialized = true
+        } else {
+            cursorExposedModelIDsDraft.formIntersection(available)
+        }
+        if let modelID = selectedCursorPickerID {
+            cursorExposedModelIDsDraft.insert(modelID)
+        } else if cursorExposedModelIDsDraft.isEmpty,
+                  let first = model.cursorModelCatalog.pickerPresets.first?.id
+        {
+            cursorExposedModelIDsDraft.insert(first)
+        }
     }
 
     private var cursorStatusIcon: String {

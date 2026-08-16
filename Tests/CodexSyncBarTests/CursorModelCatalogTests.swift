@@ -132,6 +132,40 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(gptVariants["low"]?["standard"], "gpt-5.2-low")
     }
 
+    func testFiltersCodexExposureByCollapsedPickerModelID() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        auto - Auto (default)
+        gpt-5.6-sol-medium - GPT-5.6 Sol 1M
+        gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
+        claude-opus-5-high - Opus 5 1M
+        claude-opus-5-thinking-high - Opus 5 1M Thinking
+        claude-opus-5-thinking-high-fast - Opus 5 Thinking High Fast
+        """)
+
+        let filtered = try catalog.exposingCodexModelIDs([
+            "syncbar-cursor/gpt-5.6-sol",
+            "syncbar-cursor/claude-opus-5/thinking",
+        ])
+
+        XCTAssertEqual(filtered.pickerPresets.map(\.id), [
+            "syncbar-cursor/gpt-5.6-sol",
+            "syncbar-cursor/claude-opus-5/thinking",
+        ])
+        XCTAssertEqual(filtered.variants.map(\.slug), [
+            "gpt-5.6-sol-medium",
+            "gpt-5.6-sol-high-fast",
+            "claude-opus-5-thinking-high",
+            "claude-opus-5-thinking-high-fast",
+        ])
+        XCTAssertNil(filtered.codexModelRoutes["syncbar-cursor/auto"])
+        XCTAssertNil(filtered.codexModelRoutes["syncbar-cursor/claude-opus-5"])
+        XCTAssertNotNil(filtered.codexModelRoutes["syncbar-cursor/claude-opus-5/thinking"])
+        XCTAssertThrowsError(try catalog.exposingCodexModelIDs([]))
+        XCTAssertThrowsError(try catalog.exposingCodexModelIDs([
+            "syncbar-cursor/not-in-account",
+        ]))
+    }
+
     func testNativeFastReasoningEffortsUseOnlyStandardFastPairs() throws {
         let catalog = CursorModelCatalog(cliOutput: """
         gpt-5.4-low - GPT-5.4 1M Low

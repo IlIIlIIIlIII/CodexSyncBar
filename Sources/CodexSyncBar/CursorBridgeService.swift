@@ -178,13 +178,17 @@ final class CursorBridgeService {
         }
         let modelCatalog: CursorModelCatalog
         do {
+            let accountCatalog: CursorModelCatalog
             if cachedModelCatalogAgentPath == agent.path, let cachedModelCatalog {
-                modelCatalog = cachedModelCatalog
+                accountCatalog = cachedModelCatalog
             } else {
-                modelCatalog = try await loadModelCatalog(preferredAgentPath: agent.path)
+                accountCatalog = try await loadModelCatalog(preferredAgentPath: agent.path)
             }
+            modelCatalog = try accountCatalog.exposingCodexModelIDs(
+                preferences.exposedModelIDs)
             guard modelCatalog.variants.contains(where: { $0.slug == preferences.model }) else {
-                status = .failed("현재 Cursor 계정에서 사용할 수 없는 모델입니다: \(preferences.model)")
+                status = .failed(
+                    "기본 Cursor 모델은 Codex에 노출할 모델 목록에 포함되어야 합니다: \(preferences.model)")
                 return status
             }
         } catch {

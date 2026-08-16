@@ -29,12 +29,45 @@ final class CursorBridgeTests: XCTestCase {
             try CursorBridgePreferences(
                 port: 41_000,
                 model: "  composer-2.5  ",
-                agentPath: "/opt/homebrew/bin/agent").validated().model,
+                agentPath: "/opt/homebrew/bin/agent",
+                exposedModelIDs: [
+                    "syncbar-cursor/gpt-5.6-sol",
+                    "syncbar-cursor/auto",
+                ]).validated().model,
             "composer-2.5")
+        XCTAssertEqual(
+            try CursorBridgePreferences(exposedModelIDs: [
+                "syncbar-cursor/gpt-5.6-sol",
+                "syncbar-cursor/auto",
+            ]).validated().exposedModelIDs,
+            ["syncbar-cursor/auto", "syncbar-cursor/gpt-5.6-sol"])
         XCTAssertThrowsError(try CursorBridgePreferences(port: 80).validated())
         XCTAssertThrowsError(try CursorBridgePreferences(model: "bad model").validated())
         XCTAssertThrowsError(try CursorBridgePreferences(agentPath: "agent").validated())
+        XCTAssertThrowsError(try CursorBridgePreferences(exposedModelIDs: []).validated())
+        XCTAssertThrowsError(try CursorBridgePreferences(exposedModelIDs: [
+            "syncbar-cursor/auto",
+            "syncbar-cursor/auto",
+        ]).validated())
+        XCTAssertThrowsError(try CursorBridgePreferences(exposedModelIDs: ["gpt-5.6-sol"]).validated())
         XCTAssertThrowsError(try CursorBridgePreferences(bridgeToken: "short").validated())
+    }
+
+    func testCursorBridgePreferencesDecodeLegacyFileAsExposeAll() throws {
+        let legacy = """
+        {
+          "schemaVersion": 2,
+          "port": 32125,
+          "model": "auto",
+          "bridgeToken": "\(testCursorBridgeToken)"
+        }
+        """
+
+        let preferences = try JSONDecoder().decode(
+            CursorBridgePreferences.self,
+            from: Data(legacy.utf8))
+
+        XCTAssertNil(try preferences.validated().exposedModelIDs)
     }
 
     @MainActor
@@ -449,7 +482,8 @@ final class CursorBridgeTests: XCTestCase {
         let expected = CursorBridgePreferences(
             port: 41_001,
             model: "composer-2.5",
-            agentPath: "/opt/homebrew/bin/agent")
+            agentPath: "/opt/homebrew/bin/agent",
+            exposedModelIDs: ["syncbar-cursor/composer-2.5"])
 
         try store.save(expected)
 

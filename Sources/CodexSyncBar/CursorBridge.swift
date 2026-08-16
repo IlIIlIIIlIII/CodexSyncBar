@@ -9,6 +9,7 @@ struct CursorBridgePreferences: Codable, Equatable, Sendable {
     var port = Self.defaultPort
     var model = "auto"
     var agentPath: String?
+    var exposedModelIDs: [String]?
     var bridgeToken: String
 
     init(
@@ -16,12 +17,14 @@ struct CursorBridgePreferences: Codable, Equatable, Sendable {
         port: Int = Self.defaultPort,
         model: String = "auto",
         agentPath: String? = nil,
+        exposedModelIDs: [String]? = nil,
         bridgeToken: String = Self.makeBridgeToken())
     {
         self.schemaVersion = schemaVersion
         self.port = port
         self.model = model
         self.agentPath = agentPath
+        self.exposedModelIDs = exposedModelIDs
         self.bridgeToken = bridgeToken
     }
 
@@ -44,11 +47,24 @@ struct CursorBridgePreferences: Codable, Equatable, Sendable {
                 throw AppError.processFailed("Cursor CLI 경로는 절대 경로여야 합니다.")
             }
         }
+        if let exposedModelIDs {
+            guard !exposedModelIDs.isEmpty,
+                  exposedModelIDs.count <= 512,
+                  Set(exposedModelIDs).count == exposedModelIDs.count,
+                  exposedModelIDs.allSatisfy({ modelID in
+                      modelID.hasPrefix("syncbar-cursor/")
+                          && CursorModelCatalog.isValidCodexModelID(modelID)
+                  })
+            else {
+                throw AppError.processFailed("Codex에 노출할 Cursor 모델 목록이 올바르지 않습니다.")
+            }
+        }
         guard bridgeToken.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
             throw AppError.processFailed("Cursor 브리지 인증 token 형식이 올바르지 않습니다.")
         }
         var value = self
         value.model = normalizedModel
+        value.exposedModelIDs = exposedModelIDs?.sorted()
         return value
     }
 

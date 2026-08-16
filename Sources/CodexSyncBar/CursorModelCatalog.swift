@@ -290,6 +290,10 @@ struct CursorModelCatalog: Equatable, Sendable {
             parsedVariants.append(variant)
         }
 
+        self.init(variants: parsedVariants)
+    }
+
+    private init(variants parsedVariants: [CursorModelVariant]) {
         variants = parsedVariants
 
         var baseSlugs: [String] = []
@@ -313,6 +317,31 @@ struct CursorModelCatalog: Equatable, Sendable {
                 group: Self.group(for: baseSlug),
                 variants: familyVariants)
         }
+    }
+
+    func exposingCodexModelIDs(_ modelIDs: [String]?) throws -> CursorModelCatalog {
+        guard let modelIDs else { return self }
+        let requested = Set(modelIDs)
+        let available = Set(pickerPresets.map(\.id))
+        guard !requested.isEmpty,
+              requested.count == modelIDs.count,
+              requested.isSubset(of: available)
+        else {
+            throw AppError.processFailed(
+                "Codex에 노출할 Cursor 모델이 현재 계정의 모델 목록과 일치하지 않습니다.")
+        }
+
+        let filteredVariants = variants.filter { variant in
+            requested.contains(Self.codexModelID(
+                baseSlug: variant.baseSlug,
+                thinking: variant.thinking))
+        }
+        let filtered = CursorModelCatalog(variants: filteredVariants)
+        guard Set(filtered.pickerPresets.map(\.id)) == requested else {
+            throw AppError.processFailed(
+                "선택한 Cursor 모델을 Codex 모델 선택기에 안전하게 노출할 수 없습니다.")
+        }
+        return filtered
     }
 
     var sections: [CursorModelSection] {

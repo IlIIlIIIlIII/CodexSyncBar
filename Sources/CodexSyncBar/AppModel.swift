@@ -1858,7 +1858,8 @@ final class AppModel: ObservableObject {
     func enableCursorProvider(
         model: String,
         port: Int,
-        agentPath: String?) async
+        agentPath: String?,
+        exposedModelIDs: [String]? = nil) async
     {
         guard cursorManagementCanBegin else { return }
         isManagingCursorProvider = true
@@ -1870,23 +1871,38 @@ final class AppModel: ObservableObject {
         var activatedConfiguration = false
         do {
             let normalizedPath = agentPath?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let preferences = try CursorBridgePreferences(
+            let requestedPreferences = try CursorBridgePreferences(
                 port: port,
                 model: model,
                 agentPath: normalizedPath?.isEmpty == true ? nil : normalizedPath,
+                exposedModelIDs: exposedModelIDs,
                 bridgeToken: cursorBridgePreferences.bridgeToken).validated()
             let catalog = try await cursorBridgeService.loadModelCatalog(
-                preferredAgentPath: preferences.agentPath)
-            guard catalog.variants.contains(where: { $0.slug == preferences.model }) else {
+                preferredAgentPath: requestedPreferences.agentPath)
+            let exposedCatalog = try catalog.exposingCodexModelIDs(
+                requestedPreferences.exposedModelIDs)
+            guard exposedCatalog.variants.contains(where: {
+                $0.slug == requestedPreferences.model
+            }) else {
                 throw AppError.processFailed(
-                    "현재 Cursor 계정에서 사용할 수 없는 모델입니다: \(preferences.model)")
+                    "기본 Cursor 모델은 Codex에 노출할 모델 목록에 포함되어야 합니다: \(requestedPreferences.model)")
             }
-            guard let codexPickerModel = catalog.preferredPickerModelID(
-                forFlatSlug: preferences.model)
+            guard let codexPickerModel = exposedCatalog.preferredPickerModelID(
+                forFlatSlug: requestedPreferences.model)
             else {
                 throw AppError.processFailed(
-                    "선택한 Cursor 모델을 Codex 모델 선택기에 연결할 수 없습니다: \(preferences.model)")
+                    "선택한 Cursor 모델을 Codex 모델 선택기에 연결할 수 없습니다: \(requestedPreferences.model)")
             }
+            let allPickerIDs = Set(catalog.pickerPresets.map(\.id))
+            let selectedPickerIDs = Set(exposedCatalog.pickerPresets.map(\.id))
+            let preferences = try CursorBridgePreferences(
+                port: requestedPreferences.port,
+                model: requestedPreferences.model,
+                agentPath: requestedPreferences.agentPath,
+                exposedModelIDs: selectedPickerIDs == allPickerIDs
+                    ? nil
+                    : selectedPickerIDs.sorted(),
+                bridgeToken: requestedPreferences.bridgeToken).validated()
             cursorModelCatalog = catalog
             cursorModelCatalogError = nil
             if !wasActive,
@@ -1899,7 +1915,7 @@ final class AppModel: ObservableObject {
                     "기존 Codex 설정이 SyncBar 관리 모델 카탈로그 경로를 이미 사용하고 있어 파일을 덮어쓰지 않았습니다: \(configuredCatalogPath)")
             }
             previousCatalogData = try await codexCursorModelCatalogService.install(
-                cursorCatalog: catalog)
+                cursorCatalog: exposedCatalog)
             installedCatalog = true
             let runtimeStatus = await cursorBridgeService.start(
                 preferences: preferences,
@@ -2112,11 +2128,13 @@ final class AppModel: ObservableObject {
         on deviceID: String,
         apiKey: String) async throws -> CursorRemoteProvisioningResult
     {
-        let catalogModels = cursorModelCatalog.variants.map(\.slug)
+        let exposedCatalog = try cursorModelCatalog.exposingCodexModelIDs(
+            cursorBridgePreferences.exposedModelIDs)
+        let catalogModels = exposedCatalog.variants.map(\.slug)
         let models = catalogModels.contains(cursorBridgePreferences.model)
             ? catalogModels
             : [cursorBridgePreferences.model] + catalogModels
-        let catalogParameters = cursorModelCatalog.acpModelParametersBySlug
+        let catalogParameters = exposedCatalog.acpModelParametersBySlug
         let modelParameters = Dictionary(uniqueKeysWithValues: models.map { slug in
             let parsedFallback = CursorModelCatalog(cliOutput: "\(slug) - \(slug)")
                 .acpModelParametersBySlug[slug]
