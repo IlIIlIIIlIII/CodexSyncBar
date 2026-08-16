@@ -14,9 +14,13 @@ struct CodexCursorActivationState: Codable, Equatable, Sendable {
     let previousModelAssignment: String?
     let previousProviderAssignment: String?
     let previousCatalogAssignment: String?
+    let previousOpenAIBaseURLAssignment: String?
+    let previousResponsesWebsocketsAssignment: String?
     let installedModelAssignment: String
     let installedProviderAssignment: String
     let installedCatalogAssignment: String
+    let installedOpenAIBaseURLAssignment: String?
+    let installedResponsesWebsocketsAssignment: String?
     let installedCatalogPath: String
     let installedManagedSuffix: String
     let installedModel: String
@@ -30,9 +34,13 @@ struct CodexCursorActivationState: Codable, Equatable, Sendable {
         previousModelAssignment: String?,
         previousProviderAssignment: String?,
         previousCatalogAssignment: String?,
+        previousOpenAIBaseURLAssignment: String? = nil,
+        previousResponsesWebsocketsAssignment: String? = nil,
         installedModelAssignment: String,
         installedProviderAssignment: String,
         installedCatalogAssignment: String,
+        installedOpenAIBaseURLAssignment: String? = nil,
+        installedResponsesWebsocketsAssignment: String? = nil,
         installedCatalogPath: String,
         installedManagedSuffix: String,
         installedModel: String,
@@ -46,9 +54,13 @@ struct CodexCursorActivationState: Codable, Equatable, Sendable {
         self.previousModelAssignment = previousModelAssignment
         self.previousProviderAssignment = previousProviderAssignment
         self.previousCatalogAssignment = previousCatalogAssignment
+        self.previousOpenAIBaseURLAssignment = previousOpenAIBaseURLAssignment
+        self.previousResponsesWebsocketsAssignment = previousResponsesWebsocketsAssignment
         self.installedModelAssignment = installedModelAssignment
         self.installedProviderAssignment = installedProviderAssignment
         self.installedCatalogAssignment = installedCatalogAssignment
+        self.installedOpenAIBaseURLAssignment = installedOpenAIBaseURLAssignment
+        self.installedResponsesWebsocketsAssignment = installedResponsesWebsocketsAssignment
         self.installedCatalogPath = installedCatalogPath
         self.installedManagedSuffix = installedManagedSuffix
         self.installedModel = installedModel
@@ -64,6 +76,7 @@ struct ActiveCursorProviderConfiguration: Equatable, Sendable {
     let port: Int
     let bridgeToken: String
     let modelCatalogPath: String
+    let routesBuiltInOpenAIProvider: Bool
 }
 
 struct CodexConfigTransaction: Codable, Equatable, Sendable {
@@ -167,10 +180,13 @@ enum CodexCursorConfigEditor {
         let installedModel = "model = \"\(preferences.model)\""
         let installedProvider = "model_provider = \"\(cursorProviderID)\""
         let installedCatalog = "model_catalog_json = \"\(catalogPath)\""
+        let installedOpenAIBaseURL = "openai_base_url = \"http://127.0.0.1:\(preferences.port)/v1/\(preferences.bridgeToken)\""
 
         let previousModel: String?
         let previousProvider: String?
         let previousCatalog: String?
+        let previousOpenAIBaseURL: String?
+        let previousResponsesWebsockets: String?
         var baseText = text
         if let existingState {
             try validateState(existingState)
@@ -179,6 +195,11 @@ enum CodexCursorConfigEditor {
                 existingState.installedProviderAssignment,
                 parsed.catalog?.content.trimmingCharacters(in: .whitespaces) ==
                 existingState.installedCatalogAssignment,
+                (existingState.installedOpenAIBaseURLAssignment.map {
+                    parsed.openAIBaseURL?.content.trimmingCharacters(in: .whitespaces) == $0
+                } ?? true),
+                try responsesWebsocketsAssignment(in: baseText) ==
+                    existingState.installedResponsesWebsocketsAssignment,
                 baseText.hasSuffix(existingState.installedManagedSuffix)
             else {
                 throw AppError.processFailed(
@@ -187,6 +208,12 @@ enum CodexCursorConfigEditor {
             previousModel = existingState.previousModelAssignment
             previousProvider = existingState.previousProviderAssignment
             previousCatalog = existingState.previousCatalogAssignment
+            previousOpenAIBaseURL = existingState.installedOpenAIBaseURLAssignment == nil
+                ? parsed.openAIBaseURL?.content
+                : existingState.previousOpenAIBaseURLAssignment
+            previousResponsesWebsockets = existingState.installedResponsesWebsocketsAssignment == nil
+                ? try responsesWebsocketsAssignment(in: baseText)
+                : existingState.previousResponsesWebsocketsAssignment
             baseText.removeLast(existingState.installedManagedSuffix.count)
         } else {
             guard !containsManagedProvider(text) else {
@@ -196,6 +223,8 @@ enum CodexCursorConfigEditor {
             previousModel = parsed.model?.content
             previousProvider = parsed.provider?.content
             previousCatalog = parsed.catalog?.content
+            previousOpenAIBaseURL = parsed.openAIBaseURL?.content
+            previousResponsesWebsockets = try responsesWebsocketsAssignment(in: text)
         }
 
         try rejectProviderCollision(baseText)
@@ -203,12 +232,14 @@ enum CodexCursorConfigEditor {
             baseText,
             modelAssignment: installedModel,
             providerAssignment: installedProvider,
-            catalogAssignment: installedCatalog)
+            catalogAssignment: installedCatalog,
+            openAIBaseURLAssignment: installedOpenAIBaseURL)
+        let websocketPatch = try installResponsesWebsocketsOverride(in: patchedTop)
         let managedSuffix = makeManagedSuffix(
-            for: patchedTop,
+            for: websocketPatch.text,
             port: preferences.port,
             bridgeToken: preferences.bridgeToken)
-        let patched = patchedTop + managedSuffix
+        let patched = websocketPatch.text + managedSuffix
         let sourceHash = existingState?.sourceSHA256 ?? sha256(text)
         let state = CodexCursorActivationState(
             previousConfigurationExisted: existingState?.previousConfigurationExisted
@@ -216,9 +247,13 @@ enum CodexCursorConfigEditor {
             previousModelAssignment: previousModel,
             previousProviderAssignment: previousProvider,
             previousCatalogAssignment: previousCatalog,
+            previousOpenAIBaseURLAssignment: previousOpenAIBaseURL,
+            previousResponsesWebsocketsAssignment: previousResponsesWebsockets,
             installedModelAssignment: installedModel,
             installedProviderAssignment: installedProvider,
             installedCatalogAssignment: installedCatalog,
+            installedOpenAIBaseURLAssignment: installedOpenAIBaseURL,
+            installedResponsesWebsocketsAssignment: websocketPatch.installedAssignment,
             installedCatalogPath: catalogPath,
             installedManagedSuffix: managedSuffix,
             installedModel: preferences.model,
@@ -240,6 +275,11 @@ enum CodexCursorConfigEditor {
             state.installedProviderAssignment,
             parsed.catalog?.content.trimmingCharacters(in: .whitespaces) ==
             state.installedCatalogAssignment,
+            (state.installedOpenAIBaseURLAssignment.map {
+                parsed.openAIBaseURL?.content.trimmingCharacters(in: .whitespaces) == $0
+            } ?? true),
+            try responsesWebsocketsAssignment(in: text) ==
+                state.installedResponsesWebsocketsAssignment,
             text.hasSuffix(state.installedManagedSuffix)
         else {
             throw AppError.processFailed(
@@ -248,11 +288,16 @@ enum CodexCursorConfigEditor {
 
         var base = text
         base.removeLast(state.installedManagedSuffix.count)
+        let restoredWebsockets = try restoreResponsesWebsocketsOverride(
+            in: base,
+            installedAssignment: state.installedResponsesWebsocketsAssignment,
+            previousAssignment: state.previousResponsesWebsocketsAssignment)
         return try replaceTopLevel(
-            base,
+            restoredWebsockets,
             modelAssignment: state.previousModelAssignment,
             providerAssignment: state.previousProviderAssignment,
-            catalogAssignment: state.previousCatalogAssignment)
+            catalogAssignment: state.previousCatalogAssignment,
+            openAIBaseURLAssignment: state.previousOpenAIBaseURLAssignment)
     }
 
     private static func validateState(_ state: CodexCursorActivationState) throws {
@@ -264,6 +309,13 @@ enum CodexCursorConfigEditor {
         guard state.schemaVersion == CodexCursorActivationState.currentSchemaVersion,
               state.installedProviderAssignment == "model_provider = \"\(cursorProviderID)\"",
               state.installedCatalogAssignment == "model_catalog_json = \"\(catalogPath)\"",
+              (state.installedOpenAIBaseURLAssignment.map {
+                  $0 == "openai_base_url = \"http://127.0.0.1:\(preferences.port)/v1/\(preferences.bridgeToken)\""
+              } ?? true),
+              (state.installedResponsesWebsocketsAssignment.map {
+                  $0 == "responses_websockets = false" ||
+                      $0 == "features = { responses_websockets = false }"
+              } ?? true),
               preferences.model == state.installedModel,
               state.installedManagedSuffix.contains(cursorMarkerBegin),
               state.installedManagedSuffix.contains(cursorMarkerEnd)
@@ -276,6 +328,135 @@ enum CodexCursorConfigEditor {
         guard let line else { return false }
         guard let model = basicStringValue(in: line.content, key: "model") else { return false }
         return CursorModelCatalog.isValidCodexModelID(model)
+    }
+
+    private struct ResponsesWebsocketsLocation {
+        let assignment: CodexConfigLine?
+        let inlineFeatures: CodexConfigLine?
+        let featuresHeader: CodexConfigLine?
+    }
+
+    private static func responsesWebsocketsLocation(
+        in text: String) throws -> ResponsesWebsocketsLocation
+    {
+        var featuresHeaders: [CodexConfigLine] = []
+        var assignments: [CodexConfigLine] = []
+        var inlineFeatures: [CodexConfigLine] = []
+        var inFeatures = false
+        var beforeFirstTable = true
+        for line in scanLines(text) {
+            let trimmed = line.content.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                beforeFirstTable = false
+                let syntax = String(trimmed.split(separator: "#", maxSplits: 1).first ?? "")
+                    .trimmingCharacters(in: .whitespaces)
+                inFeatures = syntax == "[features]"
+                if inFeatures { featuresHeaders.append(line) }
+                continue
+            }
+            guard !trimmed.isEmpty,
+                  !trimmed.hasPrefix("#"),
+                  let equal = trimmed.firstIndex(of: "=")
+            else { continue }
+            let key = trimmed[..<equal].trimmingCharacters(in: .whitespaces)
+            if beforeFirstTable, key == "features" {
+                inlineFeatures.append(line)
+            }
+            guard inFeatures else { continue }
+            if key == "\"responses_websockets\"" || key == "'responses_websockets'" {
+                throw AppError.processFailed(
+                    "Codex features.responses_websockets key가 quoted 형식이라 자동 수정하지 않았습니다.")
+            }
+            if key == "responses_websockets" {
+                let value = trimmed[trimmed.index(after: equal)...]
+                    .trimmingCharacters(in: .whitespaces)
+                let syntax = String(value.split(separator: "#", maxSplits: 1).first ?? "")
+                    .trimmingCharacters(in: .whitespaces)
+                guard syntax == "true" || syntax == "false" else {
+                    throw AppError.processFailed(
+                        "Codex features.responses_websockets 값이 안전한 boolean이 아닙니다.")
+                }
+                assignments.append(line)
+            }
+        }
+        guard featuresHeaders.count <= 1,
+              assignments.count <= 1,
+              inlineFeatures.count <= 1,
+              !(featuresHeaders.count == 1 && inlineFeatures.count == 1)
+        else {
+            throw AppError.processFailed(
+                "Codex features 설정이 중복되어 responses_websockets를 자동 수정하지 않았습니다.")
+        }
+        if let inline = inlineFeatures.first {
+            let normalized = inline.content.trimmingCharacters(in: .whitespaces)
+            guard normalized == "features = { responses_websockets = false }" else {
+                throw AppError.processFailed(
+                    "Codex 최상위 inline features 설정은 안전하게 보존할 수 없어 자동 수정하지 않았습니다.")
+            }
+        }
+        return ResponsesWebsocketsLocation(
+            assignment: assignments.first,
+            inlineFeatures: inlineFeatures.first,
+            featuresHeader: featuresHeaders.first)
+    }
+
+    private static func responsesWebsocketsAssignment(in text: String) throws -> String? {
+        let location = try responsesWebsocketsLocation(in: text)
+        return (location.assignment ?? location.inlineFeatures)?.content
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func installResponsesWebsocketsOverride(
+        in text: String) throws -> (text: String, installedAssignment: String)
+    {
+        let location = try responsesWebsocketsLocation(in: text)
+        if let line = location.assignment {
+            var result = text
+            result.replaceSubrange(
+                line.fullRange,
+                with: "responses_websockets = false" + line.ending)
+            return (result, "responses_websockets = false")
+        }
+        if location.inlineFeatures != nil {
+            return (text, "features = { responses_websockets = false }")
+        }
+        let newline = preferredNewline(in: text)
+        if let header = location.featuresHeader {
+            var result = text
+            result.insert(
+                contentsOf: "responses_websockets = false" + newline,
+                at: header.fullRange.upperBound)
+            return (result, "responses_websockets = false")
+        }
+        let parsed = try parseTopLevel(text)
+        var result = text
+        result.insert(
+            contentsOf: "features = { responses_websockets = false }" + newline,
+            at: parsed.firstTableStart)
+        return (result, "features = { responses_websockets = false }")
+    }
+
+    private static func restoreResponsesWebsocketsOverride(
+        in text: String,
+        installedAssignment: String?,
+        previousAssignment: String?) throws -> String
+    {
+        guard let installedAssignment else { return text }
+        let location = try responsesWebsocketsLocation(in: text)
+        let line = installedAssignment.hasPrefix("features =")
+            ? location.inlineFeatures
+            : location.assignment
+        guard let line,
+              line.content.trimmingCharacters(in: .whitespaces) == installedAssignment
+        else {
+            throw AppError.processFailed(
+                "Codex features.responses_websockets 설정이 변경되어 자동 복구하지 않았습니다.")
+        }
+        var result = text
+        result.replaceSubrange(
+            line.fullRange,
+            with: previousAssignment.map { $0 + line.ending } ?? "")
+        return result
     }
 
     private static func makeManagedSuffix(
@@ -314,7 +495,8 @@ enum CodexCursorConfigEditor {
         _ text: String,
         modelAssignment: String?,
         providerAssignment: String?,
-        catalogAssignment: String?) throws -> String
+        catalogAssignment: String?,
+        openAIBaseURLAssignment: String?) throws -> String
     {
         let parsed = try parseTopLevel(text)
         var operations: [CodexConfigOperation] = []
@@ -332,10 +514,16 @@ enum CodexCursorConfigEditor {
         schedule(parsed.model, value: modelAssignment)
         schedule(parsed.provider, value: providerAssignment)
         schedule(parsed.catalog, value: catalogAssignment)
+        schedule(parsed.openAIBaseURL, value: openAIBaseURLAssignment)
 
         if !insertions.isEmpty {
             let newline = preferredNewline(in: text)
-            let existingAssignments = [parsed.model, parsed.provider, parsed.catalog].compactMap { $0 }
+            let existingAssignments = [
+                parsed.model,
+                parsed.provider,
+                parsed.catalog,
+                parsed.openAIBaseURL,
+            ].compactMap { $0 }
             let insertionIndex = existingAssignments
                 .map(\.fullRange.upperBound)
                 .max() ?? text.startIndex
@@ -386,11 +574,13 @@ enum CodexCursorConfigEditor {
         model: CodexConfigLine?,
         provider: CodexConfigLine?,
         catalog: CodexConfigLine?,
+        openAIBaseURL: CodexConfigLine?,
         firstTableStart: String.Index)
     {
         var modelLines: [CodexConfigLine] = []
         var providerLines: [CodexConfigLine] = []
         var catalogLines: [CodexConfigLine] = []
+        var openAIBaseURLLines: [CodexConfigLine] = []
         var firstTableStart = text.endIndex
         for line in scanLines(text) {
             let trimmed = line.content.trimmingCharacters(in: .whitespaces)
@@ -410,12 +600,15 @@ enum CodexCursorConfigEditor {
             let key = trimmed[..<equal].trimmingCharacters(in: .whitespaces)
             if key == "\"model\"" || key == "'model'" ||
                 key == "\"model_provider\"" || key == "'model_provider'" ||
-                key == "\"model_catalog_json\"" || key == "'model_catalog_json'"
+                key == "\"model_catalog_json\"" || key == "'model_catalog_json'" ||
+                key == "\"openai_base_url\"" || key == "'openai_base_url'"
             {
                 throw AppError.processFailed(
                     "Codex 최상위 model 관련 key가 quoted 형식이라 자동 수정하지 않았습니다.")
             }
-            guard key == "model" || key == "model_provider" || key == "model_catalog_json" else {
+            guard key == "model" || key == "model_provider" ||
+                    key == "model_catalog_json" || key == "openai_base_url"
+            else {
                 continue
             }
             let value = trimmed[trimmed.index(after: equal)...].trimmingCharacters(in: .whitespaces)
@@ -425,13 +618,23 @@ enum CodexCursorConfigEditor {
             switch key {
             case "model": modelLines.append(line)
             case "model_provider": providerLines.append(line)
-            default: catalogLines.append(line)
+            case "model_catalog_json": catalogLines.append(line)
+            default: openAIBaseURLLines.append(line)
             }
         }
-        guard modelLines.count <= 1, providerLines.count <= 1, catalogLines.count <= 1 else {
+        guard modelLines.count <= 1,
+              providerLines.count <= 1,
+              catalogLines.count <= 1,
+              openAIBaseURLLines.count <= 1
+        else {
             throw AppError.processFailed("Codex 최상위 model 관련 설정이 중복되어 자동 수정하지 않았습니다.")
         }
-        return (modelLines.first, providerLines.first, catalogLines.first, firstTableStart)
+        return (
+            modelLines.first,
+            providerLines.first,
+            catalogLines.first,
+            openAIBaseURLLines.first,
+            firstTableStart)
     }
 
     private static func validateModelCatalogPath(_ path: String) throws -> String {
@@ -624,7 +827,9 @@ struct CodexConfigService {
             model: state.installedModel,
             port: state.installedPort,
             bridgeToken: state.bridgeToken,
-            modelCatalogPath: state.installedCatalogPath)
+            modelCatalogPath: state.installedCatalogPath,
+            routesBuiltInOpenAIProvider: state.installedOpenAIBaseURLAssignment != nil &&
+                state.installedResponsesWebsocketsAssignment != nil)
     }
 
     @discardableResult

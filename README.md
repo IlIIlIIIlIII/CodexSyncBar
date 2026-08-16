@@ -102,6 +102,7 @@ shasum -a 256 -c SHA256SUMS
 3. SyncBar의 **설정 → 모델**에서 base 모델과 필요한 경우 Thinking, localhost 포트를 선택한 뒤 **Codex 기본 모델로 사용**을 누릅니다.
 4. SyncBar가 기존 Codex 모델을 보존한 병합 카탈로그를 만들고 최상위 `model_catalog_json`에 연결합니다. Cursor의 exact variant는 기본 모델과 Thinking 여부로 묶어 `Cursor · GPT · …`, `Cursor · Codex · …`처럼 표시합니다. Reasoning과 Fast는 Codex 앱의 기존 선택창에서 고르며, 목록에 실제로 존재하는 조합만 광고하고 exact Cursor slug로 변환합니다.
 5. SyncBar가 캐시된 로컬 Codex `app-server`만 종료해 시작 시 카탈로그와 설정을 다시 읽게 합니다. 새 Codex 작업은 `syncbar_cursor_bridge` provider를 사용하고, 실행 중인 일반 Codex CLI는 종료하지 않습니다.
+   활성화 전에 만든 OpenAI 작업은 관리되는 `openai_base_url`을 통해 같은 로컬 브리지로 들어오므로, 작업 안에서 Cursor 모델로 바꿔도 ChatGPT 모델 검증 오류 없이 동작합니다. 기존 OpenAI 모델 요청은 인증 헤더를 보존한 채 공식 OpenAI/ChatGPT endpoint로만 전달합니다.
 6. SSH에서도 사용할 때는 Cursor Dashboard에서 만든 User API Key를 **설정 → 모델 → SSH 원격 Cursor**에 저장합니다. 키는 이 Mac의 기기 전용 Keychain에 보관되며, 활성 SSH 장치로 동기화할 때 stdin으로만 전달됩니다.
 7. 원격 호스트에는 공식 Cursor 설치 스크립트로 `agent`를 자동 설치하고 SyncBar 전용 bridge·manager와 격리된 Cursor 인증 저장소를 구성합니다. macOS Cursor 로그인/Keychain 파일을 Linux에 복사하거나 변환하지 않습니다.
 8. **이전 Codex 모델로 복구**를 누르면 SyncBar가 바꾼 로컬 및 연결 가능한 SSH 장치의 최상위 `model`·`model_provider`·`model_catalog_json`과 관리 provider 블록을 원래 값으로 되돌리고, 원격 전용 runtime·Cursor 인증 저장소도 제거합니다. 설정이 외부에서 바뀌었다면 덮어쓰지 않고 해당 장치를 정리 실패로 표시합니다.

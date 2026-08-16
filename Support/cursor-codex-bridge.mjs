@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import { inflateRawSync } from "node:zlib";
+import { inflateRawSync, zstdDecompressSync } from "node:zlib";
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_HOST = "127.0.0.1";
@@ -3168,6 +3168,12 @@ function hasValidBridgeToken(request, configuredToken) {
   return timingSafeEqual(Buffer.from(supplied), Buffer.from(configuredToken));
 }
 
+function hasValidBridgePathToken(pathname, configuredToken, resource) {
+  const match = pathname.match(/^\/v1\/([a-f0-9]{64})\/(responses|models)$/);
+  if (!match || match[2] !== resource) return false;
+  return timingSafeEqual(Buffer.from(match[1]), Buffer.from(configuredToken));
+}
+
 function jsonError(error) {
   const bridgeError = error instanceof BridgeError ? error : new BridgeError("Internal bridge error");
   return {
@@ -3186,7 +3192,25 @@ async function readJSONBody(request) {
     if (bytes > MAX_BODY_BYTES) throw new BridgeError("Request body is too large", 413, "request_too_large");
     chunks.push(chunk);
   }
-  const rawBody = Buffer.concat(chunks);
+  const encodedBody = Buffer.concat(chunks);
+  const contentEncoding = String(request.headers["content-encoding"] ?? "identity")
+    .trim()
+    .toLowerCase();
+  let rawBody;
+  if (contentEncoding === "" || contentEncoding === "identity") {
+    rawBody = encodedBody;
+  } else if (contentEncoding === "zstd") {
+    try {
+      rawBody = zstdDecompressSync(encodedBody, { maxOutputLength: MAX_BODY_BYTES });
+    } catch {
+      throw new BridgeError("Request body has invalid zstd encoding", 400, "invalid_content_encoding");
+    }
+  } else {
+    throw new BridgeError("Request Content-Encoding is not supported", 415, "unsupported_content_encoding");
+  }
+  if (rawBody.length > MAX_BODY_BYTES) {
+    throw new BridgeError("Request body is too large", 413, "request_too_large");
+  }
   try {
     return { body: JSON.parse(rawBody.toString("utf8")), rawBody };
   } catch {
@@ -3408,17 +3432,25 @@ export function createBridgeServer(config, testHooks) {
       }));
       return;
     }
-    if (request.method === "GET" && requestURL.pathname === "/v1/models") {
+    const modelsPath = requestURL.pathname === "/v1/models" ||
+      hasValidBridgePathToken(requestURL.pathname, config.bridgeToken, "models");
+    if (request.method === "GET" && modelsPath) {
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ models: [] }));
       return;
     }
-    if (request.method !== "POST" || requestURL.pathname !== "/v1/responses") {
+    const pathAuthenticated = hasValidBridgePathToken(
+      requestURL.pathname,
+      config.bridgeToken,
+      "responses",
+    );
+    const responsesPath = requestURL.pathname === "/v1/responses" || pathAuthenticated;
+    if (request.method !== "POST" || !responsesPath) {
       response.writeHead(404, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: { message: "Not found", type: "not_found" } }));
       return;
     }
-    if (!hasValidBridgeToken(request, config.bridgeToken)) {
+    if (!pathAuthenticated && !hasValidBridgeToken(request, config.bridgeToken)) {
       response.writeHead(401, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: { message: "Invalid bridge token", type: "authentication_error" } }));
       return;

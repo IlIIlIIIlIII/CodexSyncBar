@@ -7,6 +7,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { zstdCompressSync } from "node:zlib";
 
 import {
   BridgeError,
@@ -2104,6 +2105,57 @@ test("native Codex models proxy only to branded official-upstream test targets",
     ]) {
       assert.equal(chatGPTObserved.headers[stripped], undefined, stripped);
     }
+
+    const builtInProviderResponse = await fetch(
+      `http://127.0.0.1:${address.port}/v1/${bridgeToken}/responses`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer chatgpt-built-in-provider-token",
+          "chatgpt-account-id": "account-fixture",
+          "content-type": "application/json",
+        },
+        body: chatGPTBody,
+      },
+    );
+    assert.equal(builtInProviderResponse.status, 429);
+    assert.equal((await builtInProviderResponse.json()).error.message, "rate limited");
+    const builtInObserved = observed.at(-1);
+    assert.equal(builtInObserved.path, "/chatgpt/responses");
+    assert.equal(
+      builtInObserved.headers.authorization,
+      "Bearer chatgpt-built-in-provider-token",
+    );
+
+    const compressedBuiltInProviderResponse = await fetch(
+      `http://127.0.0.1:${address.port}/v1/${bridgeToken}/responses`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer chatgpt-built-in-provider-token",
+          "chatgpt-account-id": "account-fixture",
+          "content-encoding": "zstd",
+          "content-type": "application/json",
+        },
+        body: zstdCompressSync(Buffer.from(chatGPTBody)),
+      },
+    );
+    assert.equal(compressedBuiltInProviderResponse.status, 429);
+    assert.equal(observed.at(-1).rawBody, chatGPTBody);
+
+    const wrongPathToken = await fetch(
+      `http://127.0.0.1:${address.port}/v1/${"0".repeat(64)}/responses`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer chatgpt-built-in-provider-token",
+          "chatgpt-account-id": "account-fixture",
+          "content-type": "application/json",
+        },
+        body: chatGPTBody,
+      },
+    );
+    assert.equal(wrongPathToken.status, 404);
 
     const apiResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",

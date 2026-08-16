@@ -1929,8 +1929,33 @@ final class AppModel: ObservableObject {
     func reconcileCursorBridgeRuntime() async {
         guard !isReadmeDemo else { return }
         if isCursorProviderActive {
+            var reloadedLegacyConfiguration = false
+            do {
+                if let active = try codexConfigService.activeCursorProviderConfiguration(),
+                   !active.routesBuiltInOpenAIProvider
+                {
+                    try codexConfigService.activate(
+                        model: active.model,
+                        port: active.port,
+                        bridgeToken: active.bridgeToken,
+                        modelCatalogPath: active.modelCatalogPath)
+                    reloadedLegacyConfiguration = true
+                }
+            } catch {
+                cursorBridgeStatus = .failed(error.localizedDescription)
+                cursorBridgeError = error.localizedDescription
+                return
+            }
             cursorBridgeStatus = await cursorBridgeService.start(
                 preferences: cursorBridgePreferences)
+            if reloadedLegacyConfiguration, cursorBridgeStatus.isHealthy {
+                do {
+                    try await switchService.reloadLocalCodexConfiguration()
+                } catch {
+                    cursorBridgeError = "기존 Codex 작업용 provider 경로를 적용했지만 Codex reload에 실패했습니다: \(error.localizedDescription)"
+                    return
+                }
+            }
         } else {
             cursorBridgeStatus = await cursorBridgeService.refreshAvailability(
                 preferences: cursorBridgePreferences)

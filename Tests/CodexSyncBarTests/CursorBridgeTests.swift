@@ -166,6 +166,7 @@ final class CursorBridgeTests: XCTestCase {
             "model = \"gpt-5.6-sol\" # restore exactly",
             "model_provider = \"openai\"",
             "model_catalog_json = \"/previous/catalog.json\" # restore exactly",
+            "openai_base_url = \"https://example.test/original/v1\" # restore exactly",
             "personality = \"pragmatic\"",
             "",
             "[projects.\"/tmp/example\"]",
@@ -186,9 +187,16 @@ final class CursorBridgeTests: XCTestCase {
             "http_headers = { \"X-SyncBar-Bridge-Token\" = \"\(defaultToken)\", originator = \"codex_cli_rs\" }"))
         XCTAssertTrue(patch.text.contains(
             "model_catalog_json = \"/managed/cursor-catalog.json\"\r\n"))
+        XCTAssertTrue(patch.text.contains(
+            "openai_base_url = \"http://127.0.0.1:32125/v1/\(defaultToken)\"\r\n"))
+        XCTAssertTrue(patch.text.contains(
+            "features = { responses_websockets = false }\r\n"))
         XCTAssertEqual(
             patch.state.previousCatalogAssignment,
             "model_catalog_json = \"/previous/catalog.json\" # restore exactly")
+        XCTAssertEqual(
+            patch.state.previousOpenAIBaseURLAssignment,
+            "openai_base_url = \"https://example.test/original/v1\" # restore exactly")
         XCTAssertTrue(patch.text.contains("personality = \"pragmatic\"\r\n"))
         XCTAssertEqual(
             try CodexCursorConfigEditor.deactivate(patch.text, state: patch.state),
@@ -203,6 +211,8 @@ final class CursorBridgeTests: XCTestCase {
             "model = \"auto\"",
             "model_provider = \"syncbar_cursor_bridge\"",
             "model_catalog_json = \"/tmp/codex-syncbar-cursor-model-catalog.json\"",
+            "openai_base_url = \"http://127.0.0.1:32126/v1/\(String(repeating: "0", count: 64))\"",
+            "features = { responses_websockets = false }",
             "",
         ].joined(separator: "\n")))
         XCTAssertEqual(
@@ -224,8 +234,35 @@ final class CursorBridgeTests: XCTestCase {
 
         XCTAssertTrue(second.text.contains("model = \"claude-4-sonnet\""))
         XCTAssertTrue(second.text.contains("127.0.0.1:32130/v1"))
+        XCTAssertTrue(second.text.contains(
+            "openai_base_url = \"http://127.0.0.1:32130/v1/\(String(repeating: "0", count: 64))\""))
         XCTAssertEqual(
             try CodexCursorConfigEditor.deactivate(second.text, state: second.state),
+            original)
+    }
+
+    func testCodexCursorConfigDisablesWebsocketsInExistingFeaturesTableAndRestoresIt() throws {
+        let original = [
+            "model = \"gpt-5.6-sol\"",
+            "model_provider = \"openai\"",
+            "",
+            "[features]",
+            "responses_websockets = true # restore exactly",
+            "multi_agent = true",
+            "",
+        ].joined(separator: "\n")
+        let patch = try CodexCursorConfigEditor.activate(
+            original,
+            model: "syncbar-cursor/cursor-grok-4.6",
+            port: 32_125)
+
+        XCTAssertTrue(patch.text.contains(
+            "[features]\nresponses_websockets = false\nmulti_agent = true"))
+        XCTAssertEqual(
+            patch.state.previousResponsesWebsocketsAssignment,
+            "responses_websockets = true # restore exactly")
+        XCTAssertEqual(
+            try CodexCursorConfigEditor.deactivate(patch.text, state: patch.state),
             original)
     }
 
@@ -240,6 +277,14 @@ final class CursorBridgeTests: XCTestCase {
             port: 32_125))
         XCTAssertThrowsError(try CodexCursorConfigEditor.activate(
             "\"model_catalog_json\" = \"/one.json\"\n",
+            model: "auto",
+            port: 32_125))
+        XCTAssertThrowsError(try CodexCursorConfigEditor.activate(
+            "openai_base_url = \"https://one.test/v1\"\nopenai_base_url = \"https://two.test/v1\"\n",
+            model: "auto",
+            port: 32_125))
+        XCTAssertThrowsError(try CodexCursorConfigEditor.activate(
+            "\"openai_base_url\" = \"https://one.test/v1\"\n",
             model: "auto",
             port: 32_125))
         XCTAssertThrowsError(try CodexCursorConfigEditor.activate(
@@ -273,6 +318,12 @@ final class CursorBridgeTests: XCTestCase {
         XCTAssertThrowsError(try CodexCursorConfigEditor.deactivate(
             catalogChanged,
             state: patch.state))
+        let baseURLChanged = patch.text.replacingOccurrences(
+            of: "openai_base_url = \"http://127.0.0.1:32125/v1/\(String(repeating: "0", count: 64))\"",
+            with: "openai_base_url = \"https://someone-elses.example/v1\"")
+        XCTAssertThrowsError(try CodexCursorConfigEditor.deactivate(
+            baseURLChanged,
+            state: patch.state))
         let managedSuffixChanged = patch.text.replacingOccurrences(
             of: "Cursor Subscription (local SyncBar bridge)",
             with: "externally changed provider")
@@ -302,11 +353,15 @@ final class CursorBridgeTests: XCTestCase {
 
         XCTAssertTrue(try service.isActive())
         let active = try String(contentsOf: config, encoding: .utf8)
-        XCTAssertTrue(active.contains("# preserved\n[notice]"))
+        XCTAssertTrue(active.contains("# preserved\n"))
+        XCTAssertTrue(active.contains("features = { responses_websockets = false }\n[notice]"))
         XCTAssertTrue(active.contains("model_catalog_json = \"\(catalogPath)\""))
         XCTAssertEqual(
             try service.activeCursorProviderConfiguration()?.modelCatalogPath,
             catalogPath)
+        XCTAssertEqual(
+            try service.activeCursorProviderConfiguration()?.routesBuiltInOpenAIProvider,
+            true)
         let activationMode = try FileManager.default.attributesOfItem(
             atPath: service.activationURL.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(activationMode?.intValue, 0o600)
