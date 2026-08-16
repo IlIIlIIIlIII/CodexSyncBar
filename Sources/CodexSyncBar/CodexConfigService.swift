@@ -174,8 +174,7 @@ enum CodexCursorConfigEditor {
         var baseText = text
         if let existingState {
             try validateState(existingState)
-            guard parsed.model?.content.trimmingCharacters(in: .whitespaces) ==
-                existingState.installedModelAssignment,
+            guard modelAssignmentIsValid(parsed.model),
                 parsed.provider?.content.trimmingCharacters(in: .whitespaces) ==
                 existingState.installedProviderAssignment,
                 parsed.catalog?.content.trimmingCharacters(in: .whitespaces) ==
@@ -236,8 +235,7 @@ enum CodexCursorConfigEditor {
     {
         try validateState(state)
         let parsed = try parseTopLevel(text)
-        guard parsed.model?.content.trimmingCharacters(in: .whitespaces) ==
-            state.installedModelAssignment,
+        guard modelAssignmentIsValid(parsed.model),
             parsed.provider?.content.trimmingCharacters(in: .whitespaces) ==
             state.installedProviderAssignment,
             parsed.catalog?.content.trimmingCharacters(in: .whitespaces) ==
@@ -272,6 +270,12 @@ enum CodexCursorConfigEditor {
         else {
             throw AppError.processFailed("Cursor 브리지 원복 기록이 올바르지 않습니다.")
         }
+    }
+
+    private static func modelAssignmentIsValid(_ line: CodexConfigLine?) -> Bool {
+        guard let line else { return false }
+        guard let model = basicStringValue(in: line.content, key: "model") else { return false }
+        return CursorModelCatalog.isValidCodexModelID(model)
     }
 
     private static func makeManagedSuffix(

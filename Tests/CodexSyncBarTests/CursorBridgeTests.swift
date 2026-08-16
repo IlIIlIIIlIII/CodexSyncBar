@@ -177,17 +177,23 @@ final class CursorBridgeTests: XCTestCase {
 
         let original = "model = \"gpt-5.6-sol\"\nmodel_provider = \"openai\"\n"
         let patch = try CodexCursorConfigEditor.activate(original, model: "auto", port: 32_125)
-        let externallyChanged = patch.text.replacingOccurrences(
-            of: "model = \"auto\"",
-            with: "model = \"composer-2.5\"")
+        let providerChanged = patch.text.replacingOccurrences(
+            of: "model_provider = \"syncbar_cursor_bridge\"",
+            with: "model_provider = \"openai\"")
         XCTAssertThrowsError(try CodexCursorConfigEditor.deactivate(
-            externallyChanged,
+            providerChanged,
             state: patch.state))
         let catalogChanged = patch.text.replacingOccurrences(
             of: "model_catalog_json = \"/tmp/codex-syncbar-cursor-model-catalog.json\"",
             with: "model_catalog_json = \"/someone-elses/catalog.json\"")
         XCTAssertThrowsError(try CodexCursorConfigEditor.deactivate(
             catalogChanged,
+            state: patch.state))
+        let managedSuffixChanged = patch.text.replacingOccurrences(
+            of: "Cursor Subscription (local SyncBar bridge)",
+            with: "externally changed provider")
+        XCTAssertThrowsError(try CodexCursorConfigEditor.deactivate(
+            managedSuffixChanged,
             state: patch.state))
     }
 
@@ -226,6 +232,80 @@ final class CursorBridgeTests: XCTestCase {
         XCTAssertFalse(try service.isActive())
         XCTAssertEqual(try String(contentsOf: config, encoding: .utf8), original)
         XCTAssertFalse(FileManager.default.fileExists(atPath: service.activationURL.path))
+    }
+
+    func testCodexConfigServiceStaysActiveWhenPickerChangesManagedCursorModel() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "CodexCursorPickerSelection-\(UUID().uuidString)",
+                isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let codex = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codex, withIntermediateDirectories: true)
+        let original = "model = \"gpt-5.6-sol\"\nmodel_provider = \"openai\"\n"
+        let config = codex.appendingPathComponent("config.toml")
+        try Data(original.utf8).write(to: config)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: config.path)
+        let service = CodexConfigService(home: home)
+
+        try service.activate(
+            model: "syncbar-cursor/auto",
+            port: 32_125,
+            bridgeToken: testCursorBridgeToken)
+        var selected = try String(contentsOf: service.configurationURL, encoding: .utf8)
+        selected = selected.replacingOccurrences(
+            of: "model = \"syncbar-cursor/auto\"",
+            with: "model = \"syncbar-cursor/cursor-grok-4.6\"")
+        try Data(selected.utf8).write(to: service.configurationURL)
+
+        let restartedService = CodexConfigService(home: home)
+        XCTAssertTrue(try restartedService.isActive())
+        XCTAssertEqual(
+            try restartedService.activeCursorProviderConfiguration()?.model,
+            "syncbar-cursor/auto")
+
+        try restartedService.deactivate()
+        XCTAssertEqual(
+            try String(contentsOf: restartedService.configurationURL, encoding: .utf8),
+            original)
+    }
+
+    func testCodexConfigServiceStaysActiveWhenPickerChangesToNativeModel() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "CodexCursorNativePickerSelection-\(UUID().uuidString)",
+                isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let codex = home.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codex, withIntermediateDirectories: true)
+        let original = "model = \"gpt-5.4\"\nmodel_provider = \"openai\"\n"
+        let config = codex.appendingPathComponent("config.toml")
+        try Data(original.utf8).write(to: config)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: config.path)
+        let service = CodexConfigService(home: home)
+
+        try service.activate(
+            model: "syncbar-cursor/auto",
+            port: 32_125,
+            bridgeToken: testCursorBridgeToken)
+        var selected = try String(contentsOf: service.configurationURL, encoding: .utf8)
+        selected = selected.replacingOccurrences(
+            of: "model = \"syncbar-cursor/auto\"",
+            with: "model = \"gpt-5.6-sol\"")
+        try Data(selected.utf8).write(to: service.configurationURL)
+
+        let restartedService = CodexConfigService(home: home)
+        XCTAssertTrue(try restartedService.isActive())
+        XCTAssertNotNil(try restartedService.activeCursorProviderConfiguration())
+
+        try restartedService.deactivate()
+        XCTAssertEqual(
+            try String(contentsOf: restartedService.configurationURL, encoding: .utf8),
+            original)
     }
 
     func testCodexConfigServiceRestoresAnOriginallyMissingConfiguration() throws {
