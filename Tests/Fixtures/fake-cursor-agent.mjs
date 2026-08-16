@@ -85,7 +85,7 @@ if (
     })});`,
     "text(result.output);",
   ].join("\n");
-  const text = `<SYNCBAR_TOOL_CALL>${JSON.stringify({
+  const text = `첨부 파일을 외부 도구로 읽겠습니다.\n<SYNCBAR_TOOL_CALL>${JSON.stringify({
     ...(namespace ? { namespace } : {}),
     name: "exec",
     input,

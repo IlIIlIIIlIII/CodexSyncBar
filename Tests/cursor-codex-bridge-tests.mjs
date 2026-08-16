@@ -1271,6 +1271,51 @@ test("function and custom envelopes are accepted only for offered tools", () => 
   );
 });
 
+test("a concise progress update is preserved as commentary before a structured tool call", () => {
+  const request = baseRequest();
+  const progress = "기존 모듈을 확인한 뒤 필요한 계약을 추가하겠습니다.\n";
+  const envelope = '<SYNCBAR_TOOL_CALL>{"name":"read_record","arguments":{"id":"42"}}</SYNCBAR_TOOL_CALL>';
+  const response = buildResponseResult(request, progress + envelope);
+
+  assert.equal(response.output.length, 2);
+  assert.equal(response.output[0].type, "message");
+  assert.equal(response.output[0].phase, "commentary");
+  assert.equal(response.output[0].content[0].text, progress.trimEnd());
+  assert.equal(response.output[1].type, "function_call");
+  assert.equal(response.output[1].name, "read_record");
+
+  const events = responseSSEEvents(response);
+  assert.deepEqual(
+    events.filter((event) => event.type === "response.output_item.done")
+      .map((event) => [event.data.output_index, event.data.item.type]),
+    [[0, "message"], [1, "function_call"]],
+  );
+  assert.equal(
+    events.filter((event) => event.type === "response.output_text.delta")
+      .some((event) => event.data.delta.includes("SYNCBAR_TOOL_CALL")),
+    false,
+  );
+});
+
+test("malformed embedded tool protocol fails closed instead of leaking into assistant text", () => {
+  assert.throws(
+    () => buildResponseResult(
+      baseRequest(),
+      '진행합니다.\n<SYNCBAR_TOOL_CALL>{"name":"read_record","arguments":{bad}}</SYNCBAR_TOOL_CALL>',
+    ),
+    (error) => error instanceof BridgeError &&
+      error.statusCode === 502 &&
+      error.code === "invalid_tool_envelope",
+  );
+});
+
+test("the backend prompt permits only a concise pre-tool progress update", () => {
+  const prompt = buildCursorPrompt(baseRequest());
+  assert.match(prompt, /first write exactly one concise progress update stating the next action/);
+  assert.match(prompt, /without revealing private chain-of-thought/);
+  assert.match(prompt, /return nothing after the closing tag/);
+});
+
 test("required and specific tool choices are enforced", () => {
   assert.throws(
     () => buildResponseResult(baseRequest({ tool_choice: "required" }), "plain text"),
@@ -1375,6 +1420,16 @@ test("namespaces support the function and custom tool kinds emitted by bundled C
   assert.equal(response.output[0].namespace, "functions");
   assert.equal(response.output[0].name, "exec");
   assert.equal(response.output[0].input, 'text("ok");');
+
+  const responseWithProgress = buildResponseResult(
+    request,
+    '기존 파일을 확인하겠습니다.\n<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","input":"text(\\"ok\\");"}</SYNCBAR_TOOL_CALL>',
+  );
+  assert.equal(responseWithProgress.output[0].phase, "commentary");
+  assert.equal(responseWithProgress.output[0].content[0].text, "기존 파일을 확인하겠습니다.");
+  assert.equal(responseWithProgress.output[1].type, "custom_tool_call");
+  assert.equal(responseWithProgress.output[1].namespace, "functions");
+  assert.equal(responseWithProgress.output[1].input, 'text("ok");');
 
   const done = responseSSEEvents(response).find(
     (event) => event.type === "response.output_item.done",
@@ -1608,6 +1663,16 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
     process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:envelope,session_id:'s-tool'})+'\\n');
     return;
   }
+  if (prompt.includes('trigger-progress-then-tool')) {
+    const progress = '파일 구조를 확인한 뒤 필요한 변경을 적용하겠습니다.\\n';
+    const envelope = '<SYNCBAR_TOOL_CALL>{"name":"read_record","arguments":{"id":"with-progress"}}</SYNCBAR_TOOL_CALL>';
+    const combined = progress + envelope;
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:progress}]}})+'\\n');
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:2,message:{content:[{type:'text',text:envelope.slice(0, 9)}]}})+'\\n');
+    process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:3,message:{content:[{type:'text',text:envelope.slice(9)}]}})+'\\n');
+    process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:combined,session_id:'s-progress-tool'})+'\\n');
+    return;
+  }
   process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:'hel'}]}})+'\\n');
   process.stdout.write(JSON.stringify({type:'assistant',model_call_id:'m1',message:{content:[{type:'text',text:'hello'}]}})+'\\n');
   process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:2,message:{content:[{type:'text',text:'lo'}]}})+'\\n');
@@ -1836,6 +1901,19 @@ const selectedModel = modelIndex >= 0 ? args[modelIndex + 1] : 'auto';
         streamedToolBody.indexOf("event: response.output_item.done"),
       streamedToolBody,
     );
+    const progressToolResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
+      body: JSON.stringify(baseRequest({ input: "trigger-progress-then-tool" })),
+    });
+    const progressToolBody = await progressToolResponse.text();
+    assert.equal(progressToolResponse.status, 200, progressToolBody);
+    assert.match(progressToolBody, /파일 구조를 확인한 뒤 필요한 변경을 적용하겠습니다/);
+    assert.match(progressToolBody, /\"phase\":\"commentary\"/);
+    assert.match(progressToolBody, /response\.function_call_arguments\.delta/);
+    assert.match(progressToolBody, /\\"id\\":\\"with-progress\\"/);
+    assert.doesNotMatch(progressToolBody, /output_text\.delta[^\n]+SYNCBAR_TOOL_CALL/);
+    assert.match(progressToolBody, /\"output_index\":1/);
     const httpResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
@@ -2476,6 +2554,8 @@ test("installed Codex local attachment path round-trips through the outer tool",
     });
     assert.equal(execution.timedOut, false, execution.stderr);
     assert.equal(execution.status, 0, `${execution.stderr}\n${execution.stdout}`);
+    assert.match(execution.stdout, /첨부 파일을 외부 도구로 읽겠습니다/);
+    assert.doesNotMatch(execution.stdout, /SYNCBAR_TOOL_CALL/);
     assert.equal((await readFile(lastMessagePath, "utf8")).trim(), "cursor local attachment passed");
   } finally {
     if (server) await stopBridge(server);
