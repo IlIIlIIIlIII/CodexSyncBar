@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="CodexSyncBar_Windows.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:core="using:CodexSyncBar.Windows.Core"
+    xmlns:local="using:CodexSyncBar_Windows"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <Style x:Key="CardBorder" TargetType="Border">
+            <Setter Property="Background" Value="#171A21" />
+            <Setter Property="BorderBrush" Value="#2A303B" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Padding" Value="18" />
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#F3F5F8" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+        <Style x:Key="MutedText" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#9098A8" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="14,6" />
+        </Style>
+    </Page.Resources>
+
+    <Grid Background="#0F1116">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Padding="28,24,28,18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="3">
+                <TextBlock Text="Codex SyncBar" FontSize="24" FontWeight="SemiBold" Foreground="#F7F8FA" />
+                <TextBlock Text="ChatGPT/Codex 계정과 장치의 인증·사용량을 한 곳에서 관리합니다." Style="{StaticResource MutedText}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="RefreshButton" Content="새로고침" Click="RefreshButton_Click" Style="{StaticResource ActionButton}" />
+                <Button Content="설정" Click="SettingsButton_Click" Style="{StaticResource ActionButton}" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1" Padding="28,0,28,20" ColumnSpacing="18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource CardBorder}" Padding="12">
+                <Grid RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="계정" Style="{StaticResource SectionTitle}" Margin="4,3,0,0" />
+                        <TextBlock x:Name="AccountCountText" Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource MutedText}" />
+                    </Grid>
+                    <ListView x:Name="AccountsList"
+                              Grid.Row="1"
+                              SelectionMode="Single"
+                              SelectionChanged="AccountsList_SelectionChanged"
+                              Background="Transparent"
+                              BorderThickness="0">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="core:AccountProfile">
+                                <Grid Padding="10,9" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="34" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="32" Height="32" CornerRadius="16" Background="#263A5F" VerticalAlignment="Top">
+                                        <TextBlock Text="{x:Bind ShortName}" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Text="{x:Bind Alias}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Email}" Style="{StaticResource MutedText}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind StateLabel}" FontSize="10" Foreground="#EAB308" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <StackPanel Grid.Row="2" Spacing="8">
+                        <Button x:Name="AddAccountButton" Content="계정 추가" Click="AddAccountButton_Click" Style="{StaticResource ActionButton}" />
+                        <Button x:Name="ImportAuthButton" Content="인증 파일 가져오기" Click="ImportAuthButton_Click" Style="{StaticResource ActionButton}" />
+                        <TextBlock x:Name="BrowserCleanupText"
+                                   TextWrapping="Wrap"
+                                   Style="{StaticResource MutedText}"
+                                   Visibility="Collapsed" />
+                        <Button x:Name="RetryBrowserCleanupButton"
+                                Content="Chrome 정리 재시도"
+                                Click="RetryBrowserCleanupButton_Click"
+                                Style="{StaticResource ActionButton}"
+                                Visibility="Collapsed" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="MoveAccountUpButton" Content="위로" Tag="up" Click="MoveAccountButton_Click" Style="{StaticResource ActionButton}" HorizontalAlignment="Stretch" />
+                            <Button x:Name="MoveAccountDownButton" Content="아래로" Tag="down" Click="MoveAccountButton_Click" Style="{StaticResource ActionButton}" HorizontalAlignment="Stretch" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="16" MaxWidth="820">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="3">
+                            <TextBlock x:Name="SelectedAliasText" Text="계정을 선택해 주세요" FontSize="22" FontWeight="SemiBold" />
+                            <TextBlock x:Name="SelectedEmailText" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button x:Name="RefreshSelectedButton" Content="사용량 새로고침" Click="RefreshSelectedButton_Click" Style="{StaticResource ActionButton}" />
+                            <Button x:Name="LoginButton" Content="로그인 열기" Click="LoginButton_Click" Style="{StaticResource ActionButton}" />
+                            <Button x:Name="CancelLoginButton" Content="로그인 취소" Click="CancelLoginButton_Click" Style="{StaticResource ActionButton}" Visibility="Collapsed" />
+                            <Button x:Name="RetryLoginButton" Content="다시 시도" Click="RetryLoginButton_Click" Style="{StaticResource ActionButton}" Visibility="Collapsed" />
+                            <Button x:Name="ReopenLoginButton" Content="브라우저 다시 열기" Click="ReopenLoginButton_Click" Style="{StaticResource ActionButton}" Visibility="Collapsed" />
+                            <Button x:Name="FreshLoginButton" Content="다른 계정으로 로그인" Click="FreshLoginButton_Click" Style="{StaticResource ActionButton}" Visibility="Collapsed" />
+                            <Button x:Name="LogoutAccountButton" Content="로그아웃" Click="LogoutAccountButton_Click" Style="{StaticResource ActionButton}" />
+                            <Button x:Name="DeleteAccountButton" Content="계정 제거" Click="DeleteAccountButton_Click" Style="{StaticResource ActionButton}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <Grid ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="60" Height="60" CornerRadius="18" Background="#2563EB" VerticalAlignment="Top">
+                                <TextBlock Text="✦" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="5">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock x:Name="SelectedPlanText" Text="Codex" FontSize="17" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="ActiveBadgeText" Text="현재 사용 중" Foreground="#4ADE80" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock x:Name="AuthStatusText" Text="인증 확인 전" Style="{StaticResource MutedText}" />
+                                <TextBlock x:Name="SelectedProfilePathText" Style="{StaticResource MutedText}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <Button x:Name="EditAliasButton" Grid.Column="2" Content="별칭 편집" Click="EditAliasButton_Click" VerticalAlignment="Center" Style="{StaticResource ActionButton}" />
+                        </Grid>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="사용량" Style="{StaticResource SectionTitle}" Margin="0" />
+                                <TextBlock x:Name="UsageUpdatedText" Grid.Column="1" HorizontalAlignment="Right" Style="{StaticResource MutedText}" />
+                            </Grid>
+                            <TextBlock x:Name="UsageStatusText" Text="계정을 선택하면 사용량을 확인합니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                            <Grid x:Name="FiveHourRow" ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="60" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="5시간" VerticalAlignment="Center" />
+                                <ProgressBar x:Name="FiveHourBar" Grid.Column="1" Height="8" VerticalAlignment="Center" Maximum="100" />
+                                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                    <TextBlock x:Name="FiveHourValue" HorizontalAlignment="Right" />
+                                    <TextBlock x:Name="FiveHourResetText" Style="{StaticResource MutedText}" FontSize="10" HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid x:Name="CodexWeeklyRow" ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="60" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="주간" VerticalAlignment="Center" />
+                                <ProgressBar x:Name="WeeklyBar" Grid.Column="1" Height="8" VerticalAlignment="Center" Maximum="100" />
+                                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                    <TextBlock x:Name="WeeklyValue" HorizontalAlignment="Right" />
+                                    <TextBlock x:Name="WeeklyResetText" Style="{StaticResource MutedText}" FontSize="10" HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid x:Name="SparkFiveHourRow" ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="60" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Spark 5시간" VerticalAlignment="Center" />
+                                <ProgressBar x:Name="SparkFiveHourBar" Grid.Column="1" Height="8" VerticalAlignment="Center" Maximum="100" />
+                                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                    <TextBlock x:Name="SparkFiveHourValue" HorizontalAlignment="Right" />
+                                    <TextBlock x:Name="SparkFiveHourResetText" Style="{StaticResource MutedText}" FontSize="10" HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                            <Grid x:Name="SparkWeeklyRow" ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="60" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Spark 주간" VerticalAlignment="Center" />
+                                <ProgressBar x:Name="SparkWeeklyBar" Grid.Column="1" Height="8" VerticalAlignment="Center" Maximum="100" />
+                                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                    <TextBlock x:Name="SparkWeeklyValue" HorizontalAlignment="Right" />
+                                    <TextBlock x:Name="SparkWeeklyResetText" Style="{StaticResource MutedText}" FontSize="10" HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock x:Name="CreditsText" Style="{StaticResource MutedText}" />
+                            <TextBlock x:Name="ResetCreditsExpiryText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="토큰 사용량" Style="{StaticResource SectionTitle}" Margin="0" />
+                                    <TextBlock x:Name="TokenUsageStatusText" Text="세션 로그를 집계하면 최근 30일 토큰 사용량을 표시합니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="집계 새로고침" Click="RefreshTokenUsageButton_Click" Style="{StaticResource ActionButton}" />
+                            </Grid>
+                            <TextBlock x:Name="TokenUsageCountText" Text="토큰 —" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock x:Name="TokenUsageCostText" Text="예상 비용 —" />
+                            <TextBlock x:Name="TokenUsageDevicesText" Style="{StaticResource MutedText}" />
+                            <TextBlock x:Name="TokenUsageUpdatedText" Style="{StaticResource MutedText}" />
+                            <ListView x:Name="TokenUsageDevicesList"
+                                      MaxHeight="180"
+                                      SelectionMode="None"
+                                      IsHitTestVisible="False"
+                                      Background="Transparent"
+                                      BorderThickness="0">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:TokenUsageRow">
+                                        <Grid Padding="0,5" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="2">
+                                                <TextBlock Text="{x:Bind DisplayName}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{x:Bind AccountText}" Foreground="{x:Bind AccountBrush}" Style="{StaticResource MutedText}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right" Spacing="2">
+                                                <TextBlock Text="{x:Bind UsageText}" HorizontalAlignment="Right" />
+                                                <TextBlock Text="{x:Bind CostText}" HorizontalAlignment="Right" Style="{StaticResource MutedText}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="11">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Cursor 브리지" Style="{StaticResource SectionTitle}" Margin="0" />
+                                    <TextBlock x:Name="CursorStatusText" Text="확인 전" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="모델 새로고침" Click="CursorRefreshModelsButton_Click" Style="{StaticResource ActionButton}" />
+                            </Grid>
+                            <TextBlock x:Name="CursorRuntimePathsText"
+                                       Style="{StaticResource MutedText}"
+                                       FontSize="10"
+                                       TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <PasswordBox x:Name="CursorApiKeyBox" Header="Cursor User API Key" PlaceholderText="16~1024 UTF-8 bytes" />
+                                <Button x:Name="CursorSaveApiKeyButton" Grid.Column="1" Content="저장" Click="CursorSaveApiKeyButton_Click" Style="{StaticResource ActionButton}" VerticalAlignment="Bottom" />
+                                <Button x:Name="CursorDeleteApiKeyButton" Grid.Column="2" Content="삭제" Click="CursorDeleteApiKeyButton_Click" Style="{StaticResource ActionButton}" VerticalAlignment="Bottom" />
+                                <Button x:Name="CursorSyncRemoteButton" Grid.Column="3" Content="SSH 동기화" Click="CursorSyncRemoteButton_Click" Style="{StaticResource ActionButton}" VerticalAlignment="Bottom" />
+                            </Grid>
+                            <TextBlock x:Name="CursorApiKeyStatusText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="100" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="모델" VerticalAlignment="Center" />
+                                <ComboBox x:Name="CursorModelPicker"
+                                          Grid.Column="1"
+                                          Visibility="Collapsed"
+                                          SelectionChanged="CursorModelPicker_SelectionChanged" />
+                                <TextBox x:Name="CursorModelTextBox" Grid.Column="1" Text="auto" PlaceholderText="auto 또는 cursor-agent 모델 ID" TextChanged="CursorModelTextBox_TextChanged" />
+                                <TextBlock Grid.Column="2" Text="포트" VerticalAlignment="Center" />
+                                <TextBox x:Name="CursorPortTextBox" Grid.Column="3" Text="32125" />
+                            </Grid>
+                            <TextBox x:Name="CursorAgentPathTextBox"
+                                     Header="Cursor CLI 경로 (선택)"
+                                     PlaceholderText="cursor-agent.exe 또는 전체 경로" />
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <CheckBox x:Name="CursorThinkingCheckBox"
+                                          Content="Thinking 변형"
+                                          Click="CursorThinkingCheckBox_Click"
+                                          IsEnabled="False" />
+                                <TextBlock Text="모델 목록을 새로고침하면 가능한 변형을 확인합니다."
+                                           Style="{StaticResource MutedText}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="CursorAgentText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="CursorModelsText" Style="{StaticResource MutedText}" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="CursorEnableButton" Content="Codex provider 켜기" Click="CursorEnableButton_Click" Style="{StaticResource ActionButton}" />
+                                <Button x:Name="CursorDisableButton" Content="끄기·원복" Click="CursorDisableButton_Click" Style="{StaticResource ActionButton}" />
+                                <Button Content="CLI 설치 안내" Click="CursorGuideButton_Click" Style="{StaticResource ActionButton}" />
+                                <Button Content="cursor-agent login 복사" Click="CursorCopyLoginButton_Click" Style="{StaticResource ActionButton}" />
+                            </StackPanel>
+                            <TextBlock Text="Windows에서는 Cursor CLI 로그인 상태를 사용합니다. Cursor CLI가 설치되어 있고 cursor-agent status가 성공해야 합니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="전체 장치" Style="{StaticResource SectionTitle}" Margin="0" />
+                                    <TextBlock Text="현재 계정을 이 Windows PC와 등록된 SSH 장치에 적용할 수 있습니다." Style="{StaticResource MutedText}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                    <Button Content="SSH 장치 추가" Click="AddDeviceButton_Click" Style="{StaticResource ActionButton}" />
+                                    <Button x:Name="EditDeviceButton" Content="편집" Click="EditDeviceButton_Click" Style="{StaticResource ActionButton}" />
+                                    <Button x:Name="ActivateDeviceButton" Content="설치 및 활성화" Click="ActivateDeviceButton_Click" Style="{StaticResource ActionButton}" />
+                                    <Button x:Name="RemoveDeviceButton" Content="제거" Click="RemoveDeviceButton_Click" Style="{StaticResource ActionButton}" />
+                                    <Button x:Name="TestDeviceButton" Content="연결 테스트" Click="TestDeviceButton_Click" Style="{StaticResource ActionButton}" />
+                                    <Button Content="상태 확인" Click="RefreshDevicesButton_Click" Style="{StaticResource ActionButton}" />
+                                </StackPanel>
+                            </Grid>
+                            <ListView x:Name="DevicesList" SelectionMode="Single" SelectionChanged="DevicesList_SelectionChanged" IsItemClickEnabled="False" Background="Transparent" BorderThickness="0">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="local:DeviceRow">
+                                        <Grid Padding="0,8" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="30" Height="30" CornerRadius="15" Background="{x:Bind StateBrush}">
+                                                <TextBlock Text="{x:Bind StateGlyph}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                <TextBlock Text="{x:Bind DisplayName}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{x:Bind Detail}" Style="{StaticResource MutedText}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{x:Bind StateText}" Foreground="{x:Bind StateBrush}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <Button x:Name="SyncButton" Content="선택 계정을 모든 장치에 적용" Click="SyncButton_Click" Style="{StaticResource ActionButton}" />
+                        </StackPanel>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Content="Codex 열기" Click="OpenCodexButton_Click" Style="{StaticResource ActionButton}" />
+                        <Button Content="Codex 폴더 열기" Click="OpenCodexFolderButton_Click" Style="{StaticResource ActionButton}" />
+                        <Button Content="인증 파일 폴더" Click="OpenAuthFolderButton_Click" Style="{StaticResource ActionButton}" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#171A21" BorderBrush="#2A303B" BorderThickness="0,1,0,0" Padding="28,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="BannerText" Text="준비 중…" Style="{StaticResource MutedText}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <ProgressRing x:Name="LoadingRing" Width="16" Height="16" IsActive="False" />
+                    <Button Content="앱 종료" Click="QuitButton_Click" Style="{StaticResource ActionButton}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

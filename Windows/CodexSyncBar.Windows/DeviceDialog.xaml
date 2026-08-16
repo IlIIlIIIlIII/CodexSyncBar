@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentDialog
+    x:Class="CodexSyncBar_Windows.DeviceDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="SSH 장치 설정"
+    PrimaryButtonText="저장"
+    SecondaryButtonText="취소"
+    DefaultButton="Primary">
+    <ScrollViewer MaxHeight="560">
+        <StackPanel Spacing="10" MinWidth="420">
+            <TextBlock Text="Windows OpenSSH 설정을 사용하거나 개인 키를 지정할 수 있습니다." TextWrapping="Wrap" Foreground="#9098A8" />
+            <TextBox x:Name="DisplayNameBox" Header="표시 이름" PlaceholderText="예: 개발 서버" />
+            <TextBox x:Name="IdBox" Header="장치 ID" PlaceholderText="예: dev-server" />
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="110" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="HostBox" Header="호스트" PlaceholderText="hostname 또는 IP" />
+                <NumberBox x:Name="PortBox" Grid.Column="1" Header="포트" Value="22" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Compact" />
+            </Grid>
+            <TextBox x:Name="UsernameBox" Header="사용자 이름" PlaceholderText="SSH 사용자" />
+            <ComboBox x:Name="AuthenticationBox" Header="인증 방식" SelectedIndex="0" SelectionChanged="AuthenticationBox_SelectionChanged">
+                <ComboBoxItem Content="기존 OpenSSH 설정" Tag="openSSHConfig" />
+                <ComboBoxItem Content="개인 키 / SSH 인증서" Tag="privateKey" />
+                <ComboBoxItem Content="비밀번호 (저장만)" Tag="password" />
+            </ComboBox>
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="IdentityFileBox" Header="개인 키 경로" PlaceholderText="C:\Users\me\.ssh\id_ed25519" />
+                <Button Grid.Column="1" Content="찾기" VerticalAlignment="Bottom" Click="BrowseIdentityButton_Click" />
+            </Grid>
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="CertificateFileBox" Header="SSH 인증서 경로 (선택)" PlaceholderText="C:\Users\me\.ssh\id_ed25519-cert.pub" />
+                <Button Grid.Column="1" Content="찾기" VerticalAlignment="Bottom" Click="BrowseCertificateButton_Click" />
+            </Grid>
+            <PasswordBox x:Name="PasswordBox" Header="SSH 비밀번호 (선택)" PlaceholderText="Windows DPAPI로 암호화해 저장" />
+            <PasswordBox x:Name="PassphraseBox" Header="개인 키 암호 (선택)" PlaceholderText="Windows DPAPI로 암호화해 저장" />
+            <CheckBox x:Name="ClearPasswordBox" Content="저장된 SSH 비밀번호 삭제" />
+            <CheckBox x:Name="ClearPassphraseBox" Content="저장된 키 암호 삭제" />
+            <CheckBox x:Name="EnabledBox" Content="저장 후 동기화 대상에 포함" IsChecked="False" />
+            <TextBlock Text="새 장치나 연결 정보가 바뀐 장치는 저장 후 ‘설치 및 활성화’로 연결 검증을 해야 동기화됩니다." Foreground="#9098A8" TextWrapping="Wrap" />
+            <TextBlock x:Name="ErrorText" Foreground="#F87171" TextWrapping="Wrap" Visibility="Collapsed" />
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>
