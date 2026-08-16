@@ -2230,10 +2230,63 @@ remote_install_cursor_helpers() {
 
   command='set -eu
 umask 077
+mode_of() { stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }
+owner_of() { stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"; }
+ensure_owned_directory() {
+  directory="$1"
+  requested_mode="$2"
+  if [ -e "$directory" ] || [ -L "$directory" ]; then
+    [ -d "$directory" ] && [ ! -L "$directory" ] && \
+      [ "$(owner_of "$directory")" = "$(id -u)" ]
+    chmod "$requested_mode" "$directory"
+  else
+    mkdir -m "$requested_mode" "$directory"
+  fi
+  [ -d "$directory" ] && [ ! -L "$directory" ] && \
+    [ "$(owner_of "$directory")" = "$(id -u)" ] && \
+    [ "$(mode_of "$directory")" = "$requested_mode" ]
+}
+ensure_safe_parent_directory() {
+  directory="$1"
+  if [ -e "$directory" ] || [ -L "$directory" ]; then
+    [ -d "$directory" ] && [ ! -L "$directory" ] && \
+      [ "$(owner_of "$directory")" = "$(id -u)" ]
+    # Preserve an existing private mode such as 0700; only remove the unsafe
+    # group/world write bits that the manager rejects.
+    chmod go-w "$directory"
+  else
+    mkdir -m 700 "$directory"
+  fi
+  mode=$(mode_of "$directory")
+  [ -d "$directory" ] && [ ! -L "$directory" ] && \
+    [ "$(owner_of "$directory")" = "$(id -u)" ] && \
+    [ $((0$mode & 022)) -eq 0 ]
+}
+local_root="$HOME/.local"
+share_root="$local_root/share"
 state="$HOME/.local/share/gpt-switch"
 lib="$HOME/.local/lib/gpt-switch"
-mkdir -p "$state" "$lib"
-chmod 700 "$state" "$lib"
+ensure_safe_parent_directory "$local_root"
+ensure_safe_parent_directory "$share_root"
+ensure_safe_parent_directory "$local_root/lib"
+ensure_owned_directory "$state" 700
+ensure_owned_directory "$lib" 700
+# Older SyncBar builds could leave these app-owned directories group writable.
+# Normalize only the known Cursor subtree after checking ownership and links;
+# never recurse through arbitrary files under ~/.local.
+for cursor_directory in \
+  "$state/cursor-remote-xdg" \
+  "$state/cursor-remote-xdg/home" \
+  "$state/cursor-remote-xdg/config" \
+  "$state/cursor-remote-xdg/data" \
+  "$state/cursor-remote-xdg/cache" \
+  "$state/cursor-remote-xdg/state" \
+  "$state/cursor-remote-workspace"
+do
+  if [ -e "$cursor_directory" ] || [ -L "$cursor_directory" ]; then
+    ensure_owned_directory "$cursor_directory" 700
+  fi
+done
 stage=$(mktemp -d "$state/.cursor-install.XXXXXX")
 bridge="$lib/cursor-codex-bridge.mjs"
 manager="$lib/cursor-remote-manager.mjs"
@@ -2245,8 +2298,6 @@ bridge_existed=0
 manager_existed=0
 committed=0
 rollback_failed=0
-mode_of() { stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }
-owner_of() { stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"; }
 restore_one() {
   destination="$1"
   backup="$2"

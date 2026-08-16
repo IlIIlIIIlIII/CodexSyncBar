@@ -193,6 +193,7 @@ if (args.includes('-p') && args.includes('--output-format') && args.includes('st
     promptSeen,
     isolatedHome: process.env.HOME === isolatedHome,
     fileCredentialStore: process.env.AGENT_CLI_CREDENTIAL_STORE === 'file',
+    sandboxMode: args[args.indexOf('--sandbox') + 1] ?? null,
   }), {mode:0o600});
   if (!promptSeen) process.exit(97);
   process.stdout.write(JSON.stringify({
@@ -1354,6 +1355,7 @@ test("generated provider and command auth complete a bundled Codex exec through 
     promptSeen: true,
     isolatedHome: true,
     fileCredentialStore: true,
+    sandboxMode: "disabled",
   });
 
   for (const output of [result.stdout, result.stderr, JSON.stringify(codexArgs)]) {

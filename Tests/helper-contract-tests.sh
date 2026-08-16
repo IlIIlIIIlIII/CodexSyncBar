@@ -801,6 +801,17 @@ CURSOR_SSH_ARGS="$TMP/cursor-ssh-args"
 CURSOR_NODE=$(command -v node)
 mkdir -p "$CURSOR_REMOTE_HOME/.codex" "$CURSOR_REMOTE_PROCESS_BIN"
 chmod 700 "$CURSOR_REMOTE_HOME" "$CURSOR_REMOTE_HOME/.codex" "$CURSOR_REMOTE_PROCESS_BIN"
+# Reproduce the permissions created by common Linux package managers and an
+# older SyncBar Cursor installation. Provisioning must repair only these
+# user-owned directories before the remote manager enforces its trust boundary.
+mkdir -p \
+  "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-xdg/config" \
+  "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-workspace"
+chmod 775 "$CURSOR_REMOTE_HOME/.local" "$CURSOR_REMOTE_HOME/.local/share"
+chmod 775 \
+  "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-xdg" \
+  "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-xdg/config" \
+  "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-workspace"
 ln -s "$CURSOR_NODE" "$CURSOR_REMOTE_HOME/node"
 printf '# keep-this-config-sentinel\r\napproval_policy = "never"\r\nmodel = "gpt-5.6-sol"\r\nmodel_provider = "openai"\r\n\r\n[mcp_servers.keep_me]\r\ncommand = "/usr/bin/true"\r\n' \
   >"$CURSOR_REMOTE_CONFIG_ORIGINAL"
@@ -1041,6 +1052,10 @@ NODE
 [ "$(stat -f '%Lp' "$CURSOR_BACKUP")" = 600 ]
 [ "$(stat -f '%Lp' "$CURSOR_AUTH_STATE")" = 600 ]
 [ "$(stat -f '%Lp' "$CURSOR_REMOTE_CONFIG")" = 600 ]
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_HOME/.local")" = 755 ]
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_HOME/.local/share")" = 755 ]
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-xdg")" = 700 ]
+[ "$(stat -f '%Lp' "$CURSOR_REMOTE_HOME/.local/share/gpt-switch/cursor-remote-workspace")" = 700 ]
 jq -e --arg api "$CURSOR_API_CANARY" --arg token "$CURSOR_BRIDGE_CANARY" \
   '.apiKey == $api and .bridgeToken == $token' "$CURSOR_RUNTIME" >/dev/null
 grep -F '# keep-this-config-sentinel' "$CURSOR_REMOTE_CONFIG" >/dev/null

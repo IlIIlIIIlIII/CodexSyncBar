@@ -26,6 +26,7 @@ import {
   prepareCursorBackendRequestWithFiles,
   responseSSEEvents,
   resolveCursorModelRoute,
+  runCursorAgent,
   runCursorACP,
   spawnCursorChild,
   startBridge,
@@ -1553,6 +1554,35 @@ test("Responses SSE includes completed full text and terminal response", () => {
   assert.equal(done.data.item.content[0].text, "hello");
   assert.equal(events.at(-1).type, "response.completed");
   assert.equal(events.at(-1).data.response.id, response.id);
+});
+
+test("remote bridge can explicitly disable the unavailable Linux sandbox", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sandbox-mode-test-"));
+  const workspace = path.join(root, "workspace");
+  const agent = path.join(root, "agent");
+  await mkdir(workspace, { recursive: true, mode: 0o700 });
+  await writeFile(agent, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const index = args.indexOf('--sandbox');
+if (index < 0 || args[index + 1] !== 'disabled') process.exit(81);
+for await (const _chunk of process.stdin) {}
+process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'ok',session_id:'sandbox'})+'\\n');
+`, { mode: 0o700 });
+  await chmod(agent, 0o700);
+  try {
+    const result = await runCursorAgent({
+      agentPath: agent,
+      workspace,
+      model: "auto",
+      sandboxMode: "disabled",
+      prompt: "test",
+      timeoutMs: 5_000,
+      env: process.env,
+    });
+    assert.equal(result.text, "ok");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("Responses SSE includes complete function arguments in output_item.done", () => {

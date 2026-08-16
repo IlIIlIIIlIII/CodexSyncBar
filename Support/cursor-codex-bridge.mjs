@@ -2508,6 +2508,7 @@ export function runCursorAgent({
   agentPath,
   workspace,
   model,
+  sandboxMode = "enabled",
   prompt,
   timeoutMs,
   signal,
@@ -2523,7 +2524,7 @@ export function runCursorAgent({
       "--trust",
       "--mode=ask",
       "--sandbox",
-      "enabled",
+      sandboxMode,
       "-p",
     ];
     if (model && model !== "auto") args.push("--model", model);
@@ -2776,6 +2777,7 @@ export function runCursorACP({
   workspace,
   model,
   modelParameters,
+  sandboxMode = "enabled",
   prompt,
   timeoutMs,
   signal,
@@ -2801,7 +2803,7 @@ export function runCursorACP({
       workspace,
       "--trust",
       "--sandbox",
-      "enabled",
+      sandboxMode,
     ];
     if (model && model !== "auto") args.push("--model", model);
     args.push("acp");
@@ -3345,6 +3347,7 @@ function parseArguments(argv) {
     parentPID: null,
     fileExtractorPath: defaultPDFExtractorPath(),
     bridgeToken: process.env.SYNCBAR_CURSOR_BRIDGE_TOKEN ?? "",
+    sandboxMode: process.env.SYNCBAR_CURSOR_SANDBOX_MODE ?? "enabled",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index];
@@ -3368,6 +3371,9 @@ function parseArguments(argv) {
   }
   if (!/^[a-f0-9]{64}$/.test(config.bridgeToken)) {
     throw new BridgeError("Missing or invalid bridge authentication token", 500, "invalid_token");
+  }
+  if (!["enabled", "disabled"].includes(config.sandboxMode)) {
+    throw new BridgeError("Invalid Cursor sandbox mode", 500, "invalid_sandbox_mode");
   }
   const rawRoutes = process.env.SYNCBAR_CURSOR_MODEL_ROUTES_JSON;
   const rawAllowedModels = process.env.SYNCBAR_CURSOR_MODELS_JSON;
@@ -3804,6 +3810,7 @@ export function createBridgeServer(config, testHooks) {
         workspace: config.workspace,
         model: cursorModel,
         modelParameters: modelParameters.get(cursorModel),
+        sandboxMode: config.sandboxMode,
         prompt: usesACP ? prepared.acpPrompt : prepared.prompt,
         timeoutMs: config.timeoutMs,
         signal: controller.signal,
