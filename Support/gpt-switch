@@ -2952,9 +2952,9 @@ resolve_cursor_runtime() {
 node_cursor_provision() {
   local payload bytes cursor_node
   validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
-  payload=$(/usr/bin/head -c 524289) || die "could not read Cursor provisioning request"
+  payload=$(/usr/bin/head -c 4194305) || die "could not read Cursor provisioning request"
   bytes=${#payload}
-  [ "$bytes" -le 524288 ] || {
+  [ "$bytes" -le 4194304 ] || {
     payload=""
     die "Cursor provisioning request is too large"
   }
@@ -4371,21 +4371,28 @@ controller_provision_cursor() {
   # emit literal NUL bytes or a trailing newline, so base64/openssl is not
   # needed. Absolute root-owned tools keep a hostile PATH from interposing on
   # the only local pipeline that ever sees the Cursor API key.
-  payload=$(/usr/bin/head -c 524289) || \
+  payload=$(/usr/bin/head -c 4194305) || \
     die "could not read Cursor provisioning request"
   bytes=${#payload}
-  [ "$bytes" -le 524288 ] || die "Cursor provisioning request is too large"
+  [ "$bytes" -le 4194304 ] || die "Cursor provisioning request is too large"
   printf '%s' "$payload" | /usr/bin/jq -e '
-    (keys | sort) == ["apiKey","bridgeToken","model","modelParameters","models","port","schemaVersion"] and
-    .schemaVersion == 1 and
+    (keys | sort) == ["apiKey","bridgeToken","catalogData","codexModel","model","modelParameters","modelRoutesJSON","models","nativeModels","port","schemaVersion"] and
+    .schemaVersion == 2 and
     (.apiKey | type == "string" and length > 0 and (test("[\u0000-\u0020\u007f]") | not)) and
     (.model | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")) and
+    (.codexModel | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")) and
     (.port | type == "number" and floor == . and . >= 1024 and . <= 65535) and
     (.bridgeToken | type == "string" and test("^[a-f0-9]{64}$")) and
     (.models | type == "array" and length >= 1 and length <= 512) and
     (all(.models[]; type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))) and
     ((.models | length) == (.models | unique | length)) and
     (.model as $selected | .models | index($selected) != null) and
+    (.codexModel as $codex_model |
+      (.modelRoutesJSON | type == "string" and length > 0 and (fromjson | type == "object" and has($codex_model)))) and
+    (.nativeModels | type == "array" and length <= 512) and
+    (all(.nativeModels[]; type == "string" and test("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"))) and
+    ((.nativeModels | length) == (.nativeModels | unique | length)) and
+    (.catalogData | type == "string" and length > 0) and
     (.models | sort) as $model_keys |
     (.modelParameters | type == "object") and
     ((.modelParameters | keys | sort) == $model_keys) and

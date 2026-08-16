@@ -126,6 +126,7 @@ async function makeFixture(options = {}) {
   const apiKey = `api_${randomBytes(32).toString("hex")}`;
   const bridgeToken = randomBytes(32).toString("hex");
   const models = ["composer-2.5", "gpt-5.6-sol-high-fast"];
+  const codexModel = "syncbar-cursor/composer-2.5";
   const modelParameters = {
     "composer-2.5": {
       model: "composer-2.5",
@@ -214,8 +215,11 @@ const args = process.argv.slice(2);
 const bridgeToken = process.env.SYNCBAR_CURSOR_BRIDGE_TOKEN ?? '';
 const apiKey = process.env.CURSOR_API_KEY ?? '';
 const modelParameters = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON ?? 'null');
+const modelRoutes = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_ROUTES_JSON ?? 'null');
+const nativeModels = JSON.parse(process.env.SYNCBAR_NATIVE_MODELS_JSON ?? 'null');
 if (!bridgeToken || !apiKey || args.some((value) => value.includes(bridgeToken) || value.includes(apiKey))) process.exit(81);
 if (!modelParameters || typeof modelParameters !== 'object') process.exit(85);
+if (!modelRoutes || typeof modelRoutes !== 'object' || !Array.isArray(nativeModels)) process.exit(86);
 if (!process.env.HOME?.endsWith('/cursor-remote-xdg/home')) process.exit(82);
 if (process.env.AGENT_CLI_CREDENTIAL_STORE !== 'file') process.exit(83);
 const value = (name) => args[args.indexOf(name) + 1];
@@ -227,7 +231,9 @@ const secretFingerprint = createHash('sha256').update(apiKey).digest('hex');
 const generation = existsSync(launchLog)
   ? readFileSync(launchLog, 'utf8').trim().split('\\n').filter(Boolean).length + 1
   : 1;
-appendFileSync(launchLog, JSON.stringify({generation, pid:process.pid, model, modelParameters, secretFingerprint}) + '\\n', {mode:0o600});
+appendFileSync(launchLog, JSON.stringify({
+  generation, pid:process.pid, model, modelParameters, modelRoutes, nativeModels, secretFingerprint,
+}) + '\\n', {mode:0o600});
 if (model === 'gpt-5.6-sol-high-fast' && existsSync(path.join(realHome, 'fail-new-bridge'))) process.exit(84);
 const server = http.createServer((request, response) => {
   if (request.url !== '/healthz' || request.headers['x-syncbar-bridge-token'] !== bridgeToken) {
@@ -262,13 +268,25 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)));
     CURSOR_REMOTE_NODE_PATH: process.execPath,
   };
   const input = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     apiKey,
     model: "composer-2.5",
+    codexModel,
     port,
     bridgeToken,
     models,
     modelParameters,
+    modelRoutesJSON: JSON.stringify({
+      [codexModel]: {
+        default_effort: "default",
+        variants: { default: { standard: "composer-2.5" } },
+      },
+    }),
+    nativeModels: ["gpt-5.6-sol"],
+    catalogData: Buffer.from(JSON.stringify({ models: [
+      { slug: "gpt-5.6-sol", display_name: "GPT-5.6 Sol" },
+      { slug: codexModel, display_name: "Cursor Composer 2.5" },
+    ] })).toString("base64"),
   };
   return {
     home, agentPath, bridgePath, apiKey, bridgeToken, models, modelParameters, port, original,
@@ -470,17 +488,20 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
   assert.deepEqual(result, {
     provisioned: true,
     model: fixture.input.model,
+    codexModel: fixture.input.codexModel,
     port: fixture.port,
     models: fixture.models,
     modelParameters: fixture.modelParameters,
+    modelRoutes: JSON.parse(fixture.input.modelRoutesJSON),
+    nativeModels: fixture.input.nativeModels,
     agentPath: await realpath(fixture.agentPath),
   });
   assert.equal((await stat(paths.runtime)).mode & 0o777, 0o600);
   assert.equal((await stat(paths.backup)).mode & 0o777, 0o600);
   assert.equal((await stat(paths.config)).mode & 0o777, 0o600);
   const backup = JSON.parse(await readFile(paths.backup, "utf8"));
-  assert.equal(backup.schemaVersion, 2);
-  assert.equal(backup.installedModel, fixture.input.model);
+  assert.equal(backup.schemaVersion, 3);
+  assert.equal(backup.installedModel, fixture.input.codexModel);
   assert.equal(runtime.apiKey, fixture.apiKey);
   assert.equal(runtime.bridgeToken, fixture.bridgeToken);
   assert.deepEqual(runtime.modelParameters, fixture.modelParameters);
@@ -495,7 +516,8 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
   assert.match(config, /# retain this comment/);
   assert.match(config, /approval_policy = "on-request"/);
   assert.match(config, /\[mcp_servers\.keep_me\]/);
-  assert.match(config, /model = "composer-2\.5"/);
+  assert.match(config, /model = "syncbar-cursor\/composer-2\.5"/);
+  assert.match(config, /model_catalog_json = /);
   assert.match(config, /model_provider = "syncbar_cursor_bridge"/);
   assert.match(config, new RegExp(MARKER_BEGIN));
   assert.match(config, new RegExp(MARKER_END));
@@ -508,7 +530,7 @@ test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preser
   assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.bridgeToken));
 });
 
-test("legacy reprovision accepts only a valid Codex picker model change and preserves it", async () => {
+test("legacy reprovision migrates a flat model selection to the Codex picker model", async () => {
   const original = [
     '# retain this comment',
     'approval_policy = "on-request"',
@@ -523,27 +545,34 @@ test("legacy reprovision accepts only a valid Codex picker model change and pres
   const paths = managerPaths({ home: fixture.home, env: fixture.env });
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
 
+  const legacyRuntime = JSON.parse(await readFile(paths.runtime, "utf8"));
+  legacyRuntime.schemaVersion = 1;
+  for (const key of ["catalogPath", "codexModel", "modelRoutes", "nativeModels"]) delete legacyRuntime[key];
+  const legacyRuntimeData = Buffer.from(`${JSON.stringify(legacyRuntime, null, 2)}\n`);
+  await writeFile(paths.runtime, legacyRuntimeData, { mode: 0o600 });
+  const legacyConfig = (await readFile(paths.config, "utf8"))
+    .replace(/^model_catalog_json = .*\n/m, "")
+    .replace(/^model = .*$/m, 'model = "composer-2.5"');
+  await writeFile(paths.config, legacyConfig, { mode: 0o600 });
+  await rm(paths.catalog);
   const legacyBackup = JSON.parse(await readFile(paths.backup, "utf8"));
-  legacyBackup.schemaVersion = 1;
-  delete legacyBackup.installedModel;
+  legacyBackup.schemaVersion = 2;
+  for (const key of [
+    "originalCatalogExisted", "originalCatalogDataBase64", "originalCatalogSHA256",
+    "originalCatalogMode", "installedCatalogSHA256",
+  ]) delete legacyBackup[key];
+  legacyBackup.installedModel = "composer-2.5";
+  legacyBackup.installedSHA256 = createHash("sha256").update(legacyConfig).digest("hex");
+  legacyBackup.runtimeSHA256 = createHash("sha256").update(legacyRuntimeData).digest("hex");
   await writeFile(paths.backup, `${JSON.stringify(legacyBackup, null, 2)}\n`, { mode: 0o600 });
-  const selectedModel = "gpt-5.6-sol";
-  const changedConfig = (await readFile(paths.config, "utf8")).replace(
-    'model = "composer-2.5"',
-    `model = "${selectedModel}"`,
-  ).replace(
-    'last_updated = "2026-08-16T01:00:00Z"',
-    'last_updated = "2026-08-17T01:00:00Z"',
-  );
-  await writeFile(paths.config, changedConfig, { mode: 0o600 });
 
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
   const reprovisioned = await readFile(paths.config, "utf8");
-  assert.match(reprovisioned, new RegExp(`model = "${selectedModel}"`));
-  assert.match(reprovisioned, /last_updated = "2026-08-17T01:00:00Z"/);
+  assert.match(reprovisioned, /model = "syncbar-cursor\/composer-2\.5"/);
+  assert.match(reprovisioned, /model_catalog_json = /);
   const migratedBackup = JSON.parse(await readFile(paths.backup, "utf8"));
-  assert.equal(migratedBackup.schemaVersion, 2);
-  assert.equal(migratedBackup.installedModel, selectedModel);
+  assert.equal(migratedBackup.schemaVersion, 3);
+  assert.equal(migratedBackup.installedModel, fixture.input.codexModel);
   assert.equal((await readRuntime({ home: fixture.home, env: fixture.env })).model, fixture.input.model);
 });
 
@@ -619,7 +648,10 @@ test("a failed reprovision preserves the previous runtime, backup, config, and X
 });
 
 test("provision crash recovery rolls back before the first CAS and rolls forward every committed stage", async (context) => {
-  for (const stage of ["after-journal", "after-runtime-commit", "after-config-commit", "after-backup-commit"]) {
+  for (const stage of [
+    "after-journal", "after-runtime-commit", "after-catalog-commit",
+    "after-config-commit", "after-backup-commit",
+  ]) {
     await context.test(stage, async () => {
       const fixture = await makeFixture();
       const paths = managerPaths({ home: fixture.home, env: fixture.env });
@@ -645,6 +677,7 @@ test("provision crash recovery rolls back before the first CAS and rolls forward
         assert.equal(health.healthy, true);
         detachedPIDs.add(health.pid);
         assert.equal((await stat(paths.runtime)).mode & 0o777, 0o600);
+        assert.equal((await stat(paths.catalog)).mode & 0o777, 0o600);
         assert.equal((await stat(paths.backup)).mode & 0o777, 0o600);
       }
       await assert.rejects(stat(paths.journal), { code: "ENOENT" });
@@ -1033,6 +1066,7 @@ test("deprovision crash recovery handles bridge-stop and every file/XDG stage", 
     "after-journal",
     "after-stop-old",
     "after-config-commit",
+    "after-catalog-commit",
     "after-runtime-commit",
     "after-backup-commit",
     "after-xdg-remove",
@@ -1120,18 +1154,35 @@ test("patching a config without a trailing newline does not concatenate assignme
 });
 
 test("provision input is exact and API keys reject whitespace and control characters", () => {
+  const codexModel = "syncbar-cursor/composer-2.5";
   const base = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     apiKey: "a".repeat(16),
     model: "composer-2.5",
+    codexModel,
     port: 32125,
     bridgeToken: "b".repeat(64),
     models: ["composer-2.5"],
     modelParameters: {
       "composer-2.5": { model: "composer-2.5", fast: false, thinking: false },
     },
+    modelRoutesJSON: JSON.stringify({
+      [codexModel]: { default_effort: "none", variants: { none: { standard: "composer-2.5" } } },
+    }),
+    nativeModels: [],
+    catalogData: Buffer.from(JSON.stringify({ models: [{ slug: codexModel }] })).toString("base64"),
   };
-  assert.deepEqual(validateProvisionInput(base), base);
+  const validated = validateProvisionInput(base);
+  assert.equal(validated.codexModel, codexModel);
+  assert.deepEqual(validated.modelRoutes[codexModel].variants.none, { standard: "composer-2.5" });
+  const overlappingNative = validateProvisionInput({
+    ...base,
+    nativeModels: ["composer-2.5"],
+    catalogData: Buffer.from(JSON.stringify({
+      models: [{ slug: "composer-2.5" }, { slug: codexModel }],
+    })).toString("base64"),
+  });
+  assert.deepEqual(overlappingNative.nativeModels, ["composer-2.5"]);
   for (const value of [
     { ...base, unknown: true },
     { ...base, apiKey: `short key` },
@@ -1171,18 +1222,27 @@ test("the maximum model catalog remains inside the bounded provision payload", (
     { model, context: "1m", effort: "xhigh", fast: true, thinking: true },
   ]));
   const input = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     apiKey: "a".repeat(1024),
     model: models[0],
+    codexModel: "syncbar-cursor/max-model",
     port: 65535,
     bridgeToken: "b".repeat(64),
     models,
     modelParameters,
+    modelRoutesJSON: JSON.stringify({
+      "syncbar-cursor/max-model": {
+        default_effort: "xhigh",
+        variants: { xhigh: { standard: models[0] } },
+      },
+    }),
+    nativeModels: [],
+    catalogData: Buffer.from(JSON.stringify({ models: [{ slug: "syncbar-cursor/max-model" }] })).toString("base64"),
   };
   const encoded = Buffer.from(JSON.stringify(input));
   assert.ok(encoded.length > 128 * 1024);
   assert.ok(encoded.length <= MAX_PROVISION_BYTES);
-  assert.deepEqual(validateProvisionInput(input), input);
+  assert.equal(validateProvisionInput(input).models.length, 512);
 });
 
 test("the provision CLI enforces the exact serialized input boundary", async () => {
@@ -1201,17 +1261,18 @@ test("the provision CLI enforces the exact serialized input boundary", async () 
 
 test("gpt-switch enforces the same model metadata and payload contract", async () => {
   const source = await readFile(gptSwitchPath, "utf8");
-  assert.match(source, /head -c 524289/);
-  assert.match(source, /\[ "\$bytes" -le 524288 \]/);
+  assert.match(source, /head -c 4194305/);
+  assert.match(source, /\[ "\$bytes" -le 4194304 \]/);
   const marker = `printf '%s' "$payload" | /usr/bin/jq -e '\n`;
   const start = source.indexOf(marker) + marker.length;
   const end = source.indexOf("\n  ' >/dev/null", start);
   assert.ok(start >= marker.length && end > start, "Cursor jq validator must remain extractable");
   const filter = source.slice(start, end);
   const valid = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     apiKey: "a".repeat(16),
     model: "composer-2.5",
+    codexModel: "syncbar-cursor/composer-2.5",
     port: 32125,
     bridgeToken: "b".repeat(64),
     models: ["composer-2.5"],
@@ -1224,6 +1285,16 @@ test("gpt-switch enforces the same model metadata and payload contract", async (
         thinking: true,
       },
     },
+    modelRoutesJSON: JSON.stringify({
+      "syncbar-cursor/composer-2.5": {
+        default_effort: "high",
+        variants: { high: { standard: "composer-2.5" } },
+      },
+    }),
+    nativeModels: [],
+    catalogData: Buffer.from(JSON.stringify({
+      models: [{ slug: "syncbar-cursor/composer-2.5" }],
+    })).toString("base64"),
   };
   const check = (value) => spawnCaptured("/usr/bin/jq", ["-e", filter], {
     stdin: JSON.stringify(value),
@@ -1255,6 +1326,8 @@ test("show and provision CLI output never disclose stored secrets", async () => 
   const launches = await bridgeLaunches(fixture);
   assert.equal(launches.length, 1);
   assert.deepEqual(launches[0].modelParameters, fixture.modelParameters);
+  assert.deepEqual(launches[0].modelRoutes, JSON.parse(fixture.input.modelRoutesJSON));
+  assert.deepEqual(launches[0].nativeModels, fixture.input.nativeModels);
   assert.doesNotThrow(() => process.kill(launches[0].pid, 0));
 
   const showResult = await spawnManager("show", fixture);
@@ -1264,6 +1337,7 @@ test("show and provision CLI output never disclose stored secrets", async () => 
   assert.equal(status.healthy, true);
   assert.ok(Number.isSafeInteger(status.pid));
   assert.deepEqual(status.modelParameters, fixture.modelParameters);
+  assert.equal(status.codexModel, fixture.input.codexModel);
   detachedPIDs.add(status.pid);
   assert.doesNotMatch(showResult.stdout, new RegExp(fixture.apiKey));
   assert.doesNotMatch(showResult.stdout, new RegExp(fixture.bridgeToken));
@@ -1313,6 +1387,8 @@ test("readRuntime migrates legacy model slugs without guessing context", async (
   const paths = managerPaths({ home: fixture.home, env: fixture.env });
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
   const legacy = JSON.parse(await readFile(paths.runtime, "utf8"));
+  legacy.schemaVersion = 1;
+  for (const key of ["catalogPath", "codexModel", "modelRoutes", "nativeModels"]) delete legacy[key];
   delete legacy.modelParameters;
   await writeFile(paths.runtime, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
   await chmod(paths.runtime, 0o600);
@@ -1389,6 +1465,32 @@ test("generated provider and command auth complete a bundled Codex exec through 
     return;
   }
   const fixture = await makeFixture({ productionBridge: true });
+  let installedCatalog;
+  try {
+    installedCatalog = JSON.parse(await readFile(path.join(
+      os.homedir(), ".local", "share", "gpt-switch", "cursor-codex-model-catalog.json"), "utf8"));
+  } catch {
+    context.skip("no validated local Codex model catalog is installed");
+    return;
+  }
+  const template = installedCatalog.models?.find((entry) => entry.slug === "gpt-5.6-sol")
+    ?? installedCatalog.models?.[0];
+  if (!template) {
+    context.skip("installed Codex model catalog has no template model");
+    return;
+  }
+  installedCatalog.models = installedCatalog.models
+    .filter((entry) => entry.slug !== fixture.input.codexModel);
+  installedCatalog.models.push({
+    ...template,
+    slug: fixture.input.codexModel,
+    display_name: "Cursor Composer 2.5",
+    default_reasoning_level: "default",
+    supported_reasoning_levels: [],
+    additional_speed_tiers: [],
+    service_tiers: [],
+  });
+  fixture.input.catalogData = Buffer.from(JSON.stringify(installedCatalog)).toString("base64");
   await provision(fixture.input, { home: fixture.home, env: fixture.env });
   const runtime = await readRuntime({ home: fixture.home, env: fixture.env });
   const health = await bridgeHealth({ runtime });

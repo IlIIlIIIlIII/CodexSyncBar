@@ -2334,13 +2334,27 @@ final class AppModel: ObservableObject {
                     thinking: false)
             )
         })
+        guard let codexModel = exposedCatalog.preferredPickerModelID(
+            forFlatSlug: cursorBridgePreferences.model)
+        else {
+            throw AppError.processFailed("선택한 Cursor 모델의 Codex 모델 ID를 만들 수 없습니다.")
+        }
+        let catalogData = try await codexCursorModelCatalogService.generatedCatalog(
+            cursorCatalog: exposedCatalog)
+        let catalogSlugs = try CodexCursorModelCatalogBuilder.bundledModelSlugs(
+            from: catalogData)
+        let nativeModels = catalogSlugs.filter { !$0.hasPrefix("syncbar-cursor/") }
         let request = try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: cursorBridgePreferences.model,
+            codexModel: codexModel,
             port: cursorBridgePreferences.port,
             bridgeToken: cursorBridgePreferences.bridgeToken,
             models: models,
-            modelParameters: modelParameters)
+            modelParameters: modelParameters,
+            modelRoutesJSON: exposedCatalog.cursorRouteJSON(),
+            nativeModels: nativeModels,
+            catalogData: catalogData)
         return try await switchService.provisionCursor(deviceID: deviceID, request: request)
     }
 

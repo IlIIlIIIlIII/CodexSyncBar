@@ -22,8 +22,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const RUNTIME_SCHEMA_VERSION = 1;
-export const MAX_PROVISION_BYTES = 512 * 1024;
+export const RUNTIME_SCHEMA_VERSION = 2;
+export const PROVISION_SCHEMA_VERSION = 2;
+export const MAX_CATALOG_BYTES = 2 * 1024 * 1024;
+export const MAX_PROVISION_BYTES = 4 * 1024 * 1024;
 export const PROVIDER_ID = "syncbar_cursor_bridge";
 export const MARKER_BEGIN = "# BEGIN CODEX SYNCBAR CURSOR REMOTE v1";
 export const MARKER_END = "# END CODEX SYNCBAR CURSOR REMOTE v1";
@@ -32,9 +34,12 @@ const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const MODEL_PARAMETER_EFFORTS = new Set([
   "none", "minimal", "low", "medium", "high", "xhigh", "max",
 ]);
+const MODEL_ROUTE_EFFORTS = new Set([
+  "default", ...MODEL_PARAMETER_EFFORTS,
+]);
 const BRIDGE_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_RUNTIME_BYTES = MAX_PROVISION_BYTES;
-const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
+const MAX_JOURNAL_BYTES = 16 * 1024 * 1024;
 const MAX_INSTALLER_BYTES = 2 * 1024 * 1024;
 const MAX_CHILD_OUTPUT_BYTES = 512 * 1024;
 const DEFAULT_INSTALL_URL = "https://cursor.com/install";
@@ -172,6 +177,100 @@ function validatedModelParameters(value, models) {
   return result;
 }
 
+function validatedModelRoutesJSON(value, models, codexModel) {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 512 * 1024) {
+    fail("modelRoutesJSON is invalid", "invalid_model_routes");
+  }
+  let routes;
+  try { routes = JSON.parse(value); } catch {
+    fail("modelRoutesJSON is invalid", "invalid_model_routes");
+  }
+  if (!routes || typeof routes !== "object" || Array.isArray(routes) ||
+      Object.keys(routes).length === 0 || Object.keys(routes).length > 512 ||
+      !Object.hasOwn(routes, codexModel)) {
+    fail("modelRoutesJSON is invalid", "invalid_model_routes");
+  }
+  const allowed = new Set(models);
+  const normalized = {};
+  for (const [pickerModel, route] of Object.entries(routes)) {
+    validatedModel(pickerModel);
+    if (allowed.has(pickerModel) || !route || typeof route !== "object" || Array.isArray(route) ||
+        !exactObjectKeys(route, ["default_effort", "variants"]) ||
+        typeof route.default_effort !== "string" ||
+        !MODEL_ROUTE_EFFORTS.has(route.default_effort) ||
+        !route.variants || typeof route.variants !== "object" || Array.isArray(route.variants)) {
+      fail("modelRoutesJSON is invalid", "invalid_model_routes");
+    }
+    if (!Object.hasOwn(route.variants, route.default_effort)) {
+      fail("modelRoutesJSON is missing its default variant", "invalid_model_routes");
+    }
+    const variants = {};
+    for (const [effort, tiers] of Object.entries(route.variants)) {
+      if (!MODEL_ROUTE_EFFORTS.has(effort) || !tiers || typeof tiers !== "object" ||
+          Array.isArray(tiers) || Object.keys(tiers).length === 0 ||
+          typeof tiers.standard !== "string" ||
+          Object.keys(tiers).some((tier) => !["standard", "fast"].includes(tier))) {
+        fail("modelRoutesJSON is invalid", "invalid_model_routes");
+      }
+      variants[effort] = {};
+      for (const [tier, slug] of Object.entries(tiers)) {
+        if (typeof slug !== "string" || !allowed.has(slug)) {
+          fail("modelRoutesJSON references an unavailable model", "invalid_model_routes");
+        }
+        variants[effort][tier] = slug;
+      }
+    }
+    normalized[pickerModel] = { default_effort: route.default_effort, variants };
+  }
+  return normalized;
+}
+
+function validatedNativeModels(value, models, modelRoutes) {
+  if (!Array.isArray(value) || value.length > 512) {
+    fail("nativeModels is invalid", "invalid_native_models");
+  }
+  // Native Codex ids may also be exact Cursor CLI slugs. The bridge checks
+  // native models first and keeps the Cursor choice under syncbar-cursor/*.
+  const reserved = new Set(Object.keys(modelRoutes));
+  const seen = new Set();
+  return value.map((candidate) => {
+    const slug = validatedModel(candidate);
+    if (reserved.has(slug) || !seen.add(slug)) {
+      fail("nativeModels is invalid", "invalid_native_models");
+    }
+    return slug;
+  });
+}
+
+function decodedCatalog(value, codexModel, modelRoutes, nativeModels) {
+  if (typeof value !== "string" || value.length === 0) {
+    fail("catalogData is invalid", "invalid_catalog");
+  }
+  const data = Buffer.from(value, "base64");
+  if (data.length === 0 || data.length > MAX_CATALOG_BYTES || data.toString("base64") !== value) {
+    fail("catalogData is invalid", "invalid_catalog");
+  }
+  let catalog;
+  try { catalog = JSON.parse(data.toString("utf8")); } catch {
+    fail("catalogData is invalid", "invalid_catalog");
+  }
+  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog) || !Array.isArray(catalog.models)) {
+    fail("catalogData is invalid", "invalid_catalog");
+  }
+  const slugs = new Set();
+  for (const entry of catalog.models) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
+        typeof entry.slug !== "string" || !MODEL_PATTERN.test(entry.slug) || slugs.has(entry.slug)) {
+      fail("catalogData model ids are invalid", "invalid_catalog");
+    }
+    slugs.add(entry.slug);
+  }
+  for (const slug of [codexModel, ...Object.keys(modelRoutes), ...nativeModels]) {
+    if (!slugs.has(slug)) fail("catalogData does not match model routing", "invalid_catalog");
+  }
+  return data;
+}
+
 function migratedModelParameters(models) {
   const aliases = new Map([
     ["auto", "default"],
@@ -241,11 +340,12 @@ export function validateProvisionInput(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     fail("provision input must be a JSON object", "invalid_input");
   }
-  if (value.schemaVersion !== RUNTIME_SCHEMA_VERSION) {
+  if (value.schemaVersion !== PROVISION_SCHEMA_VERSION) {
     fail("unsupported provision schemaVersion", "invalid_schema");
   }
   const expectedKeys = [
-    "apiKey", "bridgeToken", "model", "modelParameters", "models", "port", "schemaVersion",
+    "apiKey", "bridgeToken", "catalogData", "codexModel", "model", "modelParameters",
+    "modelRoutesJSON", "models", "nativeModels", "port", "schemaVersion",
   ];
   const actualKeys = Object.keys(value).sort();
   if (actualKeys.length !== expectedKeys.length ||
@@ -258,6 +358,9 @@ export function validateProvisionInput(value) {
     fail("port must be between 1024 and 65535", "invalid_port");
   }
   const models = validatedModels(value.models, model);
+  const codexModel = validatedModel(value.codexModel);
+  const modelRoutes = validatedModelRoutesJSON(value.modelRoutesJSON, models, codexModel);
+  const nativeModels = validatedNativeModels(value.nativeModels, models, modelRoutes);
   return {
     schemaVersion: RUNTIME_SCHEMA_VERSION,
     apiKey: validatedAPIKey(value.apiKey),
@@ -266,6 +369,10 @@ export function validateProvisionInput(value) {
     bridgeToken: validatedBridgeToken(value.bridgeToken),
     models,
     modelParameters: validatedModelParameters(value.modelParameters, models),
+    codexModel,
+    modelRoutes,
+    nativeModels,
+    catalogData: decodedCatalog(value.catalogData, codexModel, modelRoutes, nativeModels),
   };
 }
 
@@ -279,6 +386,7 @@ export function managerPaths(options = {}) {
     stateRoot,
     runtime: path.join(stateRoot, "cursor-remote-runtime.json"),
     backup: path.join(stateRoot, "cursor-remote-config-backup.json"),
+    catalog: path.join(stateRoot, "cursor-codex-model-catalog.json"),
     journal: path.join(stateRoot, "cursor-remote-transaction.json"),
     lock: path.join(stateRoot, ".cursor-remote-manager.lock"),
     configDirectory: path.join(home, ".codex"),
@@ -580,21 +688,27 @@ export function patchCodexConfig(originalText, runtime, options = {}) {
     if (trimmed.includes('"""') || trimmed.includes("'''")) {
       fail("Top-level multiline TOML cannot be patched safely", "unsupported_config");
     }
-    if (/^["'](?:model|model_provider)["']\s*=/.test(trimmed)) {
+    if (/^["'](?:model|model_provider|model_catalog_json)["']\s*=/.test(trimmed)) {
       fail("Quoted top-level model keys cannot be patched safely", "unsupported_config");
     }
-    const match = /^(model|model_provider)\s*=/.exec(trimmed);
+    const match = /^(model|model_provider|model_catalog_json)\s*=/.exec(trimmed);
     if (!match) continue;
     if (found.has(match[1])) fail("Duplicate top-level model configuration", "unsupported_config");
     found.set(match[1], index);
   }
 
   const assignments = {
-    model: `model = ${tomlString(runtime.model)}`,
+    model: `model = ${tomlString(runtime.codexModel ?? runtime.model)}`,
     model_provider: `model_provider = ${tomlString(PROVIDER_ID)}`,
+    model_catalog_json: runtime.catalogPath
+      ? `model_catalog_json = ${tomlString(runtime.catalogPath)}`
+      : null,
   };
   const missing = [];
-  for (const key of ["model", "model_provider"]) {
+  const managedKeys = runtime.catalogPath
+    ? ["model", "model_provider", "model_catalog_json"]
+    : ["model", "model_provider"];
+  for (const key of managedKeys) {
     const index = found.get(key);
     if (index === undefined) missing.push({ content: assignments[key], ending: newline });
     else lines[index].content = assignments[key];
@@ -649,30 +763,50 @@ function runtimeFromDisk(value) {
     "model", "models", "nodePath", "port", "schemaVersion", "workspace",
     "xdgCache", "xdgConfig", "xdgData", "xdgState",
   ];
+  const currentKeys = [
+    ...legacyKeys, "catalogPath", "codexModel", "modelParameters", "modelRoutes", "nativeModels",
+  ];
   const actualKeys = Object.keys(value).sort();
-  const expectedKeys = Object.hasOwn(value, "modelParameters")
-    ? [...legacyKeys, "modelParameters"].sort()
-    : legacyKeys;
+  const isCurrent = value.schemaVersion === RUNTIME_SCHEMA_VERSION;
+  const expectedKeys = isCurrent
+    ? currentKeys.sort()
+    : (Object.hasOwn(value, "modelParameters") ? [...legacyKeys, "modelParameters"].sort() : legacyKeys);
   if (actualKeys.length !== expectedKeys.length ||
       actualKeys.some((key, index) => key !== expectedKeys[index])) {
     fail("Cursor remote runtime has missing or unknown fields", "invalid_runtime");
   }
+  if (!isCurrent && value.schemaVersion !== 1) fail("Cursor remote runtime schema is invalid", "invalid_runtime");
   const modelParameters = Object.hasOwn(value, "modelParameters")
     ? value.modelParameters
     : (Array.isArray(value.models) && value.models.every((model) => typeof model === "string")
         ? migratedModelParameters(value.models)
         : {});
-  const input = validateProvisionInput({
-    schemaVersion: value.schemaVersion,
-    apiKey: value.apiKey,
-    model: value.model,
-    port: value.port,
-    bridgeToken: value.bridgeToken,
-    models: value.models,
-    modelParameters,
-  });
+  const model = validatedModel(value.model);
+  const port = Number(value.port);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    fail("Cursor remote runtime port is invalid", "invalid_runtime");
+  }
+  const models = validatedModels(value.models, model);
+  const modelParametersValue = validatedModelParameters(modelParameters, models);
+  const codexModel = isCurrent ? validatedModel(value.codexModel) : model;
+  const modelRoutes = isCurrent
+    ? validatedModelRoutesJSON(JSON.stringify(value.modelRoutes), models, codexModel)
+    : {};
+  const nativeModels = isCurrent
+    ? validatedNativeModels(value.nativeModels, models, modelRoutes)
+    : [];
   return {
-    ...input,
+    schemaVersion: value.schemaVersion,
+    apiKey: validatedAPIKey(value.apiKey),
+    model,
+    port,
+    bridgeToken: validatedBridgeToken(value.bridgeToken),
+    models,
+    modelParameters: modelParametersValue,
+    codexModel,
+    modelRoutes,
+    nativeModels,
+    ...(isCurrent ? { catalogPath: validatedAbsolutePath(value.catalogPath, "catalog path") } : {}),
     home: validatedAbsolutePath(value.home, "runtime HOME"),
     cursorHome: validatedAbsolutePath(value.cursorHome, "Cursor isolated HOME"),
     agentPath: validatedAbsolutePath(value.agentPath, "Cursor agent path"),
@@ -905,14 +1039,16 @@ async function resolvedRuntime(input, paths, environment, options = {}) {
   );
   const nodePath = await executablePath(environment.CURSOR_REMOTE_NODE_PATH ?? process.execPath, "Node");
   const managerPath = await regularFilePath(options.managerPath ?? thisFile, "Cursor remote manager");
+  const { catalogData: _catalogData, ...runtimeInput } = input;
   return {
-    ...input,
+    ...runtimeInput,
     home: paths.home,
     cursorHome: paths.cursorHome,
     agentPath,
     bridgePath,
     nodePath,
     managerPath,
+    catalogPath: paths.catalog,
     workspace: paths.workspace,
     xdgConfig: paths.xdgConfig,
     xdgData: paths.xdgData,
@@ -926,16 +1062,17 @@ function decodeBackup(snapshot) {
   if (snapshot.mode !== 0o600) fail("Cursor config backup must have mode 0600", "unsafe_permissions");
   const value = decodeJSON(snapshot.data, "Cursor config backup");
   const isLegacy = value?.schemaVersion === 1;
-  const isCurrent = value?.schemaVersion === 2;
+  const hasInstalledModel = value?.schemaVersion === 2 || value?.schemaVersion === 3;
+  const isCurrent = value?.schemaVersion === 3;
   if (
-    (!isLegacy && !isCurrent) ||
+    (!isLegacy && !hasInstalledModel) ||
     typeof value.originalExisted !== "boolean" ||
     typeof value.originalDataBase64 !== "string" ||
     typeof value.originalSHA256 !== "string" ||
     typeof value.installedSHA256 !== "string" ||
     typeof value.runtimeSHA256 !== "string" ||
     !Number.isInteger(value.originalMode) ||
-    (isCurrent && typeof value.installedModel !== "string") ||
+    (hasInstalledModel && typeof value.installedModel !== "string") ||
     (isLegacy && Object.hasOwn(value, "installedModel"))
   ) {
     fail("Cursor config backup is invalid", "invalid_backup");
@@ -943,10 +1080,31 @@ function decodeBackup(snapshot) {
   const originalData = Buffer.from(value.originalDataBase64, "base64");
   const expectedHash = value.originalExisted ? sha256(originalData) : sha256(Buffer.alloc(0));
   if (expectedHash !== value.originalSHA256) fail("Cursor config backup checksum is invalid", "invalid_backup");
+  let originalCatalogData = Buffer.alloc(0);
+  if (isCurrent) {
+    if (typeof value.originalCatalogExisted !== "boolean" ||
+        typeof value.originalCatalogDataBase64 !== "string" ||
+        typeof value.originalCatalogSHA256 !== "string" ||
+        typeof value.installedCatalogSHA256 !== "string" ||
+        !Number.isInteger(value.originalCatalogMode)) {
+      fail("Cursor catalog backup is invalid", "invalid_backup");
+    }
+    originalCatalogData = Buffer.from(value.originalCatalogDataBase64, "base64");
+    const catalogHash = value.originalCatalogExisted
+      ? sha256(originalCatalogData)
+      : sha256(Buffer.alloc(0));
+    if (catalogHash !== value.originalCatalogSHA256 ||
+        (value.originalCatalogExisted && originalCatalogData.toString("base64") !== value.originalCatalogDataBase64)) {
+      fail("Cursor catalog backup checksum is invalid", "invalid_backup");
+    }
+  }
   return {
     ...value,
-    installedModel: isCurrent ? validatedModel(value.installedModel) : null,
+    installedModel: hasInstalledModel ? validatedModel(value.installedModel) : null,
     originalData,
+    originalCatalogExisted: isCurrent ? value.originalCatalogExisted : false,
+    originalCatalogMode: isCurrent ? value.originalCatalogMode : 0o600,
+    originalCatalogData,
   };
 }
 
@@ -960,10 +1118,10 @@ function topLevelModelProviderLines(text) {
     if (trimmed.includes('\"\"\"') || trimmed.includes("'''")) {
       fail("Top-level multiline TOML cannot be validated safely", "unsupported_config");
     }
-    if (/^["'](?:model|model_provider)["']\s*=/.test(trimmed)) {
+    if (/^["'](?:model|model_provider|model_catalog_json)["']\s*=/.test(trimmed)) {
       fail("Quoted top-level model keys cannot be validated safely", "unsupported_config");
     }
-    const match = /^(model|model_provider)\s*=/.exec(trimmed);
+    const match = /^(model|model_provider|model_catalog_json)\s*=/.exec(trimmed);
     if (!match) continue;
     if (found.has(match[1])) fail("Duplicate top-level model configuration", "unsupported_config");
     found.set(match[1], { index, content: lines[index].content });
@@ -975,6 +1133,7 @@ function strictManagedTopLevel(text) {
   const parsed = topLevelModelProviderLines(text);
   const modelLine = parsed.found.get("model");
   const providerLine = parsed.found.get("model_provider");
+  const catalogLine = parsed.found.get("model_catalog_json");
   if (!modelLine || !providerLine) {
     fail("Managed Codex config has missing model settings", "unsupported_config");
   }
@@ -987,14 +1146,23 @@ function strictManagedTopLevel(text) {
   if (!modelMatch || !providerMatch || providerMatch[1] !== PROVIDER_ID) {
     fail("Managed Codex model settings are invalid", "unsupported_config");
   }
-  return { ...parsed, model: validatedModel(modelMatch[1]) };
+  const catalogMatch = catalogLine
+    ? /^model_catalog_json\s*=\s*"([^"\r\n]+)"\s*$/.exec(catalogLine.content.trim())
+    : null;
+  if (catalogLine && !catalogMatch) {
+    fail("Managed Codex catalog setting is invalid", "unsupported_config");
+  }
+  return { ...parsed, model: validatedModel(modelMatch[1]), catalogPath: catalogMatch?.[1] ?? null };
 }
 
-function restoreOriginalTopLevel(managedText, originalText) {
+function restoreOriginalTopLevel(managedText, originalText, includeCatalog = false) {
   const managed = topLevelModelProviderLines(managedText);
   const original = topLevelModelProviderLines(originalText);
   const removals = [];
-  for (const key of ["model", "model_provider"]) {
+  const keys = includeCatalog
+    ? ["model", "model_provider", "model_catalog_json"]
+    : ["model", "model_provider"];
+  for (const key of keys) {
     const managedLine = managed.found.get(key);
     if (!managedLine) fail("Managed Codex config has missing model settings", "unsupported_config");
     const originalLine = original.found.get(key);
@@ -1026,7 +1194,7 @@ function managedConfigState(configSnapshot, backup, runtime, options = {}) {
   if (!configSnapshot.exists || configSnapshot.mode !== 0o600) {
     fail("Codex config changed after Cursor provisioning", "cas_mismatch");
   }
-  const installedModel = backup.installedModel ?? runtime.model;
+  const installedModel = backup.installedModel ?? runtime.codexModel ?? runtime.model;
   if (configSnapshot.hash === backup.installedSHA256) {
     return { selectedModel: installedModel, baseData: backup.originalData };
   }
@@ -1040,7 +1208,7 @@ function managedConfigState(configSnapshot, backup, runtime, options = {}) {
   }
   const expectedText = patchCodexConfig(
     originalText,
-    { ...runtime, model: installedModel },
+    { ...runtime, codexModel: installedModel },
     options,
   );
   if (sha256(Buffer.from(expectedText, "utf8")) !== backup.installedSHA256) {
@@ -1048,11 +1216,14 @@ function managedConfigState(configSnapshot, backup, runtime, options = {}) {
   }
 
   const current = strictManagedTopLevel(currentText);
+  if (runtime.catalogPath && current.catalogPath !== runtime.catalogPath) {
+    fail("Codex model catalog changed after Cursor provisioning", "cas_mismatch");
+  }
   for (const prefix of prefixCandidatesBeforeMarker(currentText)) {
-    const restored = restoreOriginalTopLevel(prefix, originalText);
+    const restored = restoreOriginalTopLevel(prefix, originalText, Boolean(runtime.catalogPath));
     const roundTrip = patchCodexConfig(
       restored,
-      { ...runtime, model: current.model },
+      { ...runtime, codexModel: current.model },
       options,
     );
     if (roundTrip === currentText) {
@@ -1070,7 +1241,7 @@ function absentCandidate() {
   return { exists: false, data: Buffer.alloc(0), hash: sha256(Buffer.alloc(0)), mode: 0o600 };
 }
 
-const TRANSACTION_FILE_KEYS = ["runtime", "config", "backup"];
+const TRANSACTION_FILE_KEYS = ["runtime", "catalog", "config", "backup"];
 
 function exactObjectKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -1109,8 +1280,9 @@ function decodeJournalSnapshot(value, privateFile) {
 function transactionFileSpecs(paths) {
   return {
     runtime: { path: paths.runtime, privateFile: true, maxBytes: MAX_RUNTIME_BYTES },
+    catalog: { path: paths.catalog, privateFile: true, maxBytes: MAX_CATALOG_BYTES },
     config: { path: paths.config, privateFile: false },
-    backup: { path: paths.backup, privateFile: true, maxBytes: MAX_RUNTIME_BYTES },
+    backup: { path: paths.backup, privateFile: true, maxBytes: MAX_PROVISION_BYTES },
   };
 }
 
@@ -1143,7 +1315,7 @@ function decodeTransactionJournal(snapshot) {
       !exactObjectKeys(value.files, TRANSACTION_FILE_KEYS)) {
     fail("Cursor transaction journal is invalid", "invalid_journal");
   }
-  const specs = { runtime: true, config: false, backup: true };
+  const specs = { runtime: true, catalog: true, config: false, backup: true };
   const files = {};
   for (const key of TRANSACTION_FILE_KEYS) {
     const pair = value.files[key];
@@ -1157,6 +1329,7 @@ function decodeTransactionJournal(snapshot) {
   }
   if (value.operation === "provision" &&
       (!files.runtime.new.exists || files.runtime.new.mode !== 0o600 ||
+       !files.catalog.new.exists || files.catalog.new.mode !== 0o600 ||
        !files.backup.new.exists || files.backup.new.mode !== 0o600 ||
        !files.config.new.exists)) {
     fail("Cursor provision journal is invalid", "invalid_journal");
@@ -1230,8 +1403,12 @@ async function classifyTransactionFiles(paths, journal) {
 async function applyTransactionFiles(paths, journal, target, options = {}) {
   const specs = transactionFileSpecs(paths);
   const order = target === "new"
-    ? (journal.operation === "provision" ? ["runtime", "config", "backup"] : ["config", "runtime", "backup"])
-    : (journal.operation === "provision" ? ["backup", "config", "runtime"] : ["backup", "runtime", "config"]);
+    ? (journal.operation === "provision"
+        ? ["runtime", "catalog", "config", "backup"]
+        : ["config", "catalog", "runtime", "backup"])
+    : (journal.operation === "provision"
+        ? ["backup", "config", "catalog", "runtime"]
+        : ["backup", "runtime", "catalog", "config"]);
   for (const key of order) {
     const current = await safeSnapshot(specs[key].path, {
       privateFile: specs[key].privateFile,
@@ -1335,7 +1512,11 @@ export async function provision(inputValue, options = {}) {
     );
     const backupSnapshot = await safeSnapshot(
       paths.backup,
-      { privateFile: true, maxBytes: MAX_RUNTIME_BYTES },
+      { privateFile: true, maxBytes: MAX_PROVISION_BYTES },
+    );
+    const catalogSnapshot = await safeSnapshot(
+      paths.catalog,
+      { privateFile: true, maxBytes: MAX_CATALOG_BYTES },
     );
     const freshAttempt = !runtimeSnapshot.exists && !backupSnapshot.exists;
     let journal = null;
@@ -1343,7 +1524,8 @@ export async function provision(inputValue, options = {}) {
       const existingBackup = decodeBackup(backupSnapshot);
       let original;
       let oldRuntime = null;
-      let selectedConfigModel = input.model;
+      let selectedConfigModel = input.codexModel;
+      let originalCatalog = catalogSnapshot;
       if (existingBackup) {
         if (!runtimeSnapshot.exists || runtimeSnapshot.hash !== existingBackup.runtimeSHA256 ||
             runtimeSnapshot.mode !== 0o600) {
@@ -1356,16 +1538,31 @@ export async function provision(inputValue, options = {}) {
           oldRuntime,
           options,
         );
-        selectedConfigModel = managedState.selectedModel;
+        selectedConfigModel = existingBackup.schemaVersion === 3
+          ? managedState.selectedModel
+          : input.codexModel;
         original = {
           exists: existingBackup.originalExisted || managedState.baseData.length > 0,
           data: managedState.baseData,
           hash: sha256(managedState.baseData),
           mode: existingBackup.originalMode,
         };
+        if (existingBackup.schemaVersion === 3) {
+          if (!catalogSnapshot.exists || catalogSnapshot.hash !== existingBackup.installedCatalogSHA256 ||
+              catalogSnapshot.mode !== 0o600) {
+            fail("Cursor model catalog changed after provisioning", "cas_mismatch");
+          }
+          originalCatalog = existingBackup.originalCatalogExisted
+            ? candidate(existingBackup.originalCatalogData, existingBackup.originalCatalogMode)
+            : absentCandidate();
+        } else if (catalogSnapshot.exists) {
+          fail("An unmanaged Cursor model catalog already exists", "catalog_collision");
+        }
       } else {
         if (runtimeSnapshot.exists) fail("An unmanaged Cursor runtime already exists", "runtime_collision");
+        if (catalogSnapshot.exists) fail("An unmanaged Cursor model catalog already exists", "catalog_collision");
         original = configSnapshot;
+        originalCatalog = catalogSnapshot;
       }
 
       // A managed reprovision must replace the bridge generation even when the
@@ -1388,26 +1585,40 @@ export async function provision(inputValue, options = {}) {
       await ensureCursorXDGDirectories(paths);
       const runtime = await resolvedRuntime(input, paths, environment, options);
       await validateCursorAgent(runtime, environment);
+      if (!Object.hasOwn(runtime.modelRoutes, selectedConfigModel) &&
+          !runtime.nativeModels.includes(selectedConfigModel)) {
+        selectedConfigModel = runtime.codexModel;
+      }
 
       const patchedData = Buffer.from(patchCodexConfig(
         originalText,
-        { ...runtime, model: selectedConfigModel },
+        { ...runtime, codexModel: selectedConfigModel },
         options,
       ), "utf8");
       const runtimeData = privateJSON(runtime);
       const backup = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         originalExisted: original.exists,
         originalDataBase64: original.data.toString("base64"),
         originalSHA256: original.exists ? sha256(original.data) : sha256(Buffer.alloc(0)),
         originalMode: original.exists ? original.mode : 0o600,
         installedModel: selectedConfigModel,
         installedSHA256: sha256(patchedData),
+        originalCatalogExisted: originalCatalog.exists,
+        originalCatalogDataBase64: originalCatalog.exists
+          ? originalCatalog.data.toString("base64")
+          : "",
+        originalCatalogSHA256: originalCatalog.exists
+          ? sha256(originalCatalog.data)
+          : sha256(Buffer.alloc(0)),
+        originalCatalogMode: originalCatalog.exists ? originalCatalog.mode : 0o600,
+        installedCatalogSHA256: sha256(input.catalogData),
         runtimeSHA256: sha256(runtimeData),
       };
       const backupData = privateJSON(backup);
       const files = {
         runtime: { old: runtimeSnapshot, new: candidate(runtimeData) },
+        catalog: { old: catalogSnapshot, new: candidate(input.catalogData) },
         config: { old: configSnapshot, new: candidate(patchedData) },
         backup: { old: backupSnapshot, new: candidate(backupData) },
       };
@@ -1431,6 +1642,8 @@ export async function provision(inputValue, options = {}) {
 
       await atomicCompareAndSwap(paths.runtime, runtimeSnapshot, files.runtime.new);
       crashAfter(options, "provision", "after-runtime-commit");
+      await atomicCompareAndSwap(paths.catalog, catalogSnapshot, files.catalog.new);
+      crashAfter(options, "provision", "after-catalog-commit");
       await atomicCompareAndSwap(paths.config, configSnapshot, files.config.new);
       crashAfter(options, "provision", "after-config-commit");
       await atomicCompareAndSwap(paths.backup, backupSnapshot, files.backup.new);
@@ -1444,9 +1657,12 @@ export async function provision(inputValue, options = {}) {
       return {
         provisioned: true,
         model: runtime.model,
+        codexModel: runtime.codexModel,
         port: runtime.port,
         models: runtime.models,
         modelParameters: runtime.modelParameters,
+        modelRoutes: runtime.modelRoutes,
+        nativeModels: runtime.nativeModels,
         agentPath: runtime.agentPath,
       };
     } catch (error) {
@@ -1465,7 +1681,7 @@ export async function provision(inputValue, options = {}) {
         );
         const liveBackup = await safeSnapshot(
           paths.backup,
-          { privateFile: true, maxBytes: MAX_RUNTIME_BYTES },
+          { privateFile: true, maxBytes: MAX_PROVISION_BYTES },
         );
         const liveJournal = await safeSnapshot(
           paths.journal,
@@ -1523,17 +1739,22 @@ export async function bridgeHealth(options = {}) {
 }
 
 function detachedBridgeEnvironment(runtime, base = process.env) {
-  return {
+  const environment = {
     ...cursorRuntimeEnvironment(runtime, base),
     SYNCBAR_CURSOR_BRIDGE_TOKEN: runtime.bridgeToken,
     SYNCBAR_CURSOR_MODELS_JSON: JSON.stringify(runtime.models),
     SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON: JSON.stringify(runtime.modelParameters),
+    SYNCBAR_CURSOR_MODEL_ROUTES_JSON: JSON.stringify(runtime.modelRoutes ?? {}),
     // Cursor's Linux terminal sandbox requires host AppArmor support that is
     // absent on several SSH replicas. The remote bridge still enforces the
     // isolated empty workspace, ask mode, deny-all permissions, no MCP, and
     // fail-closed native-tool event handling.
     SYNCBAR_CURSOR_SANDBOX_MODE: "disabled",
   };
+  if (runtime.nativeModels?.length > 0) {
+    environment.SYNCBAR_NATIVE_MODELS_JSON = JSON.stringify(runtime.nativeModels);
+  }
+  return environment;
 }
 
 export async function ensureDetachedBridge(options = {}) {
@@ -1644,7 +1865,11 @@ export async function deprovision(options = {}) {
   return withManagerLock(paths, async () => {
     const configSnapshot = await safeSnapshot(paths.config, { privateFile: false });
     const runtimeSnapshot = await safeSnapshot(paths.runtime, { privateFile: true, maxBytes: MAX_RUNTIME_BYTES });
-    const backupSnapshot = await safeSnapshot(paths.backup, { privateFile: true, maxBytes: MAX_RUNTIME_BYTES });
+    const backupSnapshot = await safeSnapshot(paths.backup, { privateFile: true, maxBytes: MAX_PROVISION_BYTES });
+    const catalogSnapshot = await safeSnapshot(paths.catalog, {
+      privateFile: true,
+      maxBytes: MAX_CATALOG_BYTES,
+    });
     const backup = decodeBackup(backupSnapshot);
     if (!backup) {
       if (!runtimeSnapshot.exists) {
@@ -1665,9 +1890,21 @@ export async function deprovision(options = {}) {
     }
     await dedicatedXDGRootExists(paths);
     const runtime = runtimeFromDisk(decodeJSON(runtimeSnapshot.data, "Cursor remote runtime"));
+    if (runtime.catalogPath) {
+      if (runtime.catalogPath !== paths.catalog || !catalogSnapshot.exists ||
+          backup.schemaVersion !== 3 || catalogSnapshot.hash !== backup.installedCatalogSHA256 ||
+          catalogSnapshot.mode !== 0o600) {
+        fail("Cursor model catalog changed after provisioning", "cas_mismatch");
+      }
+    } else if (catalogSnapshot.exists) {
+      fail("An unmanaged Cursor model catalog already exists", "catalog_collision");
+    }
     const managedState = managedConfigState(configSnapshot, backup, runtime, options);
     const original = backup.originalExisted || managedState.baseData.length > 0
       ? candidate(managedState.baseData, backup.originalMode)
+      : absentCandidate();
+    const originalCatalog = backup.originalCatalogExisted
+      ? candidate(backup.originalCatalogData, backup.originalCatalogMode)
       : absentCandidate();
     // Never report deprovisioning success while a credential-bearing bridge
     // can remain on the managed port. Start the trusted runtime when idle so
@@ -1677,6 +1914,7 @@ export async function deprovision(options = {}) {
     const bridgeExpected = true;
     const files = {
       runtime: { old: runtimeSnapshot, new: absentCandidate() },
+      catalog: { old: catalogSnapshot, new: originalCatalog },
       config: { old: configSnapshot, new: original },
       backup: { old: backupSnapshot, new: absentCandidate() },
     };
@@ -1695,6 +1933,8 @@ export async function deprovision(options = {}) {
       crashAfter(options, "deprovision", "after-stop-old");
       await atomicCompareAndSwap(paths.config, configSnapshot, files.config.new);
       crashAfter(options, "deprovision", "after-config-commit");
+      await atomicCompareAndSwap(paths.catalog, catalogSnapshot, files.catalog.new);
+      crashAfter(options, "deprovision", "after-catalog-commit");
       await atomicCompareAndSwap(paths.runtime, runtimeSnapshot, files.runtime.new);
       crashAfter(options, "deprovision", "after-runtime-commit");
       await atomicCompareAndSwap(paths.backup, backupSnapshot, files.backup.new);
@@ -1732,9 +1972,12 @@ export async function show(options = {}) {
     healthy: health.healthy,
     pid: health.pid,
     model: runtime.model,
+    codexModel: runtime.codexModel,
     port: runtime.port,
     models: runtime.models,
     modelParameters: runtime.modelParameters,
+    modelRoutes: runtime.modelRoutes,
+    nativeModels: runtime.nativeModels,
     agentPath: runtime.agentPath,
   };
 }

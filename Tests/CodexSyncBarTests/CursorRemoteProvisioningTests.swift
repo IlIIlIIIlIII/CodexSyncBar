@@ -2,6 +2,11 @@ import Foundation
 import XCTest
 @testable import CodexSyncBar
 
+private let testRemoteCodexModel = "syncbar-cursor/test-model"
+private let testRemoteRoutesJSON = #"{"syncbar-cursor/test-model":{}}"#
+private let testRemoteCatalogData = Data(
+    #"{"models":[{"slug":"gpt-5.6-sol"},{"slug":"syncbar-cursor/test-model"}]}"#.utf8)
+
 final class CursorRemoteProvisioningTests: XCTestCase {
     func testRequestValidationAndEncodingKeepSecretsOutOfMetadata() throws {
         let apiKey = "cursor_" + String(repeating: "a", count: 32)
@@ -19,17 +24,27 @@ final class CursorRemoteProvisioningTests: XCTestCase {
                 effort: nil,
                 fast: false,
                 thinking: false),
+            "gpt-5.6-sol": CursorACPModelParameters(
+                model: "gpt-5.6-sol",
+                context: nil,
+                effort: nil,
+                fast: false,
+                thinking: false),
         ]
         let request = try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "gpt-5.6-sol-high",
+            codexModel: testRemoteCodexModel,
             port: 32125,
             bridgeToken: token,
-            models: ["gpt-5.6-sol-high", "composer-2.5", "composer-2.5"],
-            modelParameters: modelParameters)
+            models: ["gpt-5.6-sol-high", "composer-2.5", "gpt-5.6-sol", "composer-2.5"],
+            modelParameters: modelParameters,
+            modelRoutesJSON: testRemoteRoutesJSON,
+            nativeModels: ["gpt-5.6-sol"],
+            catalogData: testRemoteCatalogData)
 
-        XCTAssertEqual(request.schemaVersion, 1)
-        XCTAssertEqual(request.models, ["gpt-5.6-sol-high", "composer-2.5"])
+        XCTAssertEqual(request.schemaVersion, 2)
+        XCTAssertEqual(request.models, ["gpt-5.6-sol-high", "composer-2.5", "gpt-5.6-sol"])
         XCTAssertEqual(request.modelParameters, modelParameters)
         let data = try JSONEncoder().encode(request)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -48,28 +63,41 @@ final class CursorRemoteProvisioningTests: XCTestCase {
         XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "composer-2.5",
+            codexModel: testRemoteCodexModel,
             port: 32125,
             bridgeToken: token,
             models: ["composer-2.5", "모델-1"],
-            modelParameters: parameters(for: ["composer-2.5", "모델-1"])))
+            modelParameters: parameters(for: ["composer-2.5", "모델-1"]),
+            modelRoutesJSON: testRemoteRoutesJSON,
+            nativeModels: [],
+            catalogData: testRemoteCatalogData))
         XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "composer-2.5",
+            codexModel: testRemoteCodexModel,
             port: 32125,
             bridgeToken: token,
             models: ["gpt-5.6-sol-high"],
-            modelParameters: parameters(for: ["gpt-5.6-sol-high"])))
+            modelParameters: parameters(for: ["gpt-5.6-sol-high"]),
+            modelRoutesJSON: testRemoteRoutesJSON,
+            nativeModels: [],
+            catalogData: testRemoteCatalogData))
 
         XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "composer-2.5",
+            codexModel: testRemoteCodexModel,
             port: 32125,
             bridgeToken: token,
             models: ["composer-2.5"],
-            modelParameters: parameters(for: ["composer-2.5", "extra-model"])))
+            modelParameters: parameters(for: ["composer-2.5", "extra-model"]),
+            modelRoutesJSON: testRemoteRoutesJSON,
+            nativeModels: [],
+            catalogData: testRemoteCatalogData))
         XCTAssertThrowsError(try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: "composer-2.5",
+            codexModel: testRemoteCodexModel,
             port: 32125,
             bridgeToken: token,
             models: ["composer-2.5"],
@@ -80,7 +108,10 @@ final class CursorRemoteProvisioningTests: XCTestCase {
                     effort: .default,
                     fast: false,
                     thinking: false),
-            ]))
+            ],
+            modelRoutesJSON: testRemoteRoutesJSON,
+            nativeModels: [],
+            catalogData: testRemoteCatalogData))
     }
 
     func testProvisioningSummaryParserAcceptsOnlyExactSafeSummary() throws {
@@ -461,10 +492,14 @@ final class CursorRemoteProvisioningTests: XCTestCase {
         try CursorRemoteProvisioningRequest(
             apiKey: apiKey,
             model: model,
+            codexModel: testRemoteCodexModel,
             port: 32125,
             bridgeToken: String(repeating: "b", count: 64),
             models: models,
-            modelParameters: parameters(for: models))
+            modelParameters: parameters(for: models),
+            modelRoutesJSON: testRemoteRoutesJSON,
+            nativeModels: [],
+            catalogData: testRemoteCatalogData)
     }
 
     private func parameters(for models: [String]) -> [String: CursorACPModelParameters] {

@@ -219,13 +219,17 @@ final class CodexCursorModelCatalogService {
         } else {
             previousData = nil
         }
-        let bundled = try await loadBundledCatalog()
-        let candidate = try CodexCursorModelCatalogBuilder.build(
-            cursorCatalog: cursorCatalog,
-            bundledCatalogData: bundled)
+        let candidate = try await generatedCatalog(cursorCatalog: cursorCatalog)
         try ensureStateRoot()
         try atomicWrite(candidate, to: catalogURL)
         return previousData
+    }
+
+    func generatedCatalog(cursorCatalog: CursorModelCatalog) async throws -> Data {
+        let bundled = try await loadBundledCatalog()
+        return try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: cursorCatalog,
+            bundledCatalogData: bundled)
     }
 
     func restore(_ previousData: Data?) throws {
