@@ -95,11 +95,14 @@ if (
     timestamp_ms: 1,
     message: { content: [{ type: "text", text }] },
   })}\n`);
-  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text, session_id: "fixture-session" })}\n`);
   process.exit(0);
 }
 if (
-  prompt.includes("Exercise one local attachment tool read") &&
+  (
+    prompt.includes("Exercise one local attachment tool read") ||
+    args[args.indexOf("--resume") + 1] === "fixture-session"
+  ) &&
   hasCustomToolOutput
 ) {
   if (!prompt.includes("local-attachment-content-42")) process.exit(13);
@@ -109,7 +112,7 @@ if (
     timestamp_ms: 1,
     message: { content: [{ type: "text", text }] },
   })}\n`);
-  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text, session_id: "fixture-session" })}\n`);
   process.exit(0);
 }
 if (
@@ -138,7 +141,7 @@ if (
     timestamp_ms: 1,
     message: { content: [{ type: "text", text }] },
   })}\n`);
-  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text, session_id: "fixture-session" })}\n`);
   process.exit(0);
 }
 if (
@@ -151,7 +154,7 @@ if (
     timestamp_ms: 1,
     message: { content: [{ type: "text", text }] },
   })}\n`);
-  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text, session_id: "fixture-session" })}\n`);
   process.exit(0);
 }
 if (prompt.includes("Exercise one harmless tool call") && !hasFunctionToolOutput) {
@@ -177,7 +180,7 @@ if (prompt.includes("Exercise one harmless tool call") && !hasFunctionToolOutput
     timestamp_ms: 1,
     message: { content: [{ type: "text", text }] },
   })}\n`);
-  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text })}\n`);
+  process.stdout.write(`${JSON.stringify({ type: "result", subtype: "success", result: text, session_id: "fixture-session" })}\n`);
   process.exit(0);
 }
 

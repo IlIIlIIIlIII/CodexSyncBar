@@ -114,7 +114,7 @@ final class CodexCursorModelCatalogTests: XCTestCase {
 
         let gpt = models[4]
         XCTAssertEqual(gpt["display_name"] as? String,
-                       "Cursor · GPT · GPT-5.6 Sol")
+                       "Cursor · GPT-5.6 Sol")
         XCTAssertEqual(gpt["default_reasoning_level"] as? String, "medium")
         let levels = try XCTUnwrap(gpt["supported_reasoning_levels"] as? [[String: String]])
         XCTAssertEqual(levels.compactMap { $0["effort"] }, ["low", "medium"])
@@ -123,7 +123,7 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(gpt["supports_image_detail_original"] as? Bool, true)
 
         XCTAssertEqual(models[5]["display_name"] as? String,
-                       "Cursor · Codex · Codex 5.3")
+                       "Cursor · Codex 5.3")
     }
 
     func testDefaultCursorVariantDoesNotAdvertiseChangeableReasoning() throws {
@@ -188,7 +188,7 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             1_000_000)
         XCTAssertEqual(
             bySlug["syncbar-cursor/claude-opus-5/thinking"]?["display_name"] as? String,
-            "Cursor · Claude · Opus 5")
+            "Cursor · Opus 5")
         XCTAssertNil(bySlug["syncbar-cursor/claude-opus-5"])
     }
 
@@ -477,10 +477,10 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         XCTAssertNotNil(byID["syncbar-cursor/composer-2.5"])
         XCTAssertEqual(
             byID["syncbar-cursor/gpt-5.6-sol"]?["displayName"] as? String,
-            "Cursor · GPT · GPT-5.6 Sol")
+            "Cursor · GPT-5.6 Sol")
         XCTAssertEqual(
             byID["syncbar-cursor/gpt-5.3-codex"]?["displayName"] as? String,
-            "Cursor · Codex · Codex 5.3")
+            "Cursor · Codex 5.3")
         XCTAssertEqual(
             byID["syncbar-cursor/gpt-5.6-sol"]?["defaultReasoningEffort"] as? String,
             "medium")

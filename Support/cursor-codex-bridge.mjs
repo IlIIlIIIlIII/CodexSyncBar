@@ -34,6 +34,8 @@ const OFFICE_EXTRACTOR_TIMEOUT_MS = 15_000;
 const MAX_PDF_EXTRACTOR_OUTPUT_BYTES = 36 * 1024 * 1024;
 const PDF_EXTRACTOR_TIMEOUT_MS = 30_000;
 const MAX_CONCURRENT_REQUESTS = 4;
+const MAX_CURSOR_SESSIONS = 128;
+const CURSOR_SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_CURSOR_MODEL_COUNT = 512;
 const MAX_CURSOR_MODELS_JSON_BYTES = 128 * 1024;
 const MAX_CURSOR_MODEL_PARAMETERS_JSON_BYTES = 512 * 1024;
@@ -48,6 +50,7 @@ const CURSOR_REASONING_EFFORTS = new Set([
 const CHATGPT_RESPONSES_URL = new URL("https://chatgpt.com/backend-api/codex/responses");
 const OPENAI_API_RESPONSES_URL = new URL("https://api.openai.com/v1/responses");
 const OPENAI_PROXY_TEST_HOOKS = new WeakSet();
+const BRIDGE_REQUEST_TEST_HOOKS = new WeakSet();
 const PREPROCESSED_FILE = Symbol("syncbar-preprocessed-file");
 const BRIDGE_START = "<SYNCBAR_BACKEND_REQUEST>";
 const BRIDGE_END = "</SYNCBAR_BACKEND_REQUEST>";
@@ -144,6 +147,137 @@ export class MixedDeltaTracker {
     if (this.text.startsWith(snapshot)) return "";
     this.text = snapshot;
     return "";
+  }
+}
+
+function arrayStartsWith(values, prefix) {
+  if (!Array.isArray(values) || !Array.isArray(prefix) || prefix.length > values.length) {
+    return false;
+  }
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (stableJSONStringify(values[index]) !== stableJSONStringify(prefix[index])) return false;
+  }
+  return true;
+}
+
+export function continuationRequest(request, previous) {
+  if (!previous || !Array.isArray(request?.input)) return request;
+  const priorInput = Array.isArray(previous.input) ? previous.input : [];
+  const priorOutput = Array.isArray(previous.output) ? previous.output : [];
+  const combined = [...priorInput, ...priorOutput];
+  if (combined.length > 0 && arrayStartsWith(request.input, combined)) {
+    return { ...request, input: request.input.slice(combined.length) };
+  }
+  if (priorInput.length > 0 && arrayStartsWith(request.input, priorInput)) {
+    let suffix = request.input.slice(priorInput.length);
+    if (priorOutput.length > 0 && arrayStartsWith(suffix, priorOutput)) {
+      suffix = suffix.slice(priorOutput.length);
+    }
+    return { ...request, input: suffix };
+  }
+  // Responses clients may send only the new turn when previous_response_id is
+  // present. Preserve that incremental input unchanged.
+  return request;
+}
+
+export class CursorSessionRegistry {
+  constructor({
+    maxEntries = MAX_CURSOR_SESSIONS,
+    ttlMs = CURSOR_SESSION_TTL_MS,
+    now = () => Date.now(),
+  } = {}) {
+    this.maxEntries = maxEntries;
+    this.ttlMs = ttlMs;
+    this.now = now;
+    this.entries = new Map();
+    this.latestByClientKey = new Map();
+  }
+
+  delete(responseID) {
+    const entry = this.entries.get(responseID);
+    if (!entry) return;
+    this.entries.delete(responseID);
+    if (entry.clientKey && this.latestByClientKey.get(entry.clientKey) === responseID) {
+      this.latestByClientKey.delete(entry.clientKey);
+    }
+  }
+
+  prune() {
+    const cutoff = this.now() - this.ttlMs;
+    for (const [responseID, entry] of this.entries) {
+      if (entry.createdAt <= cutoff && !entry.inUse) this.delete(responseID);
+    }
+    while (this.entries.size > this.maxEntries) {
+      const removable = [...this.entries].find(([, entry]) => !entry.inUse);
+      if (!removable) break;
+      this.delete(removable[0]);
+    }
+  }
+
+  add(responseID, value) {
+    this.prune();
+    this.delete(responseID);
+    this.entries.set(responseID, {
+      ...value,
+      responseID,
+      createdAt: this.now(),
+      inUse: false,
+    });
+    if (value.clientKey) this.latestByClientKey.set(value.clientKey, responseID);
+    this.prune();
+  }
+
+  acquireLatest(clientKey, { model, workspace }) {
+    this.prune();
+    const responseID = this.latestByClientKey.get(clientKey);
+    const entry = responseID ? this.entries.get(responseID) : null;
+    if (!entry || entry.inUse || entry.model !== model || entry.workspace !== workspace) return null;
+    entry.inUse = true;
+    return entry;
+  }
+
+  acquire(responseID, { model, workspace }) {
+    this.prune();
+    const entry = this.entries.get(responseID);
+    if (!entry) {
+      throw new BridgeError(
+        "previous_response_id is unknown or expired",
+        409,
+        "invalid_previous_response",
+      );
+    }
+    if (entry.model !== model || entry.workspace !== workspace) {
+      throw new BridgeError(
+        "previous_response_id belongs to a different Cursor route",
+        409,
+        "invalid_previous_response",
+      );
+    }
+    if (entry.inUse) {
+      throw new BridgeError(
+        "previous_response_id is already being continued",
+        409,
+        "previous_response_in_use",
+      );
+    }
+    entry.inUse = true;
+    return entry;
+  }
+
+  release(responseID, { consume = false } = {}) {
+    const entry = this.entries.get(responseID);
+    if (!entry) return;
+    if (consume) this.delete(responseID);
+    else entry.inUse = false;
+  }
+
+  clear() {
+    this.entries.clear();
+    this.latestByClientKey.clear();
+  }
+
+  get size() {
+    return this.entries.size;
   }
 }
 
@@ -1970,8 +2104,8 @@ function toolItem(toolCall, completed) {
   return item;
 }
 
-export function buildResponseResult(request, cursorText) {
-  const id = `resp_${randomUUID().replaceAll("-", "")}`;
+export function buildResponseResult(request, cursorText, options = {}) {
+  const id = options.responseID ?? `resp_${randomUUID().replaceAll("-", "")}`;
   const parsed = parsedToolResponse(cursorText, request);
   const choice = normalizedToolChoice(request);
   if (!parsed && (choice.mode === "required" || choice.mode === "specific")) {
@@ -2105,11 +2239,11 @@ function trailingToolStartPrefixLength(text) {
 }
 
 export class StreamingResponseSSE {
-  constructor(request, emit) {
+  constructor(request, emit, options = {}) {
     this.request = request;
     this.emitEvent = emit;
     this.sequence = 0;
-    this.responseID = `resp_${randomUUID().replaceAll("-", "")}`;
+    this.responseID = options.responseID ?? `resp_${randomUUID().replaceAll("-", "")}`;
     this.messageID = `msg_${randomUUID().replaceAll("-", "")}`;
     this.base = responseBase(request, this.responseID, "in_progress", []);
     this.choice = normalizedToolChoice(request);
@@ -2508,6 +2642,7 @@ export function runCursorAgent({
   agentPath,
   workspace,
   model,
+  resumeChatID = null,
   sandboxMode = "enabled",
   prompt,
   timeoutMs,
@@ -2516,8 +2651,13 @@ export function runCursorAgent({
   onSpawn,
   onClose,
   onTextDelta,
+  now = () => performance.now(),
 }) {
   return new Promise((resolve, reject) => {
+    if (resumeChatID !== null && !validCursorSessionID(resumeChatID)) {
+      throw new BridgeError("Cursor resume session ID is invalid", 500, "invalid_cursor_session");
+    }
+    const startedAt = now();
     const args = [
       "--workspace",
       workspace,
@@ -2527,6 +2667,7 @@ export function runCursorAgent({
       sandboxMode,
       "-p",
     ];
+    if (resumeChatID) args.push("--resume", resumeChatID);
     if (model && model !== "auto") args.push("--model", model);
     args.push("--output-format", "stream-json", "--stream-partial-output");
     const child = spawnCursorChild(agentPath, args, {
@@ -2543,6 +2684,9 @@ export function runCursorAgent({
       sessionID: null,
       nativeToolCalls: 0,
       nativeToolSubtype: null,
+      resumed: Boolean(resumeChatID),
+      firstTextDeltaMs: null,
+      totalMs: null,
     };
     let stdoutBuffer = "";
     let stderrBytes = 0;
@@ -2584,6 +2728,9 @@ export function runCursorAgent({
         const line = stdoutBuffer.slice(0, newline);
         stdoutBuffer = stdoutBuffer.slice(newline + 1);
         const delta = parseNDJSONLine(line, tracker, metadata);
+        if (delta && metadata.firstTextDeltaMs === null) {
+          metadata.firstTextDeltaMs = Math.max(0, now() - startedAt);
+        }
         if (delta && onTextDelta) {
           try {
             onTextDelta(delta);
@@ -2614,6 +2761,9 @@ export function runCursorAgent({
       if (settled) return;
       if (stdoutBuffer.trim()) {
         const delta = parseNDJSONLine(stdoutBuffer, tracker, metadata);
+        if (delta && metadata.firstTextDeltaMs === null) {
+          metadata.firstTextDeltaMs = Math.max(0, now() - startedAt);
+        }
         if (delta && onTextDelta) {
           try {
             onTextDelta(delta);
@@ -2628,6 +2778,7 @@ export function runCursorAgent({
         }
       }
       finish(() => {
+        metadata.totalMs = Math.max(0, now() - startedAt);
         if (code !== 0) {
           reject(new BridgeError(
             `Cursor CLI exited unsuccessfully (code ${code ?? "null"}, signal ${childSignal ?? "none"}, stderr bytes ${stderrBytes})`,
@@ -2662,6 +2813,34 @@ export function runCursorAgent({
     if (signal?.aborted) abort();
     else child.stdin.end(prompt);
   });
+}
+
+function validCursorSessionID(value) {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    !value.startsWith("-") &&
+    !/[\r\n\0]/u.test(value);
+}
+
+function validClientContinuationKey(value) {
+  return typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    !/[\r\n\0]/u.test(value);
+}
+
+function emitCursorRequestMetric(config, metric) {
+  const payload = Object.freeze({
+    schema_version: 1,
+    event: "cursor_bridge_request",
+    ...metric,
+  });
+  if (typeof config.metricsSink === "function") {
+    config.metricsSink(payload);
+  } else if (config.metricsEnabled === true) {
+    process.stderr.write(`${JSON.stringify(payload)}\n`);
+  }
 }
 
 function acpMessageText(content) {
@@ -2785,6 +2964,7 @@ export function runCursorACP({
   onSpawn,
   onClose,
   onTextDelta,
+  now = () => performance.now(),
 }) {
   return new Promise((resolve, reject) => {
     if (!Array.isArray(prompt) || prompt.length < 2 || prompt[0]?.type !== "text") {
@@ -2798,6 +2978,7 @@ export function runCursorACP({
       reject(error);
       return;
     }
+    const startedAt = now();
     const args = [
       "--workspace",
       workspace,
@@ -2829,6 +3010,9 @@ export function runCursorACP({
       sessionID: null,
       nativeToolCalls: 0,
       nativeToolSubtype: null,
+      resumed: false,
+      firstTextDeltaMs: null,
+      totalMs: null,
     };
 
     const cleanup = () => {
@@ -2862,6 +3046,7 @@ export function runCursorACP({
     const finishSuccess = () => {
       if (settled) return;
       settled = true;
+      metadata.totalMs = Math.max(0, now() - startedAt);
       terminateChild(child);
       cleanup();
       waitForChildExit(child).then(() => resolve({ text: outputText, metadata }));
@@ -3033,6 +3218,9 @@ export function runCursorACP({
             return;
           }
           outputText += text;
+          if (text && metadata.firstTextDeltaMs === null) {
+            metadata.firstTextDeltaMs = Math.max(0, now() - startedAt);
+          }
           if (text && onTextDelta) {
             try {
               onTextDelta(text);
@@ -3348,6 +3536,7 @@ function parseArguments(argv) {
     fileExtractorPath: defaultPDFExtractorPath(),
     bridgeToken: process.env.SYNCBAR_CURSOR_BRIDGE_TOKEN ?? "",
     sandboxMode: process.env.SYNCBAR_CURSOR_SANDBOX_MODE ?? "enabled",
+    metricsEnabled: process.env.SYNCBAR_CURSOR_METRICS === "1",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index];
@@ -3513,8 +3702,20 @@ export function createOpenAIProxyTestHooks({ chatGPTURL, apiURL }) {
   return hooks;
 }
 
+export function createBridgeRequestTestHooks(onRequest) {
+  if (typeof onRequest !== "function") {
+    throw new TypeError("Bridge request test observer must be a function");
+  }
+  const hooks = Object.freeze({ onRequest });
+  BRIDGE_REQUEST_TEST_HOOKS.add(hooks);
+  return hooks;
+}
+
 function openAIProxyTargets(testHooks) {
   if (testHooks === undefined || testHooks === null) {
+    return { chatGPT: CHATGPT_RESPONSES_URL, api: OPENAI_API_RESPONSES_URL };
+  }
+  if (BRIDGE_REQUEST_TEST_HOOKS.has(testHooks)) {
     return { chatGPT: CHATGPT_RESPONSES_URL, api: OPENAI_API_RESPONSES_URL };
   }
   if (!OPENAI_PROXY_TEST_HOOKS.has(testHooks)) {
@@ -3683,7 +3884,14 @@ export function createBridgeServer(config, testHooks) {
   const proxyTargets = openAIProxyTargets(testHooks);
   const activeControllers = new Set();
   const activeChildren = new Set();
+  const sessionRegistry = new CursorSessionRegistry({
+    maxEntries: config.cursorSessionMaxEntries ?? MAX_CURSOR_SESSIONS,
+    ttlMs: config.cursorSessionTTLms ?? CURSOR_SESSION_TTL_MS,
+    now: config.wallClockNow ?? (() => Date.now()),
+  });
+  const monotonicNow = config.monotonicNow ?? (() => performance.now());
   const server = http.createServer(async (request, response) => {
+    const requestStartedAt = monotonicNow();
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
     const requestURL = new URL(request.url ?? "/", `http://${DEFAULT_HOST}`);
@@ -3749,8 +3957,21 @@ export function createBridgeServer(config, testHooks) {
       if (!response.writableEnded) controller.abort();
     });
     let heartbeat;
+    let acquiredPreviousResponseID = null;
+    let continuationSucceeded = false;
+    let continuationSource = null;
     try {
       const { body, rawBody } = await readJSONBody(request);
+      if (BRIDGE_REQUEST_TEST_HOOKS.has(testHooks)) {
+        testHooks.onRequest(Object.freeze({
+          session_id: request.headers.session_id ?? null,
+          conversation_id: request.headers.conversation_id ?? null,
+          client_request_id: request.headers["x-client-request-id"] ?? null,
+          prompt_cache_key: body.prompt_cache_key ?? null,
+          previous_response_id: body.previous_response_id ?? null,
+          model: body.model ?? null,
+        }));
+      }
       if (typeof body.model !== "string") {
         throw new BridgeError(
           "Requested model is not configured for this bridge",
@@ -3779,13 +4000,54 @@ export function createBridgeServer(config, testHooks) {
           "model_mismatch",
         );
       }
-      const prepared = await prepareCursorBackendRequestWithFiles(body, {
+      let previousSession = null;
+      if (body.previous_response_id !== undefined && body.previous_response_id !== null) {
+        if (typeof body.previous_response_id !== "string" || body.previous_response_id.length === 0) {
+          throw new BridgeError(
+            "previous_response_id must be a non-empty string",
+            400,
+            "invalid_previous_response",
+          );
+        }
+        previousSession = sessionRegistry.acquire(body.previous_response_id, {
+          model: cursorModel,
+          workspace: config.workspace,
+        });
+        acquiredPreviousResponseID = body.previous_response_id;
+        continuationSource = "previous_response_id";
+      } else if (validClientContinuationKey(body.prompt_cache_key)) {
+        const cachedSession = sessionRegistry.acquireLatest(body.prompt_cache_key, {
+          model: cursorModel,
+          workspace: config.workspace,
+        });
+        if (cachedSession) {
+          if (stableJSONStringify(body.input) === stableJSONStringify(cachedSession.input)) {
+            sessionRegistry.release(cachedSession.responseID);
+          } else {
+            previousSession = cachedSession;
+            acquiredPreviousResponseID = cachedSession.responseID;
+            continuationSource = "prompt_cache_key";
+          }
+        }
+      }
+      const cursorRequest = continuationRequest(body, previousSession);
+      const preparationStartedAt = monotonicNow();
+      const prepared = await prepareCursorBackendRequestWithFiles(cursorRequest, {
         fileExtractorPath: config.fileExtractorPath ?? defaultPDFExtractorPath(),
         signal: controller.signal,
         onSpawn: (child) => activeChildren.add(child),
         onClose: (child) => activeChildren.delete(child),
       });
+      const preparationMs = Math.max(0, monotonicNow() - preparationStartedAt);
       const usesACP = prepared.imageCount > 0;
+      if (previousSession && usesACP) {
+        throw new BridgeError(
+          "Cursor image continuations cannot resume a text CLI session",
+          409,
+          "invalid_previous_response",
+        );
+      }
+      const responseID = `resp_${randomUUID().replaceAll("-", "")}`;
       let streamingResponse;
       if (body.stream !== false) {
         response.writeHead(200, {
@@ -3796,6 +4058,7 @@ export function createBridgeServer(config, testHooks) {
         streamingResponse = new StreamingResponseSSE(
           body,
           (event) => response.write(sseLine(event)),
+          { responseID },
         );
         streamingResponse.start();
         heartbeat = setInterval(() => {
@@ -3809,25 +4072,61 @@ export function createBridgeServer(config, testHooks) {
         agentPath: config.agentPath,
         workspace: config.workspace,
         model: cursorModel,
+        resumeChatID: previousSession?.sessionID ?? null,
         modelParameters: modelParameters.get(cursorModel),
         sandboxMode: config.sandboxMode,
         prompt: usesACP ? prepared.acpPrompt : prepared.prompt,
         timeoutMs: config.timeoutMs,
         signal: controller.signal,
         env: cursorChildEnvironment(process.env),
+        now: monotonicNow,
         onSpawn: (child) => activeChildren.add(child),
         onClose: (child) => activeChildren.delete(child),
         onTextDelta: (delta) => streamingResponse?.acceptTextDelta(delta),
       });
       const result = await execution;
+      let completed;
       if (body.stream === false) {
-        const completed = buildResponseResult(body, result.text);
+        completed = buildResponseResult(body, result.text, { responseID });
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify(completed));
-        return;
+      } else {
+        completed = streamingResponse.complete(result.text);
+        response.end();
       }
-      streamingResponse.complete(result.text);
-      response.end();
+      const reusableSessionID = validCursorSessionID(result.metadata.sessionID)
+        ? result.metadata.sessionID
+        : previousSession?.sessionID;
+      if (!usesACP && validCursorSessionID(reusableSessionID)) {
+        sessionRegistry.add(responseID, {
+          sessionID: reusableSessionID,
+          model: cursorModel,
+          workspace: config.workspace,
+          input: clone(body.input),
+          output: clone(completed.output),
+          clientKey: validClientContinuationKey(body.prompt_cache_key)
+            ? body.prompt_cache_key
+            : null,
+        });
+      }
+      continuationSucceeded = true;
+      emitCursorRequestMetric(config, {
+        request_id: responseID,
+        transport: usesACP ? "acp" : "stream-json",
+        resumed: Boolean(previousSession),
+        continuation_source: continuationSource,
+        preparation_ms: Math.round(preparationMs * 1000) / 1000,
+        first_text_delta_ms: result.metadata.firstTextDeltaMs === null
+          ? null
+          : Math.round(result.metadata.firstTextDeltaMs * 1000) / 1000,
+        cursor_total_ms: result.metadata.totalMs === null
+          ? null
+          : Math.round(result.metadata.totalMs * 1000) / 1000,
+        total_ms: Math.round(Math.max(0, monotonicNow() - requestStartedAt) * 1000) / 1000,
+        prompt_bytes: Buffer.byteLength(prepared.prompt, "utf8"),
+        output_bytes: Buffer.byteLength(result.text, "utf8"),
+        usage_available: false,
+      });
     } catch (error) {
       if (response.writableEnded || response.destroyed) return;
       const payload = jsonError(error);
@@ -3845,6 +4144,11 @@ export function createBridgeServer(config, testHooks) {
       }
     } finally {
       if (heartbeat) clearInterval(heartbeat);
+      if (acquiredPreviousResponseID) {
+        sessionRegistry.release(acquiredPreviousResponseID, {
+          consume: continuationSucceeded,
+        });
+      }
       activeControllers.delete(controller);
     }
   });
@@ -3852,8 +4156,9 @@ export function createBridgeServer(config, testHooks) {
     for (const controller of activeControllers) controller.abort();
     for (const child of activeChildren) terminateChild(child);
     activeControllers.clear();
+    sessionRegistry.clear();
   });
-  bridgeRuntimes.set(server, { activeControllers, activeChildren });
+  bridgeRuntimes.set(server, { activeControllers, activeChildren, sessionRegistry });
   return server;
 }
 

@@ -11,10 +11,13 @@ import { zstdCompressSync } from "node:zlib";
 
 import {
   BridgeError,
+  CursorSessionRegistry,
   MixedDeltaTracker,
   buildCursorPrompt,
   buildResponseResult,
   consumeCursorEvent,
+  continuationRequest,
+  createBridgeRequestTestHooks,
   createOpenAIProxyTestHooks,
   cursorChildEnvironment,
   parseCursorModelAllowlist,
@@ -1585,6 +1588,200 @@ process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'ok'
   }
 });
 
+test("text CLI resume passes the Cursor chat ID as an isolated argument", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-resume-argument-test-"));
+  const workspace = path.join(root, "workspace");
+  const agent = await writeAgentFixture(root, "agent", `#!/usr/bin/env node
+const args = process.argv.slice(2);
+const resume = args.indexOf('--resume');
+if (resume < 0 || args[resume + 1] !== 'fixture-chat') process.exit(71);
+for await (const _chunk of process.stdin) {}
+process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'resumed',session_id:'fixture-chat'})+'\\n');
+`);
+  await mkdir(workspace, { recursive: true, mode: 0o700 });
+  try {
+    const result = await runCursorAgent({
+      agentPath: agent,
+      workspace,
+      model: "composer-2.5",
+      resumeChatID: "fixture-chat",
+      prompt: "test",
+      timeoutMs: 5_000,
+      env: process.env,
+    });
+    assert.equal(result.text, "resumed");
+    assert.equal(result.metadata.resumed, true);
+    assert.equal(typeof result.metadata.totalMs, "number");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("continuation input removes an exact canonical history prefix", () => {
+  const priorInput = [{ role: "user", content: "first" }];
+  const priorOutput = [{ type: "message", role: "assistant", content: "answer" }];
+  const next = { input: [...priorInput, ...priorOutput, { role: "user", content: "second" }] };
+  assert.deepEqual(
+    continuationRequest(next, { input: priorInput, output: priorOutput }).input,
+    [{ role: "user", content: "second" }],
+  );
+  const incremental = { input: [{ type: "function_call_output", output: "done" }] };
+  assert.equal(
+    continuationRequest(incremental, { input: priorInput, output: priorOutput }),
+    incremental,
+  );
+});
+
+test("Cursor session registry expires, bounds, serializes, and clears entries", () => {
+  let now = 0;
+  const registry = new CursorSessionRegistry({ maxEntries: 2, ttlMs: 10, now: () => now });
+  const value = { sessionID: "s", model: "m", workspace: "/w", input: [], output: [] };
+  registry.add("r1", value);
+  registry.add("r2", value);
+  registry.add("r3", value);
+  assert.equal(registry.size, 2);
+  assert.throws(() => registry.acquire("r1", { model: "m", workspace: "/w" }), {
+    code: "invalid_previous_response",
+  });
+  registry.acquire("r2", { model: "m", workspace: "/w" });
+  assert.throws(() => registry.acquire("r2", { model: "m", workspace: "/w" }), {
+    code: "previous_response_in_use",
+  });
+  registry.release("r2");
+  now = 11;
+  assert.throws(() => registry.acquire("r2", { model: "m", workspace: "/w" }), {
+    code: "invalid_previous_response",
+  });
+  registry.clear();
+  assert.equal(registry.size, 0);
+
+  now = 0;
+  registry.add("r4", { ...value, clientKey: "task-key" });
+  const latest = registry.acquireLatest("task-key", { model: "m", workspace: "/w" });
+  assert.equal(latest.responseID, "r4");
+  registry.release("r4", { consume: true });
+  assert.equal(registry.acquireLatest("task-key", { model: "m", workspace: "/w" }), null);
+});
+
+test("HTTP text continuations reuse Cursor sessions and emit privacy-safe timing metrics", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-http-resume-test-"));
+  const workspace = path.join(root, "workspace");
+  const agent = await writeAgentFixture(root, "agent", `#!/usr/bin/env node
+const args = process.argv.slice(2);
+let prompt = '';
+for await (const chunk of process.stdin) prompt += chunk;
+const match = prompt.match(/<SYNCBAR_BACKEND_REQUEST>\\n([\\s\\S]*?)\\n<\\/SYNCBAR_BACKEND_REQUEST>/);
+const payload = JSON.parse(match[1]);
+const text = JSON.stringify(payload.conversation);
+const resume = args.indexOf('--resume');
+if (text.includes('first turn')) {
+  if (resume >= 0) process.exit(72);
+  process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:'first-ok'}]}})+'\\n');
+  process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'first-ok',session_id:'session-one'})+'\\n');
+} else if (text.includes('second turn')) {
+  if (resume < 0 || args[resume + 1] !== 'session-one') process.exit(73);
+  if (text.includes('first turn') || payload.conversation.length !== 1) process.exit(74);
+  process.stdout.write(JSON.stringify({type:'assistant',timestamp_ms:1,message:{content:[{type:'text',text:'second-ok'}]}})+'\\n');
+  process.stdout.write(JSON.stringify({type:'result',subtype:'success',result:'second-ok',session_id:'session-one'})+'\\n');
+} else process.exit(75);
+`);
+  const bridgeToken = "f".repeat(64);
+  const metrics = [];
+  const server = await startBridge({
+    host: "127.0.0.1",
+    port: 0,
+    agentPath: agent,
+    model: "composer-2.5",
+    allowedModels: ["composer-2.5", "gpt-5.6-sol-low"],
+    workspace,
+    timeoutMs: 5_000,
+    bridgeToken,
+    metricsSink: (metric) => metrics.push(metric),
+  });
+  try {
+    const address = server.address();
+    const url = `http://127.0.0.1:${address.port}/v1/responses`;
+    const headers = { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken };
+    const firstRequest = baseRequest({
+      input: [{ role: "user", type: "message", content: [{ type: "input_text", text: "first turn" }] }],
+      tools: [],
+      stream: false,
+    });
+    const firstResponse = await fetch(url, { method: "POST", headers, body: JSON.stringify(firstRequest) });
+    const first = await firstResponse.json();
+    assert.equal(firstResponse.status, 200, JSON.stringify(first));
+    assert.equal(first.usage, null);
+
+    const wrongModel = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        model: "gpt-5.6-sol-low",
+        previous_response_id: first.id,
+        input: "second turn",
+        tools: [],
+        stream: false,
+      })),
+    });
+    assert.equal(wrongModel.status, 409);
+    assert.equal((await wrongModel.json()).error.code, "invalid_previous_response");
+
+    const stale = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: "resp_unknown",
+        input: "second turn",
+        tools: [],
+        stream: false,
+      })),
+    });
+    assert.equal(stale.status, 409);
+
+    const secondInput = [
+      ...firstRequest.input,
+      ...first.output,
+      { role: "user", type: "message", content: [{ type: "input_text", text: "second turn" }] },
+    ];
+    const secondResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: first.id,
+        input: secondInput,
+        tools: [],
+        stream: false,
+      })),
+    });
+    const second = await secondResponse.json();
+    assert.equal(secondResponse.status, 200, JSON.stringify(second));
+    assert.equal(second.output[0].content[0].text, "second-ok");
+    assert.equal(second.previous_response_id, first.id);
+    assert.equal(metrics.length, 2);
+    assert.deepEqual(metrics.map((metric) => metric.resumed), [false, true]);
+    const unoptimizedPromptBytes = Buffer.byteLength(buildCursorPrompt(baseRequest({
+      previous_response_id: first.id,
+      input: secondInput,
+      tools: [],
+      stream: false,
+    })), "utf8");
+    assert.ok(metrics[1].prompt_bytes < unoptimizedPromptBytes);
+    for (const metric of metrics) {
+      assert.equal(metric.event, "cursor_bridge_request");
+      assert.equal(metric.usage_available, false);
+      assert.equal(typeof metric.preparation_ms, "number");
+      assert.equal(typeof metric.cursor_total_ms, "number");
+      assert.equal(typeof metric.total_ms, "number");
+      assert.equal(typeof metric.prompt_bytes, "number");
+      assert.equal(typeof metric.output_bytes, "number");
+      assert.doesNotMatch(JSON.stringify(metric), /first turn|second turn|SYNCBAR_BACKEND_REQUEST/);
+    }
+  } finally {
+    await stopBridge(server);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Responses SSE includes complete function arguments in output_item.done", () => {
   const response = buildResponseResult(
     baseRequest(),
@@ -2594,6 +2791,8 @@ test("installed Codex local attachment path round-trips through the outer tool",
   const catalogPath = path.join(root, "model-catalog.json");
   const fakeAgent = path.resolve("Tests/Fixtures/fake-cursor-agent.mjs");
   const bridgeToken = "e".repeat(64);
+  const observedRequests = [];
+  const metrics = [];
   let server;
   try {
     await mkdir(codexWorkspace, { mode: 0o700 });
@@ -2627,7 +2826,8 @@ test("installed Codex local attachment path round-trips through the outer tool",
       workspace: bridgeWorkspace,
       timeoutMs: 5_000,
       bridgeToken,
-    });
+      metricsSink: (metric) => metrics.push(metric),
+    }, createBridgeRequestTestHooks((request) => observedRequests.push(request)));
     const address = server.address();
     assert.equal(typeof address, "object");
     const config = [
@@ -2678,6 +2878,14 @@ test("installed Codex local attachment path round-trips through the outer tool",
     assert.match(execution.stdout, /첨부 파일을 외부 도구로 읽겠습니다/);
     assert.doesNotMatch(execution.stdout, /SYNCBAR_TOOL_CALL/);
     assert.equal((await readFile(lastMessagePath, "utf8")).trim(), "cursor local attachment passed");
+    assert.equal(observedRequests.length, 2);
+    assert.equal(observedRequests[0].previous_response_id, null);
+    assert.equal(observedRequests[1].previous_response_id, null);
+    assert.equal(typeof observedRequests[0].prompt_cache_key, "string");
+    assert.equal(observedRequests[1].prompt_cache_key, observedRequests[0].prompt_cache_key);
+    assert.equal(observedRequests[1].client_request_id, observedRequests[0].client_request_id);
+    assert.deepEqual(metrics.map((metric) => metric.resumed), [false, true]);
+    assert.equal(metrics[1].continuation_source, "prompt_cache_key");
   } finally {
     if (server) await stopBridge(server);
     await rm(root, { recursive: true, force: true });

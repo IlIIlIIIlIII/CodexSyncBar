@@ -129,23 +129,12 @@ enum CodexCursorModelCatalogBuilder {
         familyName: String,
         thinking: Bool) -> String
     {
-        let prefix = switch group {
-        case .automatic: "Cursor · Auto"
-        case .cursor: "Cursor"
-        case .openAIGPT: "Cursor · GPT"
-        case .openAICodex: "Cursor · Codex"
-        case .anthropicClaude: "Cursor · Claude"
-        case .googleGemini: "Cursor · Gemini"
-        case .kimi: "Cursor · Kimi"
-        case .glm: "Cursor · GLM"
-        case .other: "Cursor · 기타"
-        }
-        if group == .automatic { return prefix }
+        if group == .automatic { return "Cursor · Auto" }
         var name = familyName
         if group == .cursor, name.lowercased().hasPrefix("cursor ") {
             name.removeFirst("cursor ".count)
         }
-        let base = "\(prefix) · \(name)"
+        let base = "Cursor · \(name)"
         return thinking && group != .anthropicClaude
             ? "\(base) · Thinking"
             : base
