@@ -53,6 +53,7 @@ struct SettingsView: View {
     @State private var cursorExposedModelIDsDraft: Set<String>
     @State private var cursorExposureDraftInitialized = false
     @State private var cursorAPIKeyDraft = ""
+    @State private var cursorAccountRemovalRequested = false
 
     init(model: AppModel, readmeDetailOnly: Bool = false) {
         self.model = model
@@ -124,6 +125,14 @@ struct SettingsView: View {
             }
         } message: {
             Text("이 Mac의 장치 설정과 Keychain 비밀을 삭제합니다. 원격 장치의 Codex 파일은 변경하지 않습니다.")
+        }
+        .alert("Cursor 계정 연결을 삭제할까요?", isPresented: $cursorAccountRemovalRequested) {
+            Button("취소", role: .cancel) {}
+            Button("연결 삭제", role: .destructive) {
+                Task { await model.removeCursorAccount() }
+            }
+        } message: {
+            Text("이전 Codex provider를 복구하고 브리지를 중지한 뒤, 이 Mac과 등록된 SSH 장치의 Cursor 자격증명 및 Keychain API key를 정리합니다. Cursor.com 웹 계정과 구독은 삭제되지 않습니다.")
         }
     }
 
@@ -460,6 +469,86 @@ struct SettingsView: View {
                 .background(AppTheme.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(AppTheme.yellow.opacity(0.22)))
 
+                SettingsGroupTitle("Cursor 계정")
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        Image(systemName: cursorAccountStatusIcon)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(cursorAccountStatusColor)
+                            .frame(width: 26)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(cursorAccountStatusTitle)
+                                .font(.system(size: 13, weight: .semibold))
+                            if let email = model.cursorAccountState.email {
+                                Text(email)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .textSelection(.enabled)
+                            } else if case let .failed(message) = model.cursorAccountState {
+                                Text(message)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(AppTheme.muted)
+                                    .lineLimit(2)
+                            }
+                        }
+                        Spacer()
+                        if case .loading = model.cursorAccountState {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button {
+                                Task { await model.refreshCursorAccount(agentPath: cursorAgentPathDraft) }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .help("Cursor 계정 상태 새로고침")
+                            .disabled(settingsMutationDisabled)
+                            .accessibilityIdentifier("cursor-account-refresh-button")
+                        }
+                    }
+                    .padding(.vertical, 8)
+
+                    Divider().overlay(AppTheme.border)
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "calendar.badge.clock")
+                            .foregroundStyle(AppTheme.cyan)
+                            .frame(width: 26)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("월간 사용량")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("개인 플랜은 공개 Usage API가 없어 웹 대시보드에서 확인합니다.")
+                                .font(.system(size: 9))
+                                .foregroundStyle(AppTheme.muted)
+                        }
+                        Spacer()
+                        Button("사용량 대시보드 열기") {
+                            model.openCursorUsageDashboard()
+                        }
+                        .accessibilityIdentifier("cursor-usage-dashboard-button")
+                    }
+                    .padding(.vertical, 8)
+
+                    if model.cursorAccountState.email != nil || model.hasCursorAPIKey {
+                        Divider().overlay(AppTheme.border)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("로컬 계정 연결")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("웹 계정은 유지하고 이 Mac과 SSH 자격증명만 정리합니다.")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(AppTheme.muted)
+                            }
+                            Spacer()
+                            Button("계정 연결 삭제", role: .destructive) {
+                                cursorAccountRemovalRequested = true
+                            }
+                            .disabled(settingsMutationDisabled)
+                            .accessibilityIdentifier("cursor-account-remove-button")
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+
                 SettingsGroupTitle("연결 상태")
                 VStack(spacing: 0) {
                     HStack(spacing: 10) {
@@ -781,6 +870,7 @@ struct SettingsView: View {
             }
         }
         .task {
+            await model.refreshCursorAccount(agentPath: cursorAgentPathDraft)
             if model.cursorModelCatalog.families.isEmpty {
                 await model.refreshCursorModels(agentPath: cursorAgentPathDraft)
             }
@@ -910,6 +1000,32 @@ struct SettingsView: View {
         case .stopped: AppTheme.muted
         case .missingNode, .missingAgent, .unauthenticated, .portConflict, .failed:
             AppTheme.yellow
+        }
+    }
+
+    private var cursorAccountStatusTitle: String {
+        switch model.cursorAccountState {
+        case .unknown, .loading: "Cursor 계정 확인 중"
+        case .signedOut: "Cursor CLI 로그인 필요"
+        case .signedIn: "Cursor CLI 인증 정상"
+        case .failed: "Cursor 계정 확인 실패"
+        }
+    }
+
+    private var cursorAccountStatusIcon: String {
+        switch model.cursorAccountState {
+        case .unknown, .loading: "person.crop.circle.badge.clock"
+        case .signedOut: "person.crop.circle.badge.exclamationmark"
+        case .signedIn: "person.crop.circle.badge.checkmark"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var cursorAccountStatusColor: Color {
+        switch model.cursorAccountState {
+        case .signedIn: AppTheme.green
+        case .unknown, .loading: AppTheme.blue
+        case .signedOut, .failed: AppTheme.yellow
         }
     }
 

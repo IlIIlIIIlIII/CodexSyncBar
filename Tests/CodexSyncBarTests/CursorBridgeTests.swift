@@ -4,6 +4,57 @@ import XCTest
 private let testCursorBridgeToken = String(repeating: "a", count: 64)
 
 final class CursorBridgeTests: XCTestCase {
+    func testCursorCLIAccountParsesStatusWithoutDecorations() throws {
+        XCTAssertEqual(
+            CursorCLIAccount(statusOutput: "✓ Logged in as user@example.com\n")?.email,
+            "user@example.com")
+        XCTAssertNil(CursorCLIAccount(statusOutput: "Not authenticated\n"))
+        XCTAssertNil(CursorCLIAccount(statusOutput: "✓ Logged in as not-an-email\n"))
+        XCTAssertNil(CursorCLIAccount(statusOutput: "✓ Logged in as bad user@example.com\n"))
+    }
+
+    @MainActor
+    func testCursorBridgeServiceLoadsAndLogsOutCLIAccount() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CursorAccountService-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let agent = home.appendingPathComponent("cursor-agent")
+        let marker = home.appendingPathComponent("authenticated")
+        let script = """
+        #!/bin/sh
+        set -eu
+        marker='\(marker.path)'
+        case "${1:-}" in
+          status)
+            if [ -f "$marker" ]; then
+              echo '✓ Logged in as cursor@example.com'
+              exit 0
+            fi
+            echo 'Not authenticated'
+            exit 1
+            ;;
+          logout)
+            /bin/rm -f "$marker"
+            echo 'Logged out'
+            ;;
+          *) exit 64 ;;
+        esac
+        """
+        try Data(script.utf8).write(to: agent)
+        try Data().write(to: marker)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: agent.path)
+        let service = CursorBridgeService(home: home)
+
+        let signedIn = try await service.loadAccount(preferredAgentPath: agent.path)
+        XCTAssertEqual(signedIn?.email, "cursor@example.com")
+        try await service.logout(preferredAgentPath: agent.path)
+        let signedOut = try await service.loadAccount(preferredAgentPath: agent.path)
+        XCTAssertNil(signedOut)
+    }
+
     @MainActor
     func testCursorBridgeServiceLoadsAccountModelCatalogFromCursorCLI() async throws {
         let fixture = URL(fileURLWithPath: #filePath)

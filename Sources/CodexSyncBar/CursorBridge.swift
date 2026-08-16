@@ -1,6 +1,38 @@
 import Darwin
 import Foundation
 
+struct CursorCLIAccount: Equatable, Sendable {
+    let email: String
+
+    init?(statusOutput: String) {
+        let marker = "Logged in as "
+        guard let range = statusOutput.range(of: marker) else { return nil }
+        let suffix = statusOutput[range.upperBound...]
+        guard let line = suffix.split(whereSeparator: { $0.isNewline }).first else { return nil }
+        let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              value.utf8.count <= 320,
+              value.contains("@"),
+              !value.contains(where: { $0.isWhitespace }),
+              value.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
+        email = value
+    }
+}
+
+enum CursorAccountState: Equatable, Sendable {
+    case unknown
+    case loading
+    case signedOut
+    case signedIn(CursorCLIAccount)
+    case failed(String)
+
+    var email: String? {
+        guard case let .signedIn(account) = self else { return nil }
+        return account.email
+    }
+}
+
 struct CursorBridgePreferences: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 2
     static let defaultPort = 32_125

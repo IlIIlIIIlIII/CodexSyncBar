@@ -71,6 +71,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isLoadingCursorModels = false
     @Published private(set) var cursorModelCatalogError: String?
     @Published private(set) var hasCursorAPIKey = false
+    @Published private(set) var cursorAccountState: CursorAccountState = .unknown
 
     private let usageService: UsageService
     private let switchService: SwitchService
@@ -292,6 +293,7 @@ final class AppModel: ObservableObject {
         if let readmeDemoFixture {
             devices = readmeDemoFixture.devices
             tokenUsageSnapshot = readmeDemoFixture.tokenUsageSnapshot
+            cursorAccountState = .signedOut
             authMaintenanceSummary = "데모 인증 정상"
             launchAtLoginStatusText = "데모 모드"
             isReadmeDemo = true
@@ -1843,6 +1845,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshCursorAccount(agentPath: String? = nil) async {
+        guard !isReadmeDemo else { return }
+        cursorAccountState = .loading
+        do {
+            let normalizedPath = agentPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let account = try await cursorBridgeService.loadAccount(
+                preferredAgentPath: normalizedPath?.isEmpty == false
+                    ? normalizedPath
+                    : cursorBridgePreferences.agentPath)
+            cursorAccountState = account.map(CursorAccountState.signedIn) ?? .signedOut
+        } catch {
+            cursorAccountState = .failed(error.localizedDescription)
+        }
+    }
+
     func reconcileCursorBridgeRuntime() async {
         guard !isReadmeDemo else { return }
         if isCursorProviderActive {
@@ -2092,6 +2109,63 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func removeCursorAccount() async {
+        guard cursorManagementCanBegin else { return }
+        if isCursorProviderActive {
+            await disableCursorProvider()
+            guard !isCursorProviderActive else { return }
+        }
+        guard cursorManagementCanBegin else { return }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
+
+        await cursorBridgeService.stop()
+        cursorBridgeStatus = cursorBridgeService.status
+        var warnings: [String] = []
+
+        let remoteFailures = await deprovisionCursorOnConfiguredDevices()
+        if !remoteFailures.isEmpty {
+            warnings.append("SSH 원격 정리 실패: \(remoteFailures.joined(separator: ", "))")
+        }
+
+        do {
+            try await cursorBridgeService.logout(
+                preferredAgentPath: cursorBridgePreferences.agentPath)
+        } catch {
+            warnings.append(error.localizedDescription)
+        }
+
+        do {
+            try cursorAPIKeyStore.delete()
+            hasCursorAPIKey = false
+        } catch {
+            warnings.append("Keychain API key 삭제 실패: \(error.localizedDescription)")
+        }
+
+        cursorModelCatalog = CursorModelCatalog(cliOutput: "")
+        cursorModelCatalogError = nil
+        do {
+            let account = try await cursorBridgeService.loadAccount(
+                preferredAgentPath: cursorBridgePreferences.agentPath)
+            cursorAccountState = account.map(CursorAccountState.signedIn) ?? .signedOut
+        } catch {
+            cursorAccountState = .failed(error.localizedDescription)
+            warnings.append("로그아웃 상태 재확인 실패: \(error.localizedDescription)")
+        }
+        if cursorAccountState.email == nil {
+            cursorBridgeStatus = .unauthenticated
+            cursorBridgeError = nil
+        } else {
+            warnings.append("Cursor CLI 계정이 아직 로그인 상태입니다.")
+        }
+
+        banner = AppBanner(
+            style: warnings.isEmpty ? .success : .warning,
+            message: warnings.isEmpty
+                ? "이 Mac과 등록된 SSH 장치에서 Cursor 계정 연결을 삭제했습니다. Cursor.com 웹 계정은 유지됩니다."
+                : "Cursor 계정 연결을 일부 정리했지만 확인이 필요합니다: \(warnings.joined(separator: " "))")
+    }
+
     func syncCursorProviderToSSHDevices() async {
         guard cursorManagementCanBegin else { return }
         guard isCursorProviderActive else {
@@ -2201,6 +2275,11 @@ final class AppModel: ObservableObject {
 
     func openCursorCLIInstallationGuide() {
         guard let url = URL(string: "https://cursor.com/docs/cli/installation") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openCursorUsageDashboard() {
+        guard let url = URL(string: "https://cursor.com/dashboard/usage") else { return }
         NSWorkspace.shared.open(url)
     }
 

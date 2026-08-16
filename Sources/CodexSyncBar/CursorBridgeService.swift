@@ -139,6 +139,32 @@ final class CursorBridgeService {
         return catalog
     }
 
+    func loadAccount(preferredAgentPath: String?) async throws -> CursorCLIAccount? {
+        guard let agent = resolveAgent(preferredPath: preferredAgentPath) else {
+            throw AppError.processFailed("Cursor CLI를 찾지 못했습니다.")
+        }
+        let result = try await runAgentCommand(agent: agent, arguments: ["status"])
+        guard result.exitStatus == 0 else { return nil }
+        guard let account = CursorCLIAccount(statusOutput: result.output) else {
+            throw AppError.processFailed("Cursor CLI 로그인 상태에서 계정 이메일을 확인하지 못했습니다.")
+        }
+        return account
+    }
+
+    func logout(preferredAgentPath: String?) async throws {
+        guard let agent = resolveAgent(preferredPath: preferredAgentPath) else {
+            throw AppError.processFailed("Cursor CLI를 찾지 못했습니다.")
+        }
+        let result = try await runAgentCommand(agent: agent, arguments: ["logout"])
+        guard result.exitStatus == 0 else {
+            let metadata = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let suffix = metadata.isEmpty ? "" : ": \(String(metadata.prefix(512)))"
+            throw AppError.processFailed("Cursor CLI 로그아웃에 실패했습니다\(suffix)")
+        }
+        cachedModelCatalog = nil
+        cachedModelCatalogAgentPath = nil
+    }
+
     @discardableResult
     func start(
         preferences proposedPreferences: CursorBridgePreferences,
@@ -495,6 +521,48 @@ final class CursorBridgeService {
             return false
         }
         return child.terminationStatus == 0
+    }
+
+    private func runAgentCommand(
+        agent: URL,
+        arguments: [String]) async throws -> (exitStatus: Int32, output: String)
+    {
+        let child = Process()
+        let output = Pipe()
+        child.executableURL = agent
+        child.arguments = arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment["NO_COLOR"] = "1"
+        child.environment = environment
+        child.standardInput = FileHandle.nullDevice
+        child.standardOutput = output
+        child.standardError = output
+        do {
+            try child.run()
+        } catch {
+            throw AppError.processFailed(
+                "Cursor CLI 명령을 실행하지 못했습니다: \(error.localizedDescription)")
+        }
+        let outputRead = Task.detached(priority: .userInitiated) {
+            output.fileHandleForReading.readDataToEndOfFile()
+        }
+        for _ in 0 ..< 100 where child.isRunning {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        if child.isRunning {
+            child.terminate()
+            for _ in 0 ..< 10 where child.isRunning {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+            _ = await outputRead.value
+            throw AppError.processFailed("Cursor CLI 명령 확인 시간이 초과되었습니다.")
+        }
+        let data = await outputRead.value
+        guard data.count <= 64 * 1_024 else {
+            throw AppError.processFailed("Cursor CLI 명령 출력이 허용 크기를 초과했습니다.")
+        }
+        return (child.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
     private func recordStderrMetadata(_ data: Data) {
