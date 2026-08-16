@@ -708,6 +708,30 @@ test("pending transaction recovery fails closed when a file matches neither jour
   assert.equal((await stat(paths.journal)).mode & 0o777, 0o600);
 });
 
+test("a pending pre-catalog transaction journal is recovered during upgrade", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  const crashed = await spawnCrashable(
+    "provision",
+    fixture,
+    "provision:after-journal",
+    fixture.input,
+  );
+  assert.equal(crashed.code, 86, crashed.stderr);
+  const legacyJournal = JSON.parse(await readFile(paths.journal, "utf8"));
+  delete legacyJournal.files.catalog;
+  await writeFile(paths.journal, `${JSON.stringify(legacyJournal, null, 2)}\n`, { mode: 0o600 });
+
+  await assert.rejects(
+    providerAuth({ home: fixture.home, env: fixture.env }),
+    (error) => error instanceof RemoteManagerError && error.code === "not_provisioned",
+  );
+  await assert.rejects(stat(paths.journal), { code: "ENOENT" });
+  await assert.rejects(stat(paths.runtime), { code: "ENOENT" });
+  await assert.rejects(stat(paths.catalog), { code: "ENOENT" });
+  assert.equal(await readFile(paths.config, "utf8"), fixture.original);
+});
+
 test("healthy reprovision replaces the bridge generation and API-key environment", async () => {
   const fixture = await makeFixture();
   const paths = managerPaths({ home: fixture.home, env: fixture.env });

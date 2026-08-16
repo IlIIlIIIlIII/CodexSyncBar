@@ -1242,6 +1242,7 @@ function absentCandidate() {
 }
 
 const TRANSACTION_FILE_KEYS = ["runtime", "catalog", "config", "backup"];
+const LEGACY_TRANSACTION_FILE_KEYS = ["runtime", "config", "backup"];
 
 function exactObjectKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -1312,12 +1313,16 @@ function decodeTransactionJournal(snapshot) {
   ]) || value.schemaVersion !== 1 || !["provision", "deprovision"].includes(value.operation) ||
       typeof value.oldBridgeExpected !== "boolean" ||
       typeof value.newBridgeExpected !== "boolean" ||
-      !exactObjectKeys(value.files, TRANSACTION_FILE_KEYS)) {
+      (!exactObjectKeys(value.files, TRANSACTION_FILE_KEYS) &&
+       !exactObjectKeys(value.files, LEGACY_TRANSACTION_FILE_KEYS))) {
     fail("Cursor transaction journal is invalid", "invalid_journal");
   }
+  const fileKeys = Object.hasOwn(value.files, "catalog")
+    ? TRANSACTION_FILE_KEYS
+    : LEGACY_TRANSACTION_FILE_KEYS;
   const specs = { runtime: true, catalog: true, config: false, backup: true };
   const files = {};
-  for (const key of TRANSACTION_FILE_KEYS) {
+  for (const key of fileKeys) {
     const pair = value.files[key];
     if (!exactObjectKeys(pair, ["new", "old"])) {
       fail("Cursor transaction journal is invalid", "invalid_journal");
@@ -1329,7 +1334,7 @@ function decodeTransactionJournal(snapshot) {
   }
   if (value.operation === "provision" &&
       (!files.runtime.new.exists || files.runtime.new.mode !== 0o600 ||
-       !files.catalog.new.exists || files.catalog.new.mode !== 0o600 ||
+       (files.catalog && (!files.catalog.new.exists || files.catalog.new.mode !== 0o600)) ||
        !files.backup.new.exists || files.backup.new.mode !== 0o600 ||
        !files.config.new.exists)) {
     fail("Cursor provision journal is invalid", "invalid_journal");
@@ -1342,6 +1347,7 @@ function decodeTransactionJournal(snapshot) {
   return {
     operation: value.operation,
     files,
+    fileKeys,
     oldBridgeExpected: value.oldBridgeExpected,
     newBridgeExpected: value.newBridgeExpected,
     snapshot,
@@ -1385,7 +1391,7 @@ function runtimeFromJournalSnapshot(snapshot, description) {
 async function classifyTransactionFiles(paths, journal) {
   const specs = transactionFileSpecs(paths);
   const state = {};
-  for (const key of TRANSACTION_FILE_KEYS) {
+  for (const key of journal.fileKeys) {
     const current = await safeSnapshot(specs[key].path, {
       privateFile: specs[key].privateFile,
       maxBytes: specs[key].maxBytes,
@@ -1409,7 +1415,7 @@ async function applyTransactionFiles(paths, journal, target, options = {}) {
     : (journal.operation === "provision"
         ? ["backup", "config", "catalog", "runtime"]
         : ["backup", "runtime", "catalog", "config"]);
-  for (const key of order) {
+  for (const key of order.filter((candidate) => journal.fileKeys.includes(candidate))) {
     const current = await safeSnapshot(specs[key].path, {
       privateFile: specs[key].privateFile,
       maxBytes: specs[key].maxBytes,
@@ -1472,7 +1478,7 @@ async function recoverPendingTransaction(paths, options = {}) {
   const journal = await readTransactionJournal(paths);
   if (!journal) return;
   const state = await classifyTransactionFiles(paths, journal);
-  const allOld = TRANSACTION_FILE_KEYS.every((key) => state[key].matchesOld);
+  const allOld = journal.fileKeys.every((key) => state[key].matchesOld);
   if (allOld) {
     await completeTransactionTarget(paths, journal, "old", options);
     await clearTransactionJournal(paths, journal);
