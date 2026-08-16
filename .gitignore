@@ -5,3 +5,10 @@ dist/
 tmp/
 .DS_Store
 *.zip
+
+# Windows/.NET build output
+[Bb]in/
+[Oo]bj/
+TestResults/
+*.user
+Windows/artifacts/
