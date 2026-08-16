@@ -671,22 +671,79 @@ struct SettingsView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .accessibilityIdentifier("cursor-model-field")
                         } else {
-                            Picker("", selection: cursorBaseModelBinding) {
-                                if selectedCursorFamily == nil {
-                                    Text("직접 지정 · \(cursorModelDraft)")
-                                        .tag(cursorModelDraft)
-                                }
-                                ForEach(model.cursorModelCatalog.sections) { section in
-                                    Section(section.group.displayName) {
-                                        ForEach(section.families) { family in
-                                            Text(family.displayName).tag(family.baseSlug)
+                            Menu {
+                                Menu("기본 모델 · \(selectedCursorModelDisplayName)") {
+                                    ForEach(model.cursorModelCatalog.sections) { section in
+                                        Section(section.group.displayName) {
+                                            ForEach(section.families) { family in
+                                                Toggle(
+                                                    family.displayName,
+                                                    isOn: cursorBaseModelSelectionBinding(for: family))
+                                            }
                                         }
                                     }
                                 }
+
+                                Divider()
+                                Button("전체 선택") {
+                                    cursorExposedModelIDsDraft = availableCursorExposureIDs
+                                }
+                                Button("전체 해제") {
+                                    showOnlySelectedCursorModel()
+                                }
+                                Divider()
+
+                                ForEach(model.cursorModelCatalog.sections) { section in
+                                    let sectionIDs = cursorExposureModelIDs(in: section)
+                                    if !sectionIDs.isEmpty {
+                                        Menu(sectionExposureMenuTitle(section, modelIDs: sectionIDs)) {
+                                            Button("전체 선택") {
+                                                cursorExposedModelIDsDraft.formUnion(sectionIDs)
+                                            }
+                                            Button("전체 해제") {
+                                                clearCursorExposure(in: sectionIDs)
+                                            }
+                                            .disabled(cursorExposureCanClear(sectionIDs) == false)
+                                            Divider()
+
+                                            ForEach(section.families) { family in
+                                                if let modelID = cursorExposureModelID(
+                                                    for: family,
+                                                    thinking: false)
+                                                {
+                                                    Toggle(
+                                                        family.displayName,
+                                                        isOn: cursorExposureBinding(for: modelID))
+                                                        .disabled(modelID == selectedCursorPickerID)
+                                                }
+                                                if let modelID = cursorExposureModelID(
+                                                    for: family,
+                                                    thinking: true)
+                                                {
+                                                    Toggle(
+                                                        "\(family.displayName) · Thinking",
+                                                        isOn: cursorExposureBinding(for: modelID))
+                                                        .disabled(modelID == selectedCursorPickerID)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(selectedCursorModelDisplayName)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text("\(cursorExposedModelIDsDraft.count)/\(availableCursorExposureIDs.count) 표시")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(AppTheme.muted)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 8, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .labelsHidden()
-                            .accessibilityLabel("Cursor 모델 계열")
-                            .accessibilityIdentifier("cursor-model-picker")
+                            .accessibilityLabel("기본 Cursor 모델과 Codex 노출 모델")
+                            .accessibilityIdentifier("cursor-models-menu")
                         }
                         if model.isLoadingCursorModels {
                             ProgressView().controlSize(.small)
@@ -731,56 +788,7 @@ struct SettingsView: View {
                     }
 
                     if !model.cursorModelCatalog.pickerPresets.isEmpty {
-                        HStack(spacing: 10) {
-                            Text("Codex 노출")
-                                .font(.system(size: 11, weight: .semibold))
-                                .frame(width: 74, alignment: .leading)
-                            Menu {
-                                Button("전체 선택") {
-                                    cursorExposedModelIDsDraft = availableCursorExposureIDs
-                                }
-                                Button("기본 모델만") {
-                                    if let modelID = selectedCursorPickerID {
-                                        cursorExposedModelIDsDraft = [modelID]
-                                    }
-                                }
-                                Divider()
-                                ForEach(model.cursorModelCatalog.sections) { section in
-                                    Section(section.group.displayName) {
-                                        ForEach(section.families) { family in
-                                            if let modelID = cursorExposureModelID(
-                                                for: family,
-                                                thinking: false)
-                                            {
-                                                Toggle(
-                                                    family.displayName,
-                                                    isOn: cursorExposureBinding(for: modelID))
-                                                    .disabled(modelID == selectedCursorPickerID)
-                                            }
-                                            if let modelID = cursorExposureModelID(
-                                                for: family,
-                                                thinking: true)
-                                            {
-                                                Toggle(
-                                                    "\(family.displayName) · Thinking",
-                                                    isOn: cursorExposureBinding(for: modelID))
-                                                    .disabled(modelID == selectedCursorPickerID)
-                                            }
-                                        }
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Text("\(cursorExposedModelIDsDraft.count)/\(availableCursorExposureIDs.count)개 표시")
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: 8, weight: .semibold))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .accessibilityLabel("Codex에 표시할 Cursor 모델")
-                            .accessibilityIdentifier("cursor-exposed-models-menu")
-                        }
-                        Text("기본 모델은 항상 표시됩니다. 기존 OpenAI 모델은 이 설정과 관계없이 유지됩니다.")
+                        Text("모델 메뉴에서 기본 모델과 Codex 노출을 함께 관리합니다. 회사별 메뉴에서 전체 선택·해제할 수 있으며, 기본 모델은 항상 표시되고 기존 OpenAI 모델은 유지됩니다.")
                             .font(.system(size: 9))
                             .foregroundStyle(AppTheme.muted)
                             .padding(.leading, 84)
@@ -931,13 +939,21 @@ struct SettingsView: View {
         model.cursorModelCatalog.variants.first { $0.slug == cursorModelDraft }
     }
 
-    private var cursorBaseModelBinding: Binding<String> {
+    private var selectedCursorModelDisplayName: String {
+        guard let family = selectedCursorFamily else { return cursorModelDraft }
+        if selectedCursorVariant?.thinking == true {
+            return "\(family.displayName) · Thinking"
+        }
+        return family.displayName
+    }
+
+    private func cursorBaseModelSelectionBinding(
+        for family: CursorModelFamily) -> Binding<Bool>
+    {
         Binding(
-            get: { selectedCursorFamily?.baseSlug ?? cursorModelDraft },
-            set: { baseSlug in
-                guard let family = model.cursorModelCatalog.family(baseSlug: baseSlug),
-                      let variant = family.preferredVariant
-                else { return }
+            get: { selectedCursorFamily?.baseSlug == family.baseSlug },
+            set: { isSelected in
+                guard isSelected, let variant = family.preferredVariant else { return }
                 cursorModelDraft = variant.slug
             })
     }
@@ -973,6 +989,41 @@ struct SettingsView: View {
 
     private var selectedCursorPickerID: String? {
         model.cursorModelCatalog.preferredPickerModelID(forFlatSlug: cursorModelDraft)
+    }
+
+    private func cursorExposureModelIDs(in section: CursorModelSection) -> Set<String> {
+        model.cursorModelCatalog.codexModelIDs(in: section.group)
+    }
+
+    private func sectionExposureMenuTitle(
+        _ section: CursorModelSection,
+        modelIDs: Set<String>) -> String
+    {
+        let selectedCount = cursorExposedModelIDsDraft.intersection(modelIDs).count
+        return "\(section.group.displayName) · \(selectedCount)/\(modelIDs.count)"
+    }
+
+    private func showOnlySelectedCursorModel() {
+        if let selectedCursorPickerID {
+            cursorExposedModelIDsDraft = [selectedCursorPickerID]
+        } else if let first = model.cursorModelCatalog.pickerPresets.first?.id {
+            cursorExposedModelIDsDraft = [first]
+        }
+    }
+
+    private func clearCursorExposure(in modelIDs: Set<String>) {
+        cursorExposedModelIDsDraft.subtract(modelIDs)
+        if let selectedCursorPickerID {
+            cursorExposedModelIDsDraft.insert(selectedCursorPickerID)
+        }
+    }
+
+    private func cursorExposureCanClear(_ modelIDs: Set<String>) -> Bool {
+        var removable = modelIDs
+        if let selectedCursorPickerID {
+            removable.remove(selectedCursorPickerID)
+        }
+        return !cursorExposedModelIDsDraft.intersection(removable).isEmpty
     }
 
     private var cursorExposureSelectionIsValid: Bool {

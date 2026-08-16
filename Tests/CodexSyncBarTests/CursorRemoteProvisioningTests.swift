@@ -89,9 +89,15 @@ final class CursorRemoteProvisioningTests: XCTestCase {
                 "SSH banner\ndevice=build-server cursor=provisioned result=ok version=2.2.0\n",
                 expectedDeviceID: "build-server"),
             "2.2.0")
+        XCTAssertEqual(
+            try SwitchService.parseCursorProvisioningResult(
+                "device=build-server cursor=provisioned result=ok version=2.2.0 reload=pending\n",
+                expectedDeviceID: "build-server"),
+            "2.2.0")
         for output in [
             "device=build-server cursor=provisioned result=ok",
             "device=build-server cursor=provisioned result=ok version=2.2.0 extra=value",
+            "device=build-server cursor=provisioned result=ok version=2.2.0 reload=failed",
             "device=other cursor=provisioned result=ok version=2.2.0",
             "device=build-server device=build-server cursor=provisioned result=ok version=2.2.0",
         ] {
@@ -134,7 +140,7 @@ final class CursorRemoteProvisioningTests: XCTestCase {
           provision-cursor)
             cat >/dev/null
             printf 'untrusted diagnostic\n'
-            printf 'device=%s cursor=provisioned result=ok version=2.2.0\n' "$2"
+            printf 'device=%s cursor=provisioned result=ok version=2.2.0 reload=pending\n' "$2"
             ;;
           deprovision-cursor)
             printf 'untrusted diagnostic\n'
@@ -156,7 +162,8 @@ final class CursorRemoteProvisioningTests: XCTestCase {
             request: try request())
         XCTAssertEqual(
             provisioned.output,
-            "device=build-server cursor=provisioned result=ok version=2.2.0\n")
+            "device=build-server cursor=provisioned result=ok version=2.2.0 reload=pending\n")
+        XCTAssertTrue(provisioned.requiresCodexReload)
         let executedPath = try String(contentsOf: invocation, encoding: .utf8)
         XCTAssertNotEqual(executedPath, trusted.path)
         XCTAssertEqual(URL(fileURLWithPath: executedPath).lastPathComponent, "gpt-switch")

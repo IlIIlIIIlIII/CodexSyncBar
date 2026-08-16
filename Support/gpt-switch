@@ -2966,7 +2966,13 @@ node_cursor_provision() {
   if printf '%s' "$payload" | "$cursor_node" "$CURSOR_REMOTE_MANAGER" provision >/dev/null 2>&1; then
     payload=""
     if ! node_stop_clients >/dev/null 2>&1; then
-      die "Cursor provisioning committed but Codex clients could not be stopped"
+      # The remote provider and credential are already durably committed and
+      # the authenticated bridge is healthy at this point. A long-lived Codex
+      # app-server that cannot be stopped only delays config reload; reporting
+      # installation/authentication failure here is both inaccurate and causes
+      # safe retries to look broken in the SyncBar UI.
+      printf 'cursor=provisioned result=ok reload=pending\n'
+      return
     fi
     printf 'cursor=provisioned result=ok\n'
     return
@@ -4349,7 +4355,7 @@ controller_bootstrap_device() {
 }
 
 controller_provision_cursor() {
-  local wanted="$1" index=0 found=-1 payload result bytes version
+  local wanted="$1" index=0 found=-1 payload result bytes version reload_field
   local LC_ALL=C
   umask 077
   case "$wanted" in ''|*[!a-z0-9-]*|-*) die "invalid device id" ;; esac
@@ -4418,11 +4424,15 @@ controller_provision_cursor() {
       remote_ssh "$index" "$REMOTE_BIN __node cursor-provision" 2>/dev/null); then
     die "Cursor provisioning failed on $wanted; remote details were withheld"
   fi
-  [ "$result" = 'cursor=provisioned result=ok' ] || \
-    die "Cursor provisioning verification failed on $wanted"
+  reload_field=""
+  case "$result" in
+    'cursor=provisioned result=ok') ;;
+    'cursor=provisioned result=ok reload=pending') reload_field=' reload=pending' ;;
+    *) die "Cursor provisioning verification failed on $wanted" ;;
+  esac
   payload=""
-  printf 'device=%s cursor=provisioned result=ok version=%s\n' \
-    "$wanted" "$version"
+  printf 'device=%s cursor=provisioned result=ok version=%s%s\n' \
+    "$wanted" "$version" "$reload_field"
 }
 
 controller_deprovision_cursor() {

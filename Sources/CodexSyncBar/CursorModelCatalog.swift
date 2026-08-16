@@ -352,6 +352,15 @@ struct CursorModelCatalog: Equatable, Sendable {
         }
     }
 
+    func codexModelIDs(in group: CursorModelGroup) -> Set<String> {
+        let baseSlugs = Set(families.lazy
+            .filter { $0.group == group }
+            .map(\.baseSlug))
+        return Set(pickerPresets.lazy
+            .filter { baseSlugs.contains($0.baseSlug) }
+            .map(\.id))
+    }
+
     func family(baseSlug: String) -> CursorModelFamily? {
         families.first { $0.baseSlug == baseSlug }
     }

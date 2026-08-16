@@ -352,14 +352,22 @@ actor SwitchService {
             // locally modified helper accidentally echoes its input.
             throw AppError.processFailed("SSH 장치의 Cursor 설치와 인증에 실패했습니다.")
         }
-        let version = try Self.parseCursorProvisioningResult(
+        let summary = try Self.parseCursorResult(
             output,
-            expectedDeviceID: deviceID)
+            expectedDeviceID: deviceID,
+            expectedCursorState: "provisioned",
+            allowsReloadPending: true,
+            invalidMessage: "SSH Cursor 설치 검증 응답이 올바르지 않습니다.",
+            missingMessage: "SSH Cursor 설치 검증 응답을 찾지 못했습니다.")
         let normalized = Self.normalizedCursorResult(
             deviceID: deviceID,
             cursorState: "provisioned",
-            version: version)
-        return CursorRemoteProvisioningResult(deviceID: deviceID, output: normalized)
+            version: summary.version,
+            requiresCodexReload: summary.requiresCodexReload)
+        return CursorRemoteProvisioningResult(
+            deviceID: deviceID,
+            output: normalized,
+            requiresCodexReload: summary.requiresCodexReload)
     }
 
     func deprovisionCursor(deviceID: String) async throws -> CursorRemoteDeprovisioningResult {
@@ -394,8 +402,9 @@ actor SwitchService {
             output,
             expectedDeviceID: expectedDeviceID,
             expectedCursorState: "provisioned",
+            allowsReloadPending: true,
             invalidMessage: "SSH Cursor 설치 검증 응답이 올바르지 않습니다.",
-            missingMessage: "SSH Cursor 설치 검증 응답을 찾지 못했습니다.")
+            missingMessage: "SSH Cursor 설치 검증 응답을 찾지 못했습니다.").version
     }
 
     nonisolated static func parseCursorDeprovisioningResult(
@@ -406,16 +415,23 @@ actor SwitchService {
             output,
             expectedDeviceID: expectedDeviceID,
             expectedCursorState: "deprovisioned",
+            allowsReloadPending: false,
             invalidMessage: "SSH Cursor 해제 검증 응답이 올바르지 않습니다.",
-            missingMessage: "SSH Cursor 해제 검증 응답을 찾지 못했습니다.")
+            missingMessage: "SSH Cursor 해제 검증 응답을 찾지 못했습니다.").version
+    }
+
+    private struct ParsedCursorResult: Sendable {
+        let version: String
+        let requiresCodexReload: Bool
     }
 
     private nonisolated static func parseCursorResult(
         _ output: String,
         expectedDeviceID: String,
         expectedCursorState: String,
+        allowsReloadPending: Bool,
         invalidMessage: String,
-        missingMessage: String) throws -> String
+        missingMessage: String) throws -> ParsedCursorResult
     {
         for line in output.split(whereSeparator: \.isNewline).reversed() {
             var fields: [String: String] = [:]
@@ -426,7 +442,10 @@ actor SwitchService {
                     break
                 }
                 let key = String(token[..<separator])
-                guard ["device", "cursor", "result", "version"].contains(key),
+                let allowedKeys = allowsReloadPending
+                    ? ["device", "cursor", "result", "version", "reload"]
+                    : ["device", "cursor", "result", "version"]
+                guard allowedKeys.contains(key),
                       fields[key] == nil
                 else {
                     malformed = true
@@ -435,8 +454,14 @@ actor SwitchService {
                 fields[key] = String(token[token.index(after: separator)...])
             }
             guard !fields.isEmpty else { continue }
+            let requiredKeys = Set(["device", "cursor", "result", "version"])
+            let actualKeys = Set(fields.keys)
+            let hasValidKeys = actualKeys == requiredKeys
+                || (allowsReloadPending
+                    && actualKeys == requiredKeys.union(["reload"])
+                    && fields["reload"] == "pending")
             guard !malformed,
-                  Set(fields.keys) == Set(["device", "cursor", "result", "version"]),
+                  hasValidKeys,
                   fields["device"] == expectedDeviceID,
                   fields["cursor"] == expectedCursorState,
                   fields["result"] == "ok",
@@ -444,7 +469,9 @@ actor SwitchService {
             else {
                 throw AppError.processFailed(invalidMessage)
             }
-            return version
+            return ParsedCursorResult(
+                version: version,
+                requiresCodexReload: fields["reload"] == "pending")
         }
         throw AppError.processFailed(missingMessage)
     }
@@ -452,9 +479,11 @@ actor SwitchService {
     private nonisolated static func normalizedCursorResult(
         deviceID: String,
         cursorState: String,
-        version: String) -> String
+        version: String,
+        requiresCodexReload: Bool = false) -> String
     {
-        "device=\(deviceID) cursor=\(cursorState) result=ok version=\(version)\n"
+        let reload = requiresCodexReload ? " reload=pending" : ""
+        return "device=\(deviceID) cursor=\(cursorState) result=ok version=\(version)\(reload)\n"
     }
 
     private func validatedProvisioningLaunch() throws

@@ -74,6 +74,7 @@ struct CursorRemoteProvisioningRequest: Codable, Equatable, Sendable {
 struct CursorRemoteProvisioningResult: Equatable, Sendable {
     let deviceID: String
     let output: String
+    let requiresCodexReload: Bool
 }
 
 struct CursorRemoteDeprovisioningResult: Equatable, Sendable {

@@ -1426,10 +1426,12 @@ final class AppModel: ObservableObject {
                     guard let apiKey = try cursorAPIKeyStore.read() else {
                         throw AppError.processFailed("모델 설정에서 Cursor User API Key를 먼저 저장해 주세요.")
                     }
-                    _ = try await provisionCursor(on: id, apiKey: apiKey)
+                    let cursorResult = try await provisionCursor(on: id, apiKey: apiKey)
                     banner = AppBanner(
                         style: .success,
-                        message: "\(device.displayName)에 Codex 계정과 Cursor provider를 설치하고 활성화했습니다.")
+                        message: cursorResult.requiresCodexReload
+                            ? "\(device.displayName)에 Codex 계정과 Cursor provider를 설치했습니다. 원격 Codex 앱은 다음 재연결부터 새 설정을 사용합니다."
+                            : "\(device.displayName)에 Codex 계정과 Cursor provider를 설치하고 활성화했습니다.")
                 } catch {
                     banner = AppBanner(
                         style: .warning,
@@ -2047,24 +2049,30 @@ final class AppModel: ObservableObject {
             cursorBridgePreferences = preferences
             isCursorProviderActive = true
             cursorBridgeError = nil
-            var remoteSyncWarning: String?
+            var remoteSyncNotice: String?
+            var remoteSyncHasFailures = false
             do {
                 if let apiKey = try cursorAPIKeyStore.read() {
-                    let failures = await provisionCursorOnEnabledDevices(apiKey: apiKey)
-                    if !failures.isEmpty {
-                        remoteSyncWarning = " SSH Cursor 동기화 실패: \(failures.joined(separator: ", "))"
+                    let syncResult = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+                    if !syncResult.failures.isEmpty {
+                        remoteSyncHasFailures = true
+                        remoteSyncNotice = " SSH Cursor 동기화 실패: \(syncResult.failures.joined(separator: ", "))"
+                    } else if !syncResult.reloadPendingDeviceNames.isEmpty {
+                        remoteSyncNotice = " SSH Cursor 동기화는 완료됐습니다. 원격 Codex 앱은 다음 재연결부터 반영됩니다: \(syncResult.reloadPendingDeviceNames.joined(separator: ", "))."
                     }
                 } else if configuredDevices.contains(where: \.enabled) {
-                    remoteSyncWarning = " SSH 장치 자동 설치에는 Cursor User API Key 저장이 필요합니다."
+                    remoteSyncHasFailures = true
+                    remoteSyncNotice = " SSH 장치 자동 설치에는 Cursor User API Key 저장이 필요합니다."
                 }
             } catch {
-                remoteSyncWarning = " SSH Cursor 동기화를 건너뛰었습니다: \(error.localizedDescription)"
+                remoteSyncHasFailures = true
+                remoteSyncNotice = " SSH Cursor 동기화를 건너뛰었습니다: \(error.localizedDescription)"
             }
             do {
                 try await switchService.reloadLocalCodexConfiguration()
                 banner = AppBanner(
-                    style: remoteSyncWarning == nil ? .success : .warning,
-                    message: "Cursor 모델을 Codex 선택기에 추가했습니다. 추론 강도와 Fast는 Codex 앱에서 선택할 수 있습니다. 새 Codex 작업부터 사용됩니다.\(remoteSyncWarning ?? "")")
+                    style: remoteSyncHasFailures ? .warning : .success,
+                    message: "Cursor 모델을 Codex 선택기에 추가했습니다. 추론 강도와 Fast는 Codex 앱에서 선택할 수 있습니다. 새 Codex 작업부터 사용됩니다.\(remoteSyncNotice ?? "")")
             } catch {
                 banner = AppBanner(
                     style: .warning,
@@ -2167,11 +2175,17 @@ final class AppModel: ObservableObject {
             try cursorAPIKeyStore.save(apiKey)
             hasCursorAPIKey = true
             if isCursorProviderActive {
-                let failures = await provisionCursorOnEnabledDevices(apiKey: apiKey)
-                if !failures.isEmpty {
+                let syncResult = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+                if !syncResult.failures.isEmpty {
                     banner = AppBanner(
                         style: .warning,
-                        message: "API key는 Keychain에 저장했지만 일부 SSH 장치 동기화에 실패했습니다: \(failures.joined(separator: ", "))")
+                        message: "API key는 Keychain에 저장했지만 일부 SSH 장치 동기화에 실패했습니다: \(syncResult.failures.joined(separator: ", "))")
+                    return true
+                }
+                if !syncResult.reloadPendingDeviceNames.isEmpty {
+                    banner = AppBanner(
+                        style: .success,
+                        message: "Cursor API key와 provider를 SSH 장치에 동기화했습니다. 원격 Codex 앱은 다음 재연결부터 반영됩니다: \(syncResult.reloadPendingDeviceNames.joined(separator: ", ")).")
                     return true
                 }
             }
@@ -2279,15 +2293,17 @@ final class AppModel: ObservableObject {
                 banner = AppBanner(style: .warning, message: "활성화된 SSH 장치가 없습니다.")
                 return
             }
-            let failures = await provisionCursorOnEnabledDevices(apiKey: apiKey)
-            if failures.isEmpty {
+            let syncResult = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+            if syncResult.failures.isEmpty {
                 banner = AppBanner(
                     style: .success,
-                    message: "활성 SSH 장치 \(enabledDevices.count)대에 Cursor provider를 동기화했습니다.")
+                    message: syncResult.reloadPendingDeviceNames.isEmpty
+                        ? "활성 SSH 장치 \(enabledDevices.count)대에 Cursor provider를 동기화했습니다."
+                        : "활성 SSH 장치 \(enabledDevices.count)대에 Cursor provider를 동기화했습니다. 원격 Codex 앱은 다음 재연결부터 반영됩니다: \(syncResult.reloadPendingDeviceNames.joined(separator: ", ")).")
             } else {
                 banner = AppBanner(
                     style: .warning,
-                    message: "일부 SSH 장치 동기화에 실패했습니다: \(failures.joined(separator: ", "))")
+                    message: "일부 SSH 장치 동기화에 실패했습니다: \(syncResult.failures.joined(separator: ", "))")
             }
         } catch {
             banner = AppBanner(style: .error, message: "SSH Cursor 동기화 실패: \(error.localizedDescription)")
@@ -2328,16 +2344,24 @@ final class AppModel: ObservableObject {
         return try await switchService.provisionCursor(deviceID: deviceID, request: request)
     }
 
-    private func provisionCursorOnEnabledDevices(apiKey: String) async -> [String] {
+    private struct CursorProvisioningBatchResult {
         var failures: [String] = []
+        var reloadPendingDeviceNames: [String] = []
+    }
+
+    private func provisionCursorOnEnabledDevices(apiKey: String) async -> CursorProvisioningBatchResult {
+        var result = CursorProvisioningBatchResult()
         for device in configuredDevices.filter(\.enabled) {
             do {
-                _ = try await provisionCursor(on: device.id, apiKey: apiKey)
+                let provisioned = try await provisionCursor(on: device.id, apiKey: apiKey)
+                if provisioned.requiresCodexReload {
+                    result.reloadPendingDeviceNames.append(device.displayName)
+                }
             } catch {
-                failures.append("\(device.displayName)(\(error.localizedDescription))")
+                result.failures.append("\(device.displayName)(\(error.localizedDescription))")
             }
         }
-        return failures
+        return result
     }
 
     private func deprovisionCursorOnConfiguredDevices() async -> [String] {

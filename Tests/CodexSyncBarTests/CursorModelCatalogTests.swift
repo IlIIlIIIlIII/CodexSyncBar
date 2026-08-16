@@ -281,6 +281,7 @@ final class CursorModelCatalogTests: XCTestCase {
     func testSectionsUseStableGroupOrderAndContainOnlyPresentGroups() throws {
         let catalog = CursorModelCatalog(cliOutput: """
         claude-opus-5-high - Opus 5 1M
+        claude-opus-5-thinking-high - Opus 5 1M Thinking
         gpt-5.6-sol-high - GPT-5.6 Sol 1M High
         auto - Auto (default)
         gpt-5.3-codex-high - Codex 5.3 High
@@ -294,6 +295,16 @@ final class CursorModelCatalogTests: XCTestCase {
             .openAICodex,
             .anthropicClaude,
         ])
+        XCTAssertEqual(
+            catalog.codexModelIDs(in: .anthropicClaude),
+            [
+                "syncbar-cursor/claude-opus-5",
+                "syncbar-cursor/claude-opus-5/thinking",
+            ])
+        XCTAssertEqual(
+            catalog.codexModelIDs(in: .openAIGPT),
+            ["syncbar-cursor/gpt-5.6-sol"])
+        XCTAssertTrue(catalog.codexModelIDs(in: .googleGemini).isEmpty)
     }
 
     func testPreferredVariantChoosesDefaultThenMediumWithoutEnablingOptions() throws {
