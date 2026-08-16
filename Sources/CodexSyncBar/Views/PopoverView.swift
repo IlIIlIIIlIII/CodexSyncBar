@@ -26,11 +26,17 @@ private struct UsageQuotaMetric: Identifiable {
     var id: String { item.id }
 }
 
+private enum PopoverAccountSelection {
+    case codex
+    case cursor
+}
+
 struct PopoverView: View {
     @ObservedObject var model: AppModel
     let presentSettings: () -> Void
     let onContentHeightChange: ((CGFloat) -> Void)?
     @State private var lastReportedContentHeight: CGFloat = 0
+    @State private var accountSelection: PopoverAccountSelection = .codex
 
     init(
         model: AppModel,
@@ -47,6 +53,8 @@ struct PopoverView: View {
     }
 
     private var snapshot: UsageSnapshot? { state.snapshot }
+
+    private var isCursorSelected: Bool { accountSelection == .cursor }
 
     private var visibleUsageMetrics: [UsageQuotaMetric] {
         let preferences = model.usageDisplayPreferences
@@ -86,20 +94,31 @@ struct PopoverView: View {
                     BannerView(banner: banner)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                sectionHeader(
-                    title: "선택 계정",
-                    detail: model.selectedProfile.email,
-                    tint: AppTheme.blue)
-                accountSummary
-                reauthenticationButton
-                usageCard
-                resetCreditsCard
+                if isCursorSelected {
+                    sectionHeader(
+                        title: "선택 계정",
+                        detail: model.cursorAccountState.email ?? "Cursor 웹 사용량",
+                        tint: AppTheme.cyan)
+                    cursorAccountSummary
+                    cursorMonthlyUsageCard
+                } else {
+                    sectionHeader(
+                        title: "선택 계정",
+                        detail: model.selectedProfile.email,
+                        tint: AppTheme.blue)
+                    accountSummary
+                    reauthenticationButton
+                    usageCard
+                    resetCreditsCard
+                }
                 sectionHeader(
                     title: "전체 기기",
                     detail: "계정 선택과 무관한 공통 정보",
                     tint: AppTheme.cyan)
                 tokenUsageCard
-                switchButton
+                if !isCursorSelected {
+                    switchButton
+                }
             }
             .padding(.horizontal, 13)
             .padding(.top, 10)
@@ -168,7 +187,10 @@ struct PopoverView: View {
         return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(model.profiles) { profile in
                 Button {
-                    withAnimation(.easeOut(duration: 0.16)) { model.selectProfile(profile.id) }
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        accountSelection = .codex
+                        model.selectProfile(profile.id)
+                    }
                 } label: {
                     accountButtonLabel(profile)
                 }
@@ -179,18 +201,23 @@ struct PopoverView: View {
             }
             if !model.isReadmeDemo {
                 Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        accountSelection = .cursor
+                    }
                     switch model.cursorMonthlyUsageState {
                     case .loaded, .loading:
+                        break
+                    case .unknown:
                         Task { await model.refreshCursorMonthlyUsage() }
-                    case .unknown, .signedOut, .failed:
+                    case .signedOut, .failed:
                         model.beginCursorUsageLogin()
                     }
                 } label: {
                     cursorUsageButtonLabel
                 }
                 .buttonStyle(.plain)
-                .help(cursorUsageButtonHelp)
-                .accessibilityLabel(cursorUsageButtonHelp)
+                .help("Cursor 월간 사용량 선택")
+                .accessibilityLabel("Cursor 계정 선택, \(cursorUsageStatusText)")
                 .accessibilityIdentifier("cursor-usage-account-button")
             }
         }
@@ -203,11 +230,11 @@ struct PopoverView: View {
         return HStack(spacing: 7) {
             ZStack {
                 Circle()
-                    .fill(AppTheme.cyan.opacity(0.18))
+                    .fill(isCursorSelected ? Color.white.opacity(0.18) : AppTheme.cyan.opacity(0.18))
                     .frame(width: 25, height: 25)
                 Text("C")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(AppTheme.cyan)
+                    .foregroundStyle(isCursorSelected ? Color.white : AppTheme.cyan)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text("Cursor 월간 사용량")
@@ -215,7 +242,7 @@ struct PopoverView: View {
                     .lineLimit(1)
                 Text(email ?? "CLI 로그인 상태 확인")
                     .font(.system(size: 8))
-                    .foregroundStyle(AppTheme.muted)
+                    .foregroundStyle(isCursorSelected ? Color.white.opacity(0.72) : AppTheme.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack(spacing: 3) {
@@ -225,7 +252,10 @@ struct PopoverView: View {
                     Text(cursorUsageStatusText)
                 }
                 .font(.system(size: 7.5, weight: .semibold))
-                .foregroundStyle(snapshot == nil ? AppTheme.yellow : AppTheme.green)
+                .foregroundStyle(
+                    isCursorSelected
+                        ? Color.white.opacity(0.82)
+                        : snapshot == nil ? AppTheme.yellow : AppTheme.green)
                 .lineLimit(1)
             }
             Spacer(minLength: 1)
@@ -235,7 +265,7 @@ struct PopoverView: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                     Text("모델 \(snapshot.cursorModelsRemainingPercent)% · 기타 \(snapshot.otherModelsRemainingPercent)%")
                         .font(.system(size: 6.8, weight: .semibold))
-                        .foregroundStyle(AppTheme.muted)
+                        .foregroundStyle(isCursorSelected ? Color.white.opacity(0.68) : AppTheme.muted)
                         .lineLimit(1)
                 }
             } else if case .loading = model.cursorMonthlyUsageState {
@@ -249,11 +279,11 @@ struct PopoverView: View {
         .padding(.horizontal, 9)
         .frame(maxWidth: .infinity, minHeight: 48)
         .background(
-            AppTheme.card,
+            isCursorSelected ? AppTheme.blue : AppTheme.card,
             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(AppTheme.cyan.opacity(0.38), lineWidth: 1))
+                .stroke(isCursorSelected ? AppTheme.blue : AppTheme.cyan.opacity(0.38), lineWidth: 1))
     }
 
     private var cursorUsageStatusText: String {
@@ -267,16 +297,8 @@ struct PopoverView: View {
         }
     }
 
-    private var cursorUsageButtonHelp: String {
-        switch model.cursorMonthlyUsageState {
-        case .loaded: "Cursor 월간 사용량 새로고침"
-        case .loading: "Cursor 월간 사용량 확인 중"
-        case .unknown, .signedOut, .failed: "Cursor 사용량 로그인을 시작"
-        }
-    }
-
     private func accountButtonLabel(_ profile: AccountProfile) -> some View {
-        let isSelected = model.selectedProfileID == profile.id
+        let isSelected = !isCursorSelected && model.selectedProfileID == profile.id
         let isActive = model.activeProfileID == profile.id
         let remaining = model.usageStates[profile.id]?.snapshot?.menuRemainingPercent
         let authentication = model.authenticationStatus(for: profile.id)
@@ -382,6 +404,119 @@ struct PopoverView: View {
             }
         }
         .appCard()
+    }
+
+    private var cursorAccountSummary: some View {
+        let snapshot = model.cursorMonthlyUsageState.snapshot
+        return HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [AppTheme.cyan.opacity(0.95), AppTheme.blue.opacity(0.95)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing))
+                    .frame(width: 46, height: 46)
+                Text("C")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Cursor")
+                    .font(.system(size: 16, weight: .bold))
+                Text(model.cursorAccountState.email ?? "Cursor Dashboard")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Label(
+                    snapshot == nil ? "사용량 로그인 필요" : "사용량 인증 정상",
+                    systemImage: snapshot == nil
+                        ? "person.crop.circle.badge.exclamationmark"
+                        : "checkmark.shield.fill")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(snapshot == nil ? AppTheme.yellow : AppTheme.green)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(snapshot?.membershipType.capitalized ?? "Cursor")
+                    .font(.system(size: 12, weight: .semibold))
+                if let snapshot {
+                    Text("\(snapshot.billingCycleEnd.formatted(.dateTime.month().day())) 초기화")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(AppTheme.cyan)
+                }
+            }
+        }
+        .appCard()
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("cursor-account-summary")
+    }
+
+    @ViewBuilder
+    private var cursorMonthlyUsageCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch model.cursorMonthlyUsageState {
+            case let .loaded(snapshot):
+                CursorQuotaUsageRow(
+                    title: "Cursor Models",
+                    detail: "Cursor 자체 모델 월간 pool",
+                    icon: "sparkles",
+                    window: UsageWindow(
+                        usedPercent: snapshot.cursorModelsUsedPercent,
+                        resetsAt: snapshot.billingCycleEnd,
+                        durationSeconds: nil),
+                    tint: AppTheme.cyan,
+                    accessibilityID: "cursor-models-usage-row")
+                Divider().overlay(Color.white.opacity(0.06))
+                CursorQuotaUsageRow(
+                    title: "Other Models",
+                    detail: "그 외 모델 월간 pool",
+                    icon: "square.stack.3d.up.fill",
+                    window: UsageWindow(
+                        usedPercent: snapshot.otherModelsUsedPercent,
+                        resetsAt: snapshot.billingCycleEnd,
+                        durationSeconds: nil),
+                    tint: AppTheme.blue,
+                    accessibilityID: "cursor-other-models-usage-row")
+                Text("마지막 확인 · Cursor Dashboard")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.white.opacity(0.36))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            case .loading:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Cursor 월간 사용량 확인 중…")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(AppTheme.muted)
+                    Spacer()
+                }
+            case .unknown, .signedOut:
+                cursorUsageLoginPrompt(message: "Cursor Dashboard 로그인 후 두 월간 pool을 표시합니다.")
+            case let .failed(message):
+                cursorUsageLoginPrompt(message: "사용량 확인 실패 · \(message)")
+            }
+        }
+        .appCard()
+        .accessibilityIdentifier("cursor-monthly-usage-card")
+    }
+
+    private func cursorUsageLoginPrompt(message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .foregroundStyle(AppTheme.yellow)
+            Text(message)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(AppTheme.muted)
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            Button("로그인") {
+                model.beginCursorUsageLogin()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .accessibilityIdentifier("cursor-usage-detail-login-button")
+        }
     }
 
     @ViewBuilder
@@ -813,6 +948,41 @@ private struct QuotaUsageRow: View {
                 tint: tint)
         }
         .accessibilityIdentifier("quota-\(item.rawValue)")
+    }
+}
+
+private struct CursorQuotaUsageRow: View {
+    let title: String
+    let detail: String
+    let icon: String
+    let window: UsageWindow
+    let tint: Color
+    let accessibilityID: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(title, systemImage: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppTheme.muted)
+                Text(detail)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.36))
+                    .lineLimit(1)
+                Spacer()
+                Text(Formatting.resetDescription(window.resetsAt))
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(AppTheme.muted)
+                    .lineLimit(1)
+            }
+
+            Text("\(Int(window.remainingPercent.rounded()))% 남음")
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .monospacedDigit()
+
+            QuotaProgressBar(title: title, window: window, tint: tint)
+        }
+        .accessibilityIdentifier(accessibilityID)
     }
 }
 
