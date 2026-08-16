@@ -146,8 +146,8 @@ final class CodexCursorModelCatalogTests: XCTestCase {
         let cursor = CursorModelCatalog(cliOutput: """
         gpt-5.6-sol-high - GPT-5.6 Sol 1M High
         gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast
-        claude-opus-5-high - Opus 5 1M
-        claude-opus-5-max - Opus 5 1M Max
+        claude-opus-5-thinking-high - Opus 5 1M Thinking
+        claude-opus-5-thinking-max - Opus 5 1M Max Thinking
         """)
         let template = try JSONSerialization.data(withJSONObject: [
             "models": [[
@@ -181,11 +181,15 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             bySlug["syncbar-cursor/gpt-5.6-sol"]?["effective_context_window_percent"] as? Int,
             95)
         XCTAssertEqual(
-            bySlug["syncbar-cursor/claude-opus-5"]?["context_window"] as? Int,
+            bySlug["syncbar-cursor/claude-opus-5/thinking"]?["context_window"] as? Int,
             1_000_000)
         XCTAssertEqual(
-            bySlug["syncbar-cursor/claude-opus-5"]?["max_context_window"] as? Int,
+            bySlug["syncbar-cursor/claude-opus-5/thinking"]?["max_context_window"] as? Int,
             1_000_000)
+        XCTAssertEqual(
+            bySlug["syncbar-cursor/claude-opus-5/thinking"]?["display_name"] as? String,
+            "Cursor · Claude · Opus 5")
+        XCTAssertNil(bySlug["syncbar-cursor/claude-opus-5"])
     }
 
     func testRejectsAnUnboundedCursorModelCatalog() throws {

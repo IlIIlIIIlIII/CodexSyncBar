@@ -59,7 +59,10 @@ enum CodexCursorModelCatalogBuilder {
 
         for section in cursorCatalog.sections {
             for family in section.families {
-                for thinking in [false, true] {
+                let thinkingModes = family.group == .anthropicClaude
+                    ? [true]
+                    : [false, true]
+                for thinking in thinkingModes {
                     let modelID = CursorModelCatalog.codexModelID(
                         baseSlug: family.baseSlug,
                         thinking: thinking)
@@ -143,7 +146,9 @@ enum CodexCursorModelCatalogBuilder {
             name.removeFirst("cursor ".count)
         }
         let base = "\(prefix) · \(name)"
-        return thinking ? "\(base) · Thinking" : base
+        return thinking && group != .anthropicClaude
+            ? "\(base) · Thinking"
+            : base
     }
 
     private static func reasoningMetadata(

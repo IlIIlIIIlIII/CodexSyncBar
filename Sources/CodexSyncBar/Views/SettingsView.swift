@@ -721,7 +721,9 @@ struct SettingsView: View {
                                                     thinking: true)
                                                 {
                                                     Toggle(
-                                                        "\(family.displayName) · Thinking",
+                                                        family.group == .anthropicClaude
+                                                            ? family.displayName
+                                                            : "\(family.displayName) · Thinking",
                                                         isOn: cursorExposureBinding(for: modelID))
                                                         .disabled(modelID == selectedCursorPickerID)
                                                 }
@@ -765,10 +767,16 @@ struct SettingsView: View {
                             Text("옵션")
                                 .font(.system(size: 11, weight: .semibold))
                                 .frame(width: 74, alignment: .leading)
-                            Toggle("Thinking", isOn: cursorThinkingBinding)
-                                .toggleStyle(.checkbox)
-                                .disabled(!canToggleCursorThinking)
-                                .accessibilityIdentifier("cursor-thinking-toggle")
+                            if selectedCursorFamily?.group == .anthropicClaude {
+                                Label("Thinking 항상 켜짐", systemImage: "brain")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(AppTheme.muted)
+                            } else {
+                                Toggle("Thinking", isOn: cursorThinkingBinding)
+                                    .toggleStyle(.checkbox)
+                                    .disabled(!canToggleCursorThinking)
+                                    .accessibilityIdentifier("cursor-thinking-toggle")
+                            }
                             Text("추론 강도와 Fast는 Codex 앱에서 선택")
                                 .font(.system(size: 9))
                                 .foregroundStyle(AppTheme.muted)
@@ -818,7 +826,7 @@ struct SettingsView: View {
                             .foregroundStyle(AppTheme.yellow)
                             .textSelection(.enabled)
                     }
-                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. 선택한 Cursor 모델만 Codex 모델 선택기에 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 고르면 실제 Cursor variant로 변환됩니다. Thinking은 별도 Cursor 모델 항목으로 선택할 수 있습니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다.")
+                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. 선택한 Cursor 모델만 Codex 모델 선택기에 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 고르면 실제 Cursor variant로 변환됩니다. Anthropic Claude는 Thinking을 항상 켠 단일 모델로 표시됩니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다.")
                         .font(.system(size: 9))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -913,9 +921,11 @@ struct SettingsView: View {
             cursorModelDraft = model.cursorBridgePreferences.model
             cursorPortDraft = String(model.cursorBridgePreferences.port)
             cursorAgentPathDraft = model.cursorBridgePreferences.agentPath ?? ""
+            normalizeAnthropicThinkingSelection()
             synchronizeCursorExposureDraft(reset: true)
         }
         .onChange(of: model.cursorModelCatalog) { _ in
+            normalizeAnthropicThinkingSelection()
             synchronizeCursorExposureDraft()
         }
         .onChange(of: cursorModelDraft) { _ in
@@ -941,7 +951,9 @@ struct SettingsView: View {
 
     private var selectedCursorModelDisplayName: String {
         guard let family = selectedCursorFamily else { return cursorModelDraft }
-        if selectedCursorVariant?.thinking == true {
+        if selectedCursorVariant?.thinking == true,
+           family.group != .anthropicClaude
+        {
             return "\(family.displayName) · Thinking"
         }
         return family.displayName
@@ -977,6 +989,7 @@ struct SettingsView: View {
         guard let family = selectedCursorFamily,
               let variant = selectedCursorVariant
         else { return false }
+        guard family.group != .anthropicClaude else { return false }
         return family.resolve(
             effort: variant.effort,
             fast: variant.fast,
@@ -1063,7 +1076,9 @@ struct SettingsView: View {
         guard !available.isEmpty else { return }
         if reset || !cursorExposureDraftInitialized {
             if let stored = model.cursorBridgePreferences.exposedModelIDs {
-                cursorExposedModelIDsDraft = Set(stored).intersection(available)
+                cursorExposedModelIDsDraft = Set(stored.map(
+                    model.cursorModelCatalog.canonicalCodexModelID))
+                    .intersection(available)
             } else {
                 cursorExposedModelIDsDraft = available
             }
@@ -1078,6 +1093,18 @@ struct SettingsView: View {
         {
             cursorExposedModelIDsDraft.insert(first)
         }
+    }
+
+    private func normalizeAnthropicThinkingSelection() {
+        guard let family = selectedCursorFamily,
+              family.group == .anthropicClaude,
+              let variant = selectedCursorVariant,
+              !variant.thinking
+        else { return }
+        cursorModelDraft = family.resolve(
+            effort: variant.effort,
+            fast: variant.fast,
+            thinking: true) ?? family.preferredVariant?.slug ?? cursorModelDraft
     }
 
     private var cursorStatusIcon: String {

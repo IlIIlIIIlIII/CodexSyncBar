@@ -227,17 +227,20 @@ struct CursorModelFamily: Codable, Equatable, Identifiable, Sendable {
     }
 
     var preferredVariant: CursorModelVariant? {
+        let requiredThinking = group == .anthropicClaude
         let preferredEfforts: [CursorModelEffort] = [
             .default, .medium, .high, .low, .none, .minimal, .xhigh, .max,
         ]
         for effort in preferredEfforts {
             if let variant = variants.first(where: {
-                $0.effort == effort && !$0.fast && !$0.thinking
+                $0.effort == effort && !$0.fast && $0.thinking == requiredThinking
             }) {
                 return variant
             }
         }
-        return variants.first(where: { !$0.fast && !$0.thinking }) ?? variants.first
+        return variants.first(where: {
+            !$0.fast && $0.thinking == requiredThinking
+        }) ?? variants.first(where: { $0.thinking == requiredThinking })
     }
 
     func availableEfforts(fast: Bool, thinking: Bool) -> [CursorModelEffort] {
@@ -321,7 +324,7 @@ struct CursorModelCatalog: Equatable, Sendable {
 
     func exposingCodexModelIDs(_ modelIDs: [String]?) throws -> CursorModelCatalog {
         guard let modelIDs else { return self }
-        let requested = Set(modelIDs)
+        let requested = Set(modelIDs.map(canonicalCodexModelID))
         let available = Set(pickerPresets.map(\.id))
         guard !requested.isEmpty,
               requested.count == modelIDs.count,
@@ -342,6 +345,23 @@ struct CursorModelCatalog: Equatable, Sendable {
                 "선택한 Cursor 모델을 Codex 모델 선택기에 안전하게 노출할 수 없습니다.")
         }
         return filtered
+    }
+
+    func canonicalCodexModelID(_ modelID: String) -> String {
+        let available = Set(pickerPresets.map(\.id))
+        if available.contains(modelID) { return modelID }
+        for family in families where family.group == .anthropicClaude {
+            let legacyID = Self.codexModelID(
+                baseSlug: family.baseSlug,
+                thinking: false)
+            let thinkingID = Self.codexModelID(
+                baseSlug: family.baseSlug,
+                thinking: true)
+            if modelID == legacyID, available.contains(thinkingID) {
+                return thinkingID
+            }
+        }
+        return modelID
     }
 
     var sections: [CursorModelSection] {
@@ -379,7 +399,10 @@ struct CursorModelCatalog: Equatable, Sendable {
     var pickerPresets: [CursorCodexPickerPreset] {
         var presets: [CursorCodexPickerPreset] = []
         for family in families {
-            for thinking in [false, true] {
+            let thinkingModes = family.group == .anthropicClaude
+                ? [true]
+                : [false, true]
+            for thinking in thinkingModes {
                 let matchingVariants = family.variants.filter { $0.thinking == thinking }
                 // Codex always has a Standard service tier. A Cursor cohort
                 // that only exposes Fast cannot be represented truthfully in
@@ -417,9 +440,12 @@ struct CursorModelCatalog: Equatable, Sendable {
         guard let variant = variants.first(where: { $0.slug == slug }) else {
             return nil
         }
+        let thinking = Self.group(for: variant.baseSlug) == .anthropicClaude
+            ? true
+            : variant.thinking
         let modelID = Self.codexModelID(
             baseSlug: variant.baseSlug,
-            thinking: variant.thinking)
+            thinking: thinking)
         return pickerPresets.contains(where: { $0.id == modelID }) ? modelID : nil
     }
 

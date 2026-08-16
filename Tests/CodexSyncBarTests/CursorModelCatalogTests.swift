@@ -88,7 +88,6 @@ final class CursorModelCatalogTests: XCTestCase {
             "syncbar-cursor/auto",
             "syncbar-cursor/composer-2.5",
             "syncbar-cursor/gpt-5.2",
-            "syncbar-cursor/claude-opus-5",
             "syncbar-cursor/claude-opus-5/thinking",
         ])
         XCTAssertEqual(
@@ -97,6 +96,10 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(
             catalog.preferredPickerModelID(forFlatSlug: "claude-opus-5-thinking-high"),
             "syncbar-cursor/claude-opus-5/thinking")
+        XCTAssertEqual(
+            catalog.preferredPickerModelID(forFlatSlug: "claude-opus-5-high"),
+            "syncbar-cursor/claude-opus-5/thinking")
+        XCTAssertNil(catalog.codexModelRoutes["syncbar-cursor/claude-opus-5"])
         XCTAssertNil(catalog.preferredPickerModelID(forFlatSlug: "missing"))
 
         let gpt = try XCTUnwrap(catalog.codexModelRoutes["syncbar-cursor/gpt-5.2"])
@@ -297,10 +300,7 @@ final class CursorModelCatalogTests: XCTestCase {
         ])
         XCTAssertEqual(
             catalog.codexModelIDs(in: .anthropicClaude),
-            [
-                "syncbar-cursor/claude-opus-5",
-                "syncbar-cursor/claude-opus-5/thinking",
-            ])
+            ["syncbar-cursor/claude-opus-5/thinking"])
         XCTAssertEqual(
             catalog.codexModelIDs(in: .openAIGPT),
             ["syncbar-cursor/gpt-5.6-sol"])
@@ -322,6 +322,31 @@ final class CursorModelCatalogTests: XCTestCase {
         XCTAssertEqual(
             catalog.family(baseSlug: "composer-2.5")?.preferredVariant?.slug,
             "composer-2.5")
+    }
+
+    func testAnthropicPickerAlwaysUsesThinkingAndMigratesLegacyExposureID() throws {
+        let catalog = CursorModelCatalog(cliOutput: """
+        claude-opus-5-high - Opus 5 1M High
+        claude-opus-5-thinking-high - Opus 5 1M Thinking High
+        claude-opus-5-thinking-high-fast - Opus 5 Thinking High Fast
+        """)
+
+        XCTAssertEqual(
+            catalog.family(baseSlug: "claude-opus-5")?.preferredVariant?.slug,
+            "claude-opus-5-thinking-high")
+        XCTAssertEqual(
+            catalog.pickerPresets.map(\.id),
+            ["syncbar-cursor/claude-opus-5/thinking"])
+        let migrated = try catalog.exposingCodexModelIDs([
+            "syncbar-cursor/claude-opus-5",
+        ])
+        XCTAssertEqual(
+            migrated.pickerPresets.map(\.id),
+            ["syncbar-cursor/claude-opus-5/thinking"])
+        XCTAssertEqual(migrated.variants.map(\.slug), [
+            "claude-opus-5-thinking-high",
+            "claude-opus-5-thinking-high-fast",
+        ])
     }
 
     func testBuildsExactACPParametersWithoutInferringContextFromSlug() throws {
