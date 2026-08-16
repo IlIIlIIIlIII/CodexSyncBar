@@ -69,9 +69,9 @@ Windows의 Cursor 브리지는 로컬 Cursor CLI(`cursor-agent status`)를 사�
 ```powershell
 dotnet restore Windows\CodexSyncBar.Windows.sln --runtime win-x64
 dotnet test Windows\CodexSyncBar.Windows.Core.Tests\CodexSyncBar.Windows.Core.Tests.csproj
-dotnet build Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64
+dotnet build Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --runtime win-x64
 dotnet publish Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --runtime win-x64 --self-contained false
-dotnet run --project Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --no-restore
+dotnet run --project Windows\CodexSyncBar.Windows\CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --runtime win-x64 --no-restore
 ```
 
 Visual Studio에서 열 때는 `Windows\CodexSyncBar.Windows.sln`을 사용하고 `x64`, `x86`, `ARM64` 중 대상 장치에 맞는 구성을 선택합니다. RID별 빌드는 해당 런타임으로 복원한 뒤 실행합니다.
@@ -82,9 +82,9 @@ Visual Studio에서 열 때는 `Windows\CodexSyncBar.Windows.sln`을 사용하�
 
 ```powershell
 dotnet restore Windows\CodexSyncBar.Windows.sln --runtime win-x86
-dotnet build Windows\CodexSyncBar.Windows.sln --configuration Release --property:Platform=x86 --no-restore
+dotnet build Windows\CodexSyncBar.Windows.sln --configuration Release --property:Platform=x86 --runtime win-x86 --no-restore
 dotnet restore Windows\CodexSyncBar.Windows.sln --runtime win-arm64
-dotnet build Windows\CodexSyncBar.Windows.sln --configuration Release --property:Platform=ARM64 --no-restore
+dotnet build Windows\CodexSyncBar.Windows.sln --configuration Release --property:Platform=ARM64 --runtime win-arm64 --no-restore
 ```
 
 개발·문서 QA 실행도 macOS 앱과 같은 인자 계약을 제공합니다. `--preview-window`는 QA 화면을 열고, `--login-profile=<양의 정수>`는 해당 계정의 기본 브라우저 로그인 흐름을 바로 시작합니다. README 캡처는 기존 디렉터리에 대한 절대 PNG 경로만 허용합니다.

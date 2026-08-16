@@ -45,19 +45,19 @@ jobs:
         run: dotnet test Windows/CodexSyncBar.Windows.Core.Tests/CodexSyncBar.Windows.Core.Tests.csproj --configuration Release --no-restore
 
       - name: Build WinUI 3 x64
-        run: dotnet build Windows/CodexSyncBar.Windows/CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --no-restore
+        run: dotnet build Windows/CodexSyncBar.Windows/CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x64 --runtime win-x64 --no-restore
 
       - name: Restore x86 runtime
         run: dotnet restore Windows/CodexSyncBar.Windows.sln --runtime win-x86
 
       - name: Build WinUI 3 x86
-        run: dotnet build Windows/CodexSyncBar.Windows/CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x86 --no-restore
+        run: dotnet build Windows/CodexSyncBar.Windows/CodexSyncBar.Windows.csproj --configuration Release --property:Platform=x86 --runtime win-x86 --no-restore
 
       - name: Restore ARM64 runtime
         run: dotnet restore Windows/CodexSyncBar.Windows.sln --runtime win-arm64
 
       - name: Build WinUI 3 ARM64
-        run: dotnet build Windows/CodexSyncBar.Windows/CodexSyncBar.Windows.csproj --configuration Release --property:Platform=ARM64 --no-restore
+        run: dotnet build Windows/CodexSyncBar.Windows/CodexSyncBar.Windows.csproj --configuration Release --property:Platform=ARM64 --runtime win-arm64 --no-restore
 
       - name: Verify bundled PDF extractor
         shell: pwsh
