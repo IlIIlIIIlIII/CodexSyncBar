@@ -13,6 +13,7 @@ import {
   BridgeError,
   CursorSessionRegistry,
   MixedDeltaTracker,
+  StreamingResponseSSE,
   buildCursorPrompt,
   buildResponseResult,
   consumeCursorEvent,
@@ -1306,6 +1307,85 @@ test("non-callable Responses tools are declared unavailable without blocking cod
   assert.match(prompt, /read_record/);
 });
 
+test("client tool_search is callable while hosted tool_search remains server-owned", () => {
+  const clientRequest = baseRequest({
+    tools: [{
+      type: "tool_search",
+      execution: "client",
+      description: "Find the tools needed to continue.",
+      parameters: {
+        type: "object",
+        properties: { goal: { type: "string" } },
+        required: ["goal"],
+        additionalProperties: false,
+      },
+    }],
+  });
+  const envelope = '<SYNCBAR_TOOL_CALL>{"name":"tool_search","arguments":{"goal":"read a file"}}</SYNCBAR_TOOL_CALL>';
+
+  assert.deepEqual(parseToolEnvelope(envelope, clientRequest), {
+    kind: "tool_search",
+    arguments: { goal: "read a file" },
+  });
+  const prompt = buildCursorPrompt(clientRequest);
+  assert.match(prompt, /client-executed tool_search tool is callable/);
+  assert.match(prompt, /"execution":"client"/);
+
+  const hostedRequest = baseRequest({ tools: [{ type: "tool_search" }] });
+  assert.equal(parseToolEnvelope(envelope, hostedRequest), null);
+  assert.match(buildCursorPrompt(hostedRequest), /No client-executed tool search is available/);
+});
+
+test("tool_search_output tools become callable on the next turn", () => {
+  const request = baseRequest({
+    tools: [],
+    input: [{
+      type: "tool_search_output",
+      execution: "client",
+      call_id: "call_search",
+      status: "completed",
+      tools: [{
+        type: "namespace",
+        name: "functions",
+        description: "Outer Codex tools.",
+        tools: [{
+          type: "function",
+          name: "exec",
+          description: "Run a bounded outer operation.",
+          defer_loading: true,
+          parameters: { type: "object", properties: { input: { type: "string" } } },
+        }],
+      }],
+    }],
+  });
+  const envelope = '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","arguments":{"input":"inspect"}}</SYNCBAR_TOOL_CALL>';
+
+  assert.deepEqual(parseToolEnvelope(envelope, request), {
+    kind: "function",
+    namespace: "functions",
+    name: "exec",
+    arguments: '{"input":"inspect"}',
+  });
+  const prompt = buildCursorPrompt(request);
+  assert.match(prompt, /"name":"functions"/);
+  assert.match(prompt, /"name":"exec"/);
+});
+
+test("client tool_search requires a parameter schema and rejects unknown execution modes", () => {
+  assert.throws(
+    () => buildCursorPrompt(baseRequest({ tools: [{ type: "tool_search", execution: "client" }] })),
+    (error) => error instanceof BridgeError &&
+      error.statusCode === 400 &&
+      error.code === "invalid_request",
+  );
+  assert.throws(
+    () => buildCursorPrompt(baseRequest({ tools: [{ type: "tool_search", execution: "server" }] })),
+    (error) => error instanceof BridgeError &&
+      error.statusCode === 400 &&
+      error.code === "unsupported_tool_type",
+  );
+});
+
 test("Responses Lite additional_tools remain callable", () => {
   const request = baseRequest({
     tools: [],
@@ -1796,6 +1876,50 @@ test("Responses SSE includes complete function arguments in output_item.done", (
   assert.match(done.data.item.call_id, /^call_/);
   const argumentsDone = events.find((event) => event.type === "response.function_call_arguments.done");
   assert.equal(argumentsDone.data.name, "read_record");
+});
+
+test("client tool_search emits a complete tool_search_call in buffered and live SSE", () => {
+  const request = baseRequest({
+    tools: [{
+      type: "tool_search",
+      execution: "client",
+      parameters: {
+        type: "object",
+        properties: { goal: { type: "string" } },
+        required: ["goal"],
+        additionalProperties: false,
+      },
+    }],
+  });
+  const cursorText = '<SYNCBAR_TOOL_CALL>{"name":"tool_search","arguments":{"goal":"load browser tools"}}</SYNCBAR_TOOL_CALL>';
+  const response = buildResponseResult(request, cursorText);
+  const call = response.output[0];
+
+  assert.equal(call.type, "tool_search_call");
+  assert.equal(call.execution, "client");
+  assert.match(call.call_id, /^call_/);
+  assert.equal(call.status, "completed");
+  assert.deepEqual(call.arguments, { goal: "load browser tools" });
+
+  const bufferedEvents = responseSSEEvents(response);
+  const bufferedAdded = bufferedEvents.find((event) => event.type === "response.output_item.added");
+  const bufferedDone = bufferedEvents.find((event) => event.type === "response.output_item.done");
+  assert.equal(bufferedAdded.data.item.type, "tool_search_call");
+  assert.equal(bufferedAdded.data.item.status, "in_progress");
+  assert.deepEqual(bufferedAdded.data.item.arguments, { goal: "load browser tools" });
+  assert.deepEqual(bufferedDone.data.item, call);
+  assert.equal(bufferedEvents.some((event) => event.type.includes("function_call_arguments")), false);
+
+  const liveEvents = [];
+  const live = new StreamingResponseSSE(request, (event) => liveEvents.push(event));
+  live.start();
+  live.acceptTextDelta(cursorText);
+  const liveResponse = live.complete(cursorText);
+  const liveAdded = liveEvents.find((event) => event.type === "response.output_item.added");
+  const liveDone = liveEvents.find((event) => event.type === "response.output_item.done");
+  assert.equal(liveAdded.data.item.type, "tool_search_call");
+  assert.equal(liveDone.data.item.type, "tool_search_call");
+  assert.deepEqual(liveResponse.output[0].arguments, { goal: "load browser tools" });
 });
 
 test("visualization directives and Markdown image output pass through byte-for-byte", () => {

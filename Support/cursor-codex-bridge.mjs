@@ -705,7 +705,26 @@ function validatedTools(tools) {
     if (!tool || typeof tool !== "object" || typeof tool.type !== "string") {
       throw new BridgeError("Each tool must have a type", 400, "invalid_request");
     }
-    if (["tool_search", "image_generation", "web_search"].includes(tool.type)) {
+    if (tool.type === "tool_search") {
+      if (tool.execution !== undefined && tool.execution !== "client") {
+        throw new BridgeError(
+          "Unsupported tool_search execution mode",
+          400,
+          "unsupported_tool_type",
+        );
+      }
+      if (tool.execution === "client" && (
+        !tool.parameters || typeof tool.parameters !== "object" || Array.isArray(tool.parameters)
+      )) {
+        throw new BridgeError(
+          "Client tool_search must define parameters",
+          400,
+          "invalid_request",
+        );
+      }
+      return tool;
+    }
+    if (["image_generation", "web_search"].includes(tool.type)) {
       return tool;
     }
     if (typeof tool.name !== "string") {
@@ -747,6 +766,8 @@ function requestTools(request) {
     for (const item of request.input) {
       if (item?.type === "additional_tools") {
         tools.push(...validatedTools(item.tools));
+      } else if (item?.type === "tool_search_output") {
+        tools.push(...validatedTools(item.tools));
       }
     }
   }
@@ -761,7 +782,8 @@ function requestTools(request) {
 
 function callableTools(request) {
   return requestTools(request).filter((tool) =>
-    tool.type === "function" || tool.type === "custom" || tool.type === "namespace");
+    tool.type === "function" || tool.type === "custom" || tool.type === "namespace" ||
+      (tool.type === "tool_search" && tool.execution === "client"));
 }
 
 function normalizedToolChoice(request) {
@@ -1817,6 +1839,8 @@ function preparedCursorBackendRequest(request, options = {}) {
   });
   const allTools = requestTools(request);
   const tools = callableTools(request);
+  const hasClientToolSearch = tools.some((tool) =>
+    tool.type === "tool_search" && tool.execution === "client");
   const toolChoice = request.tool_choice ?? "auto";
   const choice = normalizedToolChoice(request);
   const mayCallTool = tools.length > 0 && choice.mode !== "none";
@@ -1850,6 +1874,9 @@ function preparedCursorBackendRequest(request, options = {}) {
     mayCallTool
       ? `When an available external tool is required, first write exactly one concise progress update stating the next action without revealing private chain-of-thought, then return ${TOOL_START}{\"name\":\"exact tool name\",\"arguments\":{}}${TOOL_END}. For a tool nested in a namespace, also include \"namespace\" with the exact namespace name. For a custom tool, use \"input\" instead of \"arguments\". Request exactly one tool per response, include no other protocol tags, and return nothing after the closing tag.`
       : "No external tool is available for this response. Return the final answer as plain text.",
+    hasClientToolSearch
+      ? `The client-executed tool_search tool is callable as ${TOOL_START}{\"name\":\"tool_search\",\"arguments\":{\"goal\":\"what capability is needed\"}}${TOOL_END}. Use its declared parameter schema and omit namespace.`
+      : "No client-executed tool search is available.",
     "Minimize model round trips. When one offered orchestration tool can safely perform a bounded sequence of related read-only operations, request that sequence in one call while preserving every tool-specific ordering rule.",
     "For a normal answer, return plain text without protocol tags.",
     "Preserve host-defined inline rendering directives and artifact paths exactly in the final answer.",
@@ -1891,6 +1918,12 @@ export function buildCursorPrompt(request) {
 function toolByName(request, name, namespace) {
   const matches = [];
   for (const tool of callableTools(request)) {
+    if (tool.type === "tool_search") {
+      if (name === "tool_search" && namespace === undefined) {
+        matches.push({ tool, namespace: null });
+      }
+      continue;
+    }
     if (tool.type !== "namespace") {
       if (tool.name === name && namespace === undefined) matches.push({ tool, namespace: null });
       continue;
@@ -1956,6 +1989,20 @@ function parsedToolResponse(text, request) {
     );
   }
   const { tool, namespace } = match;
+  if (tool.type === "tool_search") {
+    const args = envelope.arguments;
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      throw new BridgeError(
+        "Cursor backend omitted tool search arguments",
+        502,
+        "invalid_tool_envelope",
+      );
+    }
+    return {
+      call: { kind: "tool_search", arguments: clone(args) },
+      commentary,
+    };
+  }
   if (tool.type === "function") {
     const args = envelope.arguments;
     if (args === undefined) {
@@ -2080,6 +2127,16 @@ function messageItem(text, completed, phase = "final_answer") {
 function toolItem(toolCall, completed) {
   const token = randomUUID().replaceAll("-", "");
   const callID = `call_${token}`;
+  if (toolCall.kind === "tool_search") {
+    return {
+      id: `tsc_${token}`,
+      type: "tool_search_call",
+      execution: "client",
+      call_id: callID,
+      status: completed ? "completed" : "in_progress",
+      arguments: clone(toolCall.arguments),
+    };
+  }
   if (toolCall.kind === "function") {
     const item = {
       id: `fc_${token}`,
@@ -2171,6 +2228,11 @@ export function responseSSEEvents(response) {
         output_index: outputIndex,
         content_index: 0,
         part,
+      });
+    } else if (finalItem.type === "tool_search_call") {
+      push("response.output_item.added", {
+        output_index: outputIndex,
+        item: { ...finalItem, status: "in_progress" },
       });
     } else if (finalItem.type === "function_call") {
       push("response.output_item.added", {
@@ -2387,7 +2449,12 @@ export class StreamingResponseSSE {
   }
 
   emitToolItem(finalItem, outputIndex) {
-    if (finalItem.type === "function_call") {
+    if (finalItem.type === "tool_search_call") {
+      this.emit("response.output_item.added", {
+        output_index: outputIndex,
+        item: { ...finalItem, status: "in_progress" },
+      });
+    } else if (finalItem.type === "function_call") {
       this.emit("response.output_item.added", {
         output_index: outputIndex,
         item: { ...finalItem, status: "in_progress", arguments: "" },
