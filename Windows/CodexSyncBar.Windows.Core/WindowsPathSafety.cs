@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
@@ -52,9 +53,12 @@ internal static class WindowsPathSafety
             }
 
             var security = new FileInfo(path).GetAccessControl();
-            var currentUser = WindowsIdentity.GetCurrent().User;
+            using var currentIdentity = WindowsIdentity.GetCurrent();
+            var currentUser = currentIdentity.User;
             var owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
-            if (currentUser is null || owner is null || !owner.Equals(currentUser))
+            if (currentUser is null
+                || owner is null
+                || !IsOwnedByCurrentIdentity(currentIdentity, currentUser, owner))
             {
                 throw new CodexSyncBarException(
                     $"{description} 소유자가 현재 Windows 사용자와 달라 안전하지 않습니다: {path}");
@@ -156,5 +160,29 @@ internal static class WindowsPathSafety
             attributes = default;
             return false;
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool IsOwnedByCurrentIdentity(
+        WindowsIdentity currentIdentity,
+        SecurityIdentifier currentUser,
+        SecurityIdentifier owner)
+    {
+        if (owner.Equals(currentUser))
+        {
+            return true;
+        }
+
+        // An elevated administrator token uses BUILTIN\Administrators as the
+        // default owner for newly-created files. Accept that owner only while
+        // the current token is actively elevated; a normal user's disabled
+        // administrator group membership is not sufficient. Broad read ACLs
+        // are still rejected by the caller below.
+        var administrators = new SecurityIdentifier(
+            WellKnownSidType.BuiltinAdministratorsSid,
+            null);
+        return owner.Equals(administrators)
+            && new WindowsPrincipal(currentIdentity)
+                .IsInRole(WindowsBuiltInRole.Administrator);
     }
 }

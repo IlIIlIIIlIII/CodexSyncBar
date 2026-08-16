@@ -1,9 +1,50 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using CodexSyncBar.Windows.Core;
 
 namespace CodexSyncBar.Windows.Core.Tests;
 
 public sealed class CoreContractTests
 {
+    [Fact]
+    public void ElevatedAdministratorOwnerIsAcceptedForPrivateFiles()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var identity = WindowsIdentity.GetCurrent();
+        if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+        {
+            return;
+        }
+
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"codex-syncbar-administrator-owner-{Guid.NewGuid():N}");
+        var file = Path.Combine(root, "private.json");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(file, "{}");
+            var security = new FileInfo(file).GetAccessControl();
+            security.SetOwner(new SecurityIdentifier(
+                WellKnownSidType.BuiltinAdministratorsSid,
+                null));
+            new FileInfo(file).SetAccessControl(security);
+
+            WindowsPathSafety.EnsurePrivateFile(file, "테스트 개인 파일", 1_024);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     [Fact]
     public async Task CommandScriptArgumentsSurviveCmdEscaping()
     {
