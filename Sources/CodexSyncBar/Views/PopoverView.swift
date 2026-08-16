@@ -133,6 +133,7 @@ struct PopoverView: View {
         .task {
             await model.start()
             await model.refreshCursorAccount()
+            await model.refreshCursorMonthlyUsage()
             await model.refreshUsageIfStale()
         }
     }
@@ -178,13 +179,18 @@ struct PopoverView: View {
             }
             if !model.isReadmeDemo {
                 Button {
-                    model.openCursorUsageDashboard()
+                    switch model.cursorMonthlyUsageState {
+                    case .loaded, .loading:
+                        Task { await model.refreshCursorMonthlyUsage() }
+                    case .unknown, .signedOut, .failed:
+                        model.beginCursorUsageLogin()
+                    }
                 } label: {
                     cursorUsageButtonLabel
                 }
                 .buttonStyle(.plain)
-                .help("Cursor 월간 사용량 대시보드 열기")
-                .accessibilityLabel("Cursor 월간 사용량, 공식 대시보드에서 확인")
+                .help(cursorUsageButtonHelp)
+                .accessibilityLabel(cursorUsageButtonHelp)
                 .accessibilityIdentifier("cursor-usage-account-button")
             }
         }
@@ -193,6 +199,7 @@ struct PopoverView: View {
 
     private var cursorUsageButtonLabel: some View {
         let email = model.cursorAccountState.email
+        let snapshot = model.cursorMonthlyUsageState.snapshot
         return HStack(spacing: 7) {
             ZStack {
                 Circle()
@@ -212,19 +219,32 @@ struct PopoverView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack(spacing: 3) {
-                    Image(systemName: email == nil
+                    Image(systemName: snapshot == nil
                         ? "person.crop.circle.badge.exclamationmark"
                         : "checkmark.shield.fill")
-                    Text(email == nil ? "로그인 필요" : "인증 정상")
+                    Text(cursorUsageStatusText)
                 }
                 .font(.system(size: 7.5, weight: .semibold))
-                .foregroundStyle(email == nil ? AppTheme.yellow : AppTheme.green)
+                .foregroundStyle(snapshot == nil ? AppTheme.yellow : AppTheme.green)
                 .lineLimit(1)
             }
             Spacer(minLength: 1)
-            Text("웹 확인 ↗")
-                .font(.system(size: 8.5, weight: .bold))
-                .foregroundStyle(AppTheme.cyan)
+            if let snapshot {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(snapshot.totalRemainingPercent)%")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                    Text("모델 \(snapshot.cursorModelsRemainingPercent)% · 기타 \(snapshot.otherModelsRemainingPercent)%")
+                        .font(.system(size: 6.8, weight: .semibold))
+                        .foregroundStyle(AppTheme.muted)
+                        .lineLimit(1)
+                }
+            } else if case .loading = model.cursorMonthlyUsageState {
+                ProgressView().controlSize(.mini)
+            } else {
+                Text("로그인")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(AppTheme.cyan)
+            }
         }
         .padding(.horizontal, 9)
         .frame(maxWidth: .infinity, minHeight: 48)
@@ -234,6 +254,25 @@ struct PopoverView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(AppTheme.cyan.opacity(0.38), lineWidth: 1))
+    }
+
+    private var cursorUsageStatusText: String {
+        switch model.cursorMonthlyUsageState {
+        case .unknown: "사용량 확인 전"
+        case .loading: "사용량 확인 중"
+        case .signedOut: "웹 로그인 필요"
+        case let .loaded(snapshot):
+            "\(snapshot.membershipType.capitalized) · \(snapshot.billingCycleEnd.formatted(.dateTime.month().day())) 초기화"
+        case .failed: "사용량 확인 실패"
+        }
+    }
+
+    private var cursorUsageButtonHelp: String {
+        switch model.cursorMonthlyUsageState {
+        case .loaded: "Cursor 월간 사용량 새로고침"
+        case .loading: "Cursor 월간 사용량 확인 중"
+        case .unknown, .signedOut, .failed: "Cursor 사용량 로그인을 시작"
+        }
     }
 
     private func accountButtonLabel(_ profile: AccountProfile) -> some View {

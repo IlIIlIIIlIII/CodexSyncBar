@@ -84,7 +84,11 @@ struct SettingsView: View {
         .frame(minWidth: 720, minHeight: readmeDetailOnly ? 0 : 540)
         .accessibilityIdentifier("settings-root")
         .preferredColorScheme(.dark)
-        .task { await model.start() }
+        .task {
+            await model.start()
+            await model.refreshCursorAccount(agentPath: cursorAgentPathDraft)
+            await model.refreshCursorMonthlyUsage()
+        }
         .onDisappear {
             model.dismissTransientBannerAfterFocusLoss()
         }
@@ -146,7 +150,7 @@ struct SettingsView: View {
                 Task { await model.removeCursorAccount() }
             }
         } message: {
-            Text("이전 Codex provider를 복구하고 브리지를 중지한 뒤, 이 Mac과 등록된 SSH 장치의 Cursor 자격증명 및 Keychain API key를 정리합니다. Cursor.com 웹 계정과 구독은 삭제되지 않습니다.")
+            Text("이전 Codex provider를 복구하고 브리지를 중지한 뒤, 이 Mac의 CLI·사용량 로그인과 등록된 SSH 장치의 Cursor 자격증명 및 Keychain API key를 정리합니다. Cursor.com 웹 계정과 구독은 삭제되지 않습니다.")
         }
     }
 
@@ -539,25 +543,44 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("월간 사용량")
                                 .font(.system(size: 11, weight: .semibold))
-                            Text("개인 플랜은 공개 Usage API가 없어 웹 대시보드에서 확인합니다.")
+                            cursorMonthlyUsageDetail
                                 .font(.system(size: 9))
                                 .foregroundStyle(AppTheme.muted)
                         }
                         Spacer()
-                        Button("사용량 대시보드 열기") {
+                        if case .loading = model.cursorMonthlyUsageState {
+                            ProgressView().controlSize(.small)
+                        } else if model.cursorMonthlyUsageState.snapshot == nil {
+                            Button("Cursor 사용량 로그인") {
+                                model.beginCursorUsageLogin()
+                            }
+                            .accessibilityIdentifier("cursor-usage-login-button")
+                        } else {
+                            Button {
+                                Task { await model.refreshCursorMonthlyUsage() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .help("Cursor 월간 사용량 새로고침")
+                            .accessibilityIdentifier("cursor-usage-refresh-button")
+                        }
+                        Button("웹") {
                             model.openCursorUsageDashboard()
                         }
                         .accessibilityIdentifier("cursor-usage-dashboard-button")
                     }
                     .padding(.vertical, 8)
 
-                    if model.cursorAccountState.email != nil || model.hasCursorAPIKey {
+                    if model.cursorAccountState.email != nil
+                        || model.hasCursorAPIKey
+                        || model.cursorMonthlyUsageState.snapshot != nil
+                    {
                         Divider().overlay(AppTheme.border)
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("로컬 계정 연결")
                                     .font(.system(size: 11, weight: .semibold))
-                                Text("웹 계정은 유지하고 이 Mac과 SSH 자격증명만 정리합니다.")
+                                Text("웹 계정은 유지하고 이 Mac의 CLI·사용량 로그인과 SSH 자격증명만 정리합니다.")
                                     .font(.system(size: 9))
                                     .foregroundStyle(AppTheme.muted)
                             }
@@ -1049,6 +1072,26 @@ struct SettingsView: View {
         case .signedIn: AppTheme.green
         case .unknown, .loading: AppTheme.blue
         case .signedOut, .failed: AppTheme.yellow
+        }
+    }
+
+    @ViewBuilder
+    private var cursorMonthlyUsageDetail: some View {
+        switch model.cursorMonthlyUsageState {
+        case .unknown:
+            Text("SyncBar 전용 Cursor 웹 로그인이 필요합니다.")
+        case .loading:
+            Text("Cursor 월간 pool을 확인하고 있습니다.")
+        case .signedOut:
+            Text("로그인 후 Cursor Models·Other Models 잔여량을 표시합니다.")
+        case let .loaded(snapshot):
+            VStack(alignment: .leading, spacing: 2) {
+                Text("전체 \(snapshot.totalRemainingPercent)% 남음 · Cursor Models \(snapshot.cursorModelsRemainingPercent)% · Other Models \(snapshot.otherModelsRemainingPercent)%")
+                    .foregroundStyle(AppTheme.cyan)
+                Text("\(snapshot.membershipType.capitalized) · \(snapshot.billingCycleEnd.formatted(.dateTime.year().month().day().hour().minute())) 초기화")
+            }
+        case let .failed(message):
+            Text(message)
         }
     }
 

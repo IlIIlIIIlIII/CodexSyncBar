@@ -72,6 +72,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var cursorModelCatalogError: String?
     @Published private(set) var hasCursorAPIKey = false
     @Published private(set) var cursorAccountState: CursorAccountState = .unknown
+    @Published private(set) var cursorMonthlyUsageState: CursorMonthlyUsageState = .unknown
 
     private let usageService: UsageService
     private let switchService: SwitchService
@@ -85,6 +86,7 @@ final class AppModel: ObservableObject {
     private let codexCursorModelCatalogService: CodexCursorModelCatalogService
     private let cursorBridgeService: CursorBridgeService
     private let cursorAPIKeyStore: CursorAPIKeyStoring
+    private let cursorDashboardUsageService: CursorDashboardUsageService
     private let secretStore: SSHSecretStoring
     private let controllerMutationLock = ControllerMutationLock()
     private var usagePollingTask: Task<Void, Never>?
@@ -95,6 +97,7 @@ final class AppModel: ObservableObject {
     private var transientBannerID: UUID?
     private var weeklyAnchorTasks: [Int: Task<Void, Never>] = [:]
     private var loginWindowController: LoginWindowController?
+    private var cursorUsageLoginWindowController: CursorUsageLoginWindowController?
     private var loginProfileID: Int?
     private var pendingNewProfileIDs: Set<Int> = []
     private var authWarningBannerID: UUID?
@@ -123,6 +126,7 @@ final class AppModel: ObservableObject {
         let codexCursorModelCatalogService = CodexCursorModelCatalogService()
         let cursorBridgeService = CursorBridgeService()
         let cursorAPIKeyStore = SystemCursorAPIKeyStore()
+        let cursorDashboardUsageService = CursorDashboardUsageService()
         let initialCursorAPIKeyState: (isStored: Bool, error: String?) = {
             guard readmeDemoFixture == nil else { return (false, nil) }
             do { return (try cursorAPIKeyStore.read() != nil, nil) }
@@ -213,6 +217,7 @@ final class AppModel: ObservableObject {
         self.codexCursorModelCatalogService = codexCursorModelCatalogService
         self.cursorBridgeService = cursorBridgeService
         self.cursorAPIKeyStore = cursorAPIKeyStore
+        self.cursorDashboardUsageService = cursorDashboardUsageService
         cursorBridgePreferences = initialCursorState.preferences
         isCursorProviderActive = initialCursorState.providerActive
         hasCursorAPIKey = initialCursorAPIKeyState.isStored
@@ -294,6 +299,7 @@ final class AppModel: ObservableObject {
             devices = readmeDemoFixture.devices
             tokenUsageSnapshot = readmeDemoFixture.tokenUsageSnapshot
             cursorAccountState = .signedOut
+            cursorMonthlyUsageState = .signedOut
             authMaintenanceSummary = "데모 인증 정상"
             launchAtLoginStatusText = "데모 모드"
             isReadmeDemo = true
@@ -1878,6 +1884,48 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshCursorMonthlyUsage() async {
+        guard !isReadmeDemo else { return }
+        cursorMonthlyUsageState = .loading
+        do {
+            if let snapshot = try await cursorDashboardUsageService.fetchSnapshot() {
+                cursorMonthlyUsageState = .loaded(snapshot)
+            } else {
+                cursorMonthlyUsageState = .signedOut
+            }
+        } catch {
+            cursorMonthlyUsageState = .failed(error.localizedDescription)
+        }
+    }
+
+    func beginCursorUsageLogin() {
+        guard !isReadmeDemo else { return }
+        if let controller = cursorUsageLoginWindowController {
+            controller.present()
+            return
+        }
+        cursorMonthlyUsageState = .loading
+        let controller = CursorUsageLoginWindowController(
+            usageService: cursorDashboardUsageService,
+            onUsageLoaded: { [weak self] snapshot in
+                guard let self else { return }
+                self.cursorMonthlyUsageState = .loaded(snapshot)
+                self.cursorUsageLoginWindowController = nil
+                self.showTransientBanner(
+                    style: .success,
+                    message: "Cursor 월간 사용량 로그인이 완료되었습니다.")
+            },
+            onDismiss: { [weak self] didLoadUsage in
+                guard let self else { return }
+                self.cursorUsageLoginWindowController = nil
+                if !didLoadUsage, case .loading = self.cursorMonthlyUsageState {
+                    self.cursorMonthlyUsageState = .signedOut
+                }
+            })
+        cursorUsageLoginWindowController = controller
+        controller.present()
+    }
+
     func reconcileCursorBridgeRuntime() async {
         guard !isReadmeDemo else { return }
         if isCursorProviderActive {
@@ -2160,6 +2208,11 @@ final class AppModel: ObservableObject {
             warnings.append("Keychain API key 삭제 실패: \(error.localizedDescription)")
         }
 
+        await cursorDashboardUsageService.clearSession()
+        cursorUsageLoginWindowController?.close()
+        cursorUsageLoginWindowController = nil
+        cursorMonthlyUsageState = .signedOut
+
         cursorModelCatalog = CursorModelCatalog(cliOutput: "")
         cursorModelCatalogError = nil
         do {
@@ -2180,7 +2233,7 @@ final class AppModel: ObservableObject {
         banner = AppBanner(
             style: warnings.isEmpty ? .success : .warning,
             message: warnings.isEmpty
-                ? "이 Mac과 등록된 SSH 장치에서 Cursor 계정 연결을 삭제했습니다. Cursor.com 웹 계정은 유지됩니다."
+                ? "이 Mac과 등록된 SSH 장치에서 Cursor 계정 연결과 사용량 로그인 세션을 삭제했습니다. Cursor.com 웹 계정은 유지됩니다."
                 : "Cursor 계정 연결을 일부 정리했지만 확인이 필요합니다: \(warnings.joined(separator: " "))")
     }
 
@@ -2297,7 +2350,7 @@ final class AppModel: ObservableObject {
     }
 
     func openCursorUsageDashboard() {
-        guard let url = URL(string: "https://cursor.com/dashboard/usage") else { return }
+        guard let url = URL(string: "https://cursor.com/dashboard/spending") else { return }
         NSWorkspace.shared.open(url)
     }
 

@@ -105,7 +105,7 @@ shasum -a 256 -c SHA256SUMS
 6. SSH에서도 사용할 때는 Cursor Dashboard에서 만든 User API Key를 **설정 → 모델 → SSH 원격 Cursor**에 저장합니다. 키는 이 Mac의 기기 전용 Keychain에 보관되며, 활성 SSH 장치로 동기화할 때 stdin으로만 전달됩니다.
 7. 원격 호스트에는 공식 Cursor 설치 스크립트로 `agent`를 자동 설치하고 SyncBar 전용 bridge·manager와 격리된 Cursor 인증 저장소를 구성합니다. macOS Cursor 로그인/Keychain 파일을 Linux에 복사하거나 변환하지 않습니다.
 8. **이전 Codex 모델로 복구**를 누르면 SyncBar가 바꾼 로컬 및 연결 가능한 SSH 장치의 최상위 `model`·`model_provider`·`model_catalog_json`과 관리 provider 블록을 원래 값으로 되돌리고, 원격 전용 runtime·Cursor 인증 저장소도 제거합니다. 설정이 외부에서 바뀌었다면 덮어쓰지 않고 해당 장치를 정리 실패로 표시합니다.
-9. 설정의 **Cursor 계정**에서 현재 CLI 로그인 이메일을 확인하고 공식 사용량 대시보드를 열 수 있습니다. **계정 연결 삭제**는 provider 복구, 브리지 중지, `cursor-agent logout`, Keychain API key 및 원격 자격증명 정리를 수행하지만 Cursor.com 웹 계정과 구독 자체는 삭제하지 않습니다.
+9. 설정의 **Cursor 계정**에서 현재 CLI 로그인 이메일을 확인하고, **Cursor 사용량 로그인**으로 SyncBar 전용 웹 프로필을 인증하면 Cursor Models·Other Models의 월간 잔여량과 초기화 시각을 계정 카드에서 볼 수 있습니다. **계정 연결 삭제**는 provider 복구, 브리지 중지, `cursor-agent logout`, 사용량 웹 세션, Keychain API key 및 원격 자격증명 정리를 수행하지만 Cursor.com 웹 계정과 구독 자체는 삭제하지 않습니다.
 10. 설정의 Codex 계정 행에서 휴지통을 누르면, 필요 시 다른 로그인 계정으로 모든 장비를 안전하게 전환하고 로그아웃한 뒤 해당 인증·전용 Chromium 세션·SyncBar 계정 항목을 제거합니다. OpenAI·ChatGPT 웹 계정과 구독 자체는 삭제하지 않으며, 안전한 폴백을 위해 마지막 한 계정은 남겨 둡니다.
 
 SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.toml`을 사용하고, 그렇지 않으면 `~/.codex/config.toml`을 사용합니다. 실제 대상 경로는 설정 화면에 표시합니다.
@@ -114,7 +114,7 @@ SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.
 
 Cursor CLI는 raw inference API가 아니라 agent workflow입니다. Cursor 항목의 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 병합 선택기의 기존 Codex 항목은 로컬 브리지가 고정된 공식 OpenAI/ChatGPT endpoint로만 전달하며, Cursor 항목은 Cursor CLI로 보냅니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. `input_file.file_data`는 엄격한 Base64 검증 뒤 텍스트·코드·Markdown·HTML·CSV·JSON·XML, DOCX·PPTX·XLSX·ODT, 이미지, PDF를 처리합니다. Office 문서는 제한된 별도 프로세스에서 텍스트만 추출하고, PDF는 이 Mac에 번들된 PDFKit helper로 텍스트와 최대 16장의 페이지 이미지를 함께 전달합니다. 원본 Base64와 임시 경로는 Cursor 프롬프트에 남기지 않습니다. 브리지 제한은 파일 8개, 파일당 12 MiB, 합계 24 MiB, 추출 텍스트 파일당 2 MiB·합계 4 MiB이며 PDF 페이지 이미지는 일반 이미지와 동일한 16장·24 MiB 한도를 공유합니다. 원격 Linux에는 PDFKit helper가 없으므로 PDF는 명시적으로 거절하지만 텍스트와 Office 문서는 처리할 수 있습니다.
 
-Cursor 개인 플랜은 월간 사용량·남은 구독 pool을 반환하는 공개 API나 CLI 명령을 제공하지 않습니다. SyncBar는 비공개 dashboard endpoint를 역공학하거나 로컬 요청량을 구독 잔여량으로 가장하지 않고, 공식 `cursor.com/dashboard/usage` 화면을 엽니다. Team/Enterprise의 Admin API는 별도 조직 관리자 키가 필요한 다른 인증 경계이므로 저장된 개인 User API Key로 호출하지 않습니다.
+Cursor 개인 플랜은 월간 사용량·남은 구독 pool을 반환하는 공개 API나 CLI 명령을 제공하지 않습니다. SyncBar는 사용자가 앱 안의 Cursor 페이지에 직접 로그인한 전용 WebKit 프로필로 공식 `cursor.com/dashboard/spending` 화면을 연 뒤, 그 페이지가 사용하는 `/api/usage-summary` 응답만 읽어 Cursor Models·Other Models 잔여량을 표시합니다. 비밀번호나 브라우저 쿠키를 외부로 내보내지 않으며, dashboard 계약이 바뀌면 사용량 조회가 안전하게 실패하고 다시 로그인을 요청합니다. Team/Enterprise의 Admin API는 별도 조직 관리자 키가 필요한 다른 인증 경계이므로 저장된 개인 User API Key로 호출하지 않습니다.
 
 현재 Codex Desktop의 일반 파일 선택기는 파일 바이트를 Responses `input_file`로 보내지 않고 `## 이름: 절대경로` 텍스트와 UI용 attachment metadata를 전송합니다. 이 경우 Cursor가 파일을 직접 읽는 대신 제공된 Codex outer `exec`/파일 도구를 요청하고, 실제 읽기는 원래 프로젝트의 Codex sandbox·승인 경계 안에서 수행됩니다. 따라서 Cursor CLI 자체에는 프로젝트 workspace 읽기 권한을 열지 않습니다. 위 `file_data` 지원은 해당 wire를 보내는 Responses 클라이언트와 materialized attachment에 직접 적용됩니다. 보안 경계를 우회하는 `file://`·임의 로컬 경로 읽기, OpenAI Files 자격 증명이 필요한 `file_id`, 원격 `file_url`은 명시적으로 거절합니다.
 
