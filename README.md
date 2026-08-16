@@ -110,7 +110,11 @@ SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.
 
 브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증합니다. 텍스트 요청은 Cursor CLI headless agent로, 이미지나 Computer Use 스크린샷이 포함된 요청은 공식 ACP 이미지 블록으로 전달합니다. Cursor에는 실제 프로젝트 대신 전용 빈 작업공간, ask mode, sandbox와 deny 정책을 전달하고 `--force`/`--yolo`는 사용하지 않습니다. ACP 세션에서도 모델·context·Reasoning/Effort·Thinking·Fast를 선택한 exact variant와 대조하며, native tool이나 권한 요청이 시작되면 응답을 중단합니다. 그래도 Cursor의 사용자 전역 rules·hooks·MCP 설정과 현행 권한 표면을 완전히 격리한다고 보장할 수 없으므로 이 기능은 실험 기능입니다.
 
-Cursor CLI는 raw inference API가 아니라 agent workflow입니다. 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. HTML 그래프는 Codex의 outer tool이 visualization 파일을 만든 뒤 반환하는 inline directive를 byte-for-byte 보존합니다. Computer Use·브라우저·이미지 생성은 Codex의 outer custom/plugin tool이 실행하고, 그 결과 이미지나 스크린샷을 다음 Cursor turn에 전달하는 방식으로 동작합니다. Cursor ACP가 제공하지 않는 direct `computer_call`·provider-side `image_generation_call`, `input_file`/`file_id`, 오디오 입력은 지원하지 않으며 조용히 버리지 않고 오류로 종료합니다. `web_search`·`image_generation`·`tool_search`는 요청 전체를 실패시키지 않되 Cursor backend에는 사용할 수 없는 도구로 표시합니다. 변환된 프롬프트는 프로세스 인자가 아닌 stdin으로 전달합니다. Cursor의 exact variant마다 해당 Reasoning 정도를 Codex 카탈로그에 기록하며, `max`는 Codex의 모델 기능 설정에 따라 별도 활성화가 필요할 수 있습니다.
+Cursor CLI는 raw inference API가 아니라 agent workflow입니다. 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. `input_file.file_data`는 엄격한 Base64 검증 뒤 텍스트·코드·Markdown·HTML·CSV·JSON·XML, DOCX·PPTX·XLSX·ODT, 이미지, PDF를 처리합니다. Office 문서는 제한된 별도 프로세스에서 텍스트만 추출하고, PDF는 이 Mac에 번들된 PDFKit helper로 텍스트와 최대 16장의 페이지 이미지를 함께 전달합니다. 원본 Base64와 임시 경로는 Cursor 프롬프트에 남기지 않습니다. 브리지 제한은 파일 8개, 파일당 12 MiB, 합계 24 MiB, 추출 텍스트 파일당 2 MiB·합계 4 MiB이며 PDF 페이지 이미지는 일반 이미지와 동일한 16장·24 MiB 한도를 공유합니다. 원격 Linux에는 PDFKit helper가 없으므로 PDF는 명시적으로 거절하지만 텍스트와 Office 문서는 처리할 수 있습니다.
+
+현재 Codex Desktop의 일반 파일 선택기는 파일 바이트를 Responses `input_file`로 보내지 않고 `## 이름: 절대경로` 텍스트와 UI용 attachment metadata를 전송합니다. 이 경우 Cursor가 파일을 직접 읽는 대신 제공된 Codex outer `exec`/파일 도구를 요청하고, 실제 읽기는 원래 프로젝트의 Codex sandbox·승인 경계 안에서 수행됩니다. 따라서 Cursor CLI 자체에는 프로젝트 workspace 읽기 권한을 열지 않습니다. 위 `file_data` 지원은 해당 wire를 보내는 Responses 클라이언트와 materialized attachment에 직접 적용됩니다. 보안 경계를 우회하는 `file://`·임의 로컬 경로 읽기, OpenAI Files 자격 증명이 필요한 `file_id`, 원격 `file_url`은 명시적으로 거절합니다.
+
+HTML 그래프는 Codex의 outer tool이 visualization 파일을 만든 뒤 반환하는 inline directive를 byte-for-byte 보존합니다. Computer Use·브라우저·이미지 생성은 Codex의 outer custom/plugin tool이 실행하고, 그 결과 이미지나 스크린샷을 다음 Cursor turn에 전달하는 방식으로 동작합니다. Cursor ACP가 제공하지 않는 direct `computer_call`·provider-side `image_generation_call`과 오디오 입력은 지원하지 않으며 조용히 버리지 않고 오류로 종료합니다. `web_search`·`image_generation`·`tool_search`는 요청 전체를 실패시키지 않되 Cursor backend에는 사용할 수 없는 도구로 표시합니다. 변환된 프롬프트는 프로세스 인자가 아닌 stdin으로 전달합니다. Cursor의 exact variant마다 해당 Reasoning 정도를 Codex 카탈로그에 기록하며, `max`는 Codex의 모델 기능 설정에 따라 별도 활성화가 필요할 수 있습니다.
 
 ## 인증과 보안
 
@@ -183,6 +187,8 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - `~/.local/lib/gpt-switch/codex-syncbar-askpass`
 - `~/.local/lib/gpt-switch/usage-summary.mjs`
 - `~/.local/lib/gpt-switch/cursor-codex-bridge.mjs`
+- `~/.local/lib/gpt-switch/cursor-file-extractor`
+- `~/.local/lib/gpt-switch/cursor-remote-manager.mjs`
 
 `v*` 태그 릴리즈는 다음 GitHub Actions secret이 모두 있어야 실행됩니다. P12와 App Store Connect API 개인 키는 각각 base64로 저장합니다.
 

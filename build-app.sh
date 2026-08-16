@@ -24,6 +24,10 @@ if [ "${CODEX_SYNCBAR_UNIVERSAL:-0}" = 1 ]; then
     "$ARM_BIN/CodexSyncBar" \
     "$INTEL_BIN/CodexSyncBar" \
     -output "$UNIVERSAL_DIR/CodexSyncBar"
+  lipo -create \
+    "$ARM_BIN/cursor-file-extractor" \
+    "$INTEL_BIN/cursor-file-extractor" \
+    -output "$UNIVERSAL_DIR/cursor-file-extractor"
   BUILD_DIR="$UNIVERSAL_DIR"
 else
   swift build -c release
@@ -38,15 +42,19 @@ cp "$ROOT/Support/gpt-switch" "$APP/Contents/Resources/gpt-switch"
 cp "$ROOT/Support/codex-syncbar-askpass" "$APP/Contents/Resources/codex-syncbar-askpass"
 cp "$ROOT/Support/usage-summary.mjs" "$APP/Contents/Resources/usage-summary.mjs"
 cp "$ROOT/Support/cursor-codex-bridge.mjs" "$APP/Contents/Resources/cursor-codex-bridge.mjs"
+cp "$BUILD_DIR/cursor-file-extractor" "$APP/Contents/Resources/cursor-file-extractor"
 cp "$ROOT/Support/cursor-remote-manager.mjs" "$APP/Contents/Resources/cursor-remote-manager.mjs"
 chmod 755 "$APP/Contents/MacOS/CodexSyncBar"
 chmod 755 "$APP/Contents/Resources/gpt-switch"
 chmod 700 "$APP/Contents/Resources/codex-syncbar-askpass"
 chmod 755 "$APP/Contents/Resources/usage-summary.mjs"
 chmod 755 "$APP/Contents/Resources/cursor-codex-bridge.mjs"
+chmod 755 "$APP/Contents/Resources/cursor-file-extractor"
 chmod 755 "$APP/Contents/Resources/cursor-remote-manager.mjs"
 
 if [ -n "${CODEX_SYNCBAR_SIGN_IDENTITY:-}" ]; then
+  codesign --force --sign "$CODEX_SYNCBAR_SIGN_IDENTITY" \
+    --timestamp --options runtime "$APP/Contents/Resources/cursor-file-extractor"
   codesign --force --sign "$CODEX_SYNCBAR_SIGN_IDENTITY" \
     --timestamp --options runtime "$APP/Contents/MacOS/CodexSyncBar"
   codesign --force --sign "$CODEX_SYNCBAR_SIGN_IDENTITY" \

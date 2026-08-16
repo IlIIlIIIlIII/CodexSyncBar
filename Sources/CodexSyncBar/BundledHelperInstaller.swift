@@ -19,11 +19,13 @@ struct BundledHelperInstaller {
         let askpass = resources.appendingPathComponent("codex-syncbar-askpass")
         let usageSummary = resources.appendingPathComponent("usage-summary.mjs")
         let cursorBridge = resources.appendingPathComponent("cursor-codex-bridge.mjs")
+        let cursorFileExtractor = resources.appendingPathComponent("cursor-file-extractor")
         let cursorRemoteManager = resources.appendingPathComponent("cursor-remote-manager.mjs")
         guard FileManager.default.fileExists(atPath: helper.path),
               FileManager.default.fileExists(atPath: askpass.path),
               FileManager.default.fileExists(atPath: usageSummary.path),
               FileManager.default.fileExists(atPath: cursorBridge.path),
+              FileManager.default.fileExists(atPath: cursorFileExtractor.path),
               FileManager.default.fileExists(atPath: cursorRemoteManager.path)
         else { return }
         try Self(resourceDirectory: resources).install()
@@ -58,6 +60,10 @@ struct BundledHelperInstaller {
         try installResource(
             named: "usage-summary.mjs",
             to: helperLibrary.appendingPathComponent("usage-summary.mjs"),
+            permissions: 0o755)
+        try installResource(
+            named: "cursor-file-extractor",
+            to: helperLibrary.appendingPathComponent("cursor-file-extractor"),
             permissions: 0o755)
         try installResource(
             named: "cursor-codex-bridge.mjs",

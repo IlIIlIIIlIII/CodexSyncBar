@@ -895,11 +895,13 @@ final class CodexSyncBarTests: XCTestCase {
         let askpass = resources.appendingPathComponent("codex-syncbar-askpass")
         let usageSummary = resources.appendingPathComponent("usage-summary.mjs")
         let cursorBridge = resources.appendingPathComponent("cursor-codex-bridge.mjs")
+        let cursorFileExtractor = resources.appendingPathComponent("cursor-file-extractor")
         let cursorRemoteManager = resources.appendingPathComponent("cursor-remote-manager.mjs")
         try Data("#!/bin/bash\nprintf '2.0.0\\n'\n".utf8).write(to: helper)
         try Data("#!/bin/bash\nprintf 'secret'\n".utf8).write(to: askpass)
         try Data("#!/usr/bin/env node\nconsole.log('{}')\n".utf8).write(to: usageSummary)
         try Data("#!/usr/bin/env node\nconsole.log('ready')\n".utf8).write(to: cursorBridge)
+        try Data("#!/bin/sh\nprintf '{}'\n".utf8).write(to: cursorFileExtractor)
         try Data("#!/usr/bin/env node\nconsole.log('managed')\n".utf8).write(to: cursorRemoteManager)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: askpass.path)
@@ -910,21 +912,25 @@ final class CodexSyncBarTests: XCTestCase {
         let installedAskpass = home.appendingPathComponent(".local/lib/gpt-switch/codex-syncbar-askpass")
         let installedUsageSummary = home.appendingPathComponent(".local/lib/gpt-switch/usage-summary.mjs")
         let installedCursorBridge = home.appendingPathComponent(".local/lib/gpt-switch/cursor-codex-bridge.mjs")
+        let installedCursorFileExtractor = home.appendingPathComponent(".local/lib/gpt-switch/cursor-file-extractor")
         let installedCursorRemoteManager = home.appendingPathComponent(".local/lib/gpt-switch/cursor-remote-manager.mjs")
         XCTAssertEqual(try Data(contentsOf: installedHelper), try Data(contentsOf: helper))
         XCTAssertEqual(try Data(contentsOf: installedAskpass), try Data(contentsOf: askpass))
         XCTAssertEqual(try Data(contentsOf: installedUsageSummary), try Data(contentsOf: usageSummary))
         XCTAssertEqual(try Data(contentsOf: installedCursorBridge), try Data(contentsOf: cursorBridge))
+        XCTAssertEqual(try Data(contentsOf: installedCursorFileExtractor), try Data(contentsOf: cursorFileExtractor))
         XCTAssertEqual(try Data(contentsOf: installedCursorRemoteManager), try Data(contentsOf: cursorRemoteManager))
         let helperMode = try FileManager.default.attributesOfItem(atPath: installedHelper.path)[.posixPermissions] as? NSNumber
         let askpassMode = try FileManager.default.attributesOfItem(atPath: installedAskpass.path)[.posixPermissions] as? NSNumber
         let usageMode = try FileManager.default.attributesOfItem(atPath: installedUsageSummary.path)[.posixPermissions] as? NSNumber
         let cursorBridgeMode = try FileManager.default.attributesOfItem(atPath: installedCursorBridge.path)[.posixPermissions] as? NSNumber
+        let cursorFileExtractorMode = try FileManager.default.attributesOfItem(atPath: installedCursorFileExtractor.path)[.posixPermissions] as? NSNumber
         let cursorRemoteManagerMode = try FileManager.default.attributesOfItem(atPath: installedCursorRemoteManager.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(helperMode?.intValue, 0o755)
         XCTAssertEqual(askpassMode?.intValue, 0o700)
         XCTAssertEqual(usageMode?.intValue, 0o755)
         XCTAssertEqual(cursorBridgeMode?.intValue, 0o755)
+        XCTAssertEqual(cursorFileExtractorMode?.intValue, 0o755)
         XCTAssertEqual(cursorRemoteManagerMode?.intValue, 0o755)
     }
 
