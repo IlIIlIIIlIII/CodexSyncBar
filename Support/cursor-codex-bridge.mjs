@@ -54,6 +54,9 @@ const CURSOR_REASONING_EFFORTS = new Set([
 ]);
 const CHATGPT_RESPONSES_URL = new URL("https://chatgpt.com/backend-api/codex/responses");
 const OPENAI_API_RESPONSES_URL = new URL("https://api.openai.com/v1/responses");
+const OPENAI_INTERNAL_ERROR_MAX_ATTEMPTS = 2;
+const OPENAI_INTERNAL_ERROR_RETRY_DELAY_MS = 250;
+const OPENAI_RETRY_PREFIX_BYTES = 256 * 1024;
 const OPENAI_PROXY_TEST_HOOKS = new WeakSet();
 const BRIDGE_REQUEST_TEST_HOOKS = new WeakSet();
 const PREPROCESSED_FILE = Symbol("syncbar-preprocessed-file");
@@ -4256,22 +4259,108 @@ function openAIResponseHeaders(headers) {
   return result;
 }
 
-async function proxyOpenAIResponse({
-  request,
-  response,
-  rawBody,
-  bridgeToken,
-  timeoutMs,
-  signal,
-  targets,
-}) {
-  const hasChatGPTAccount = typeof request.headers["chatgpt-account-id"] === "string" &&
-    request.headers["chatgpt-account-id"].length > 0;
-  const target = hasChatGPTAccount ? targets.chatGPT : targets.api;
-  const transport = target.protocol === "https:" ? https : http;
-  const headers = openAIRequestHeaders(request, rawBody, bridgeToken);
+function isOpenAIInternalServerError(payload) {
+  const codes = [
+    payload?.code,
+    payload?.error?.code,
+    payload?.error?.type,
+    payload?.response?.error?.code,
+    payload?.response?.error?.type,
+  ];
+  if (codes.some((code) => ["server_error", "internal_server_error"].includes(code))) {
+    return true;
+  }
+  const messages = [
+    payload?.message,
+    payload?.error?.message,
+    payload?.response?.error?.message,
+  ];
+  return messages.some((message) => typeof message === "string" &&
+    message.startsWith("An error occurred while processing your request"));
+}
 
-  await new Promise((resolve, reject) => {
+function openAIStreamPrefixState(buffer) {
+  const text = buffer.toString("utf8");
+  const blocks = text.split(/\r?\n\r?\n/u);
+  if (!/(?:\r?\n){2}$/u.test(text)) blocks.pop();
+  let completed = false;
+  let failed = false;
+  let internalServerError = false;
+  let visible = false;
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/u);
+    if (block.length === 0 || lines.every((line) => line.startsWith(":"))) continue;
+    let eventType = null;
+    const data = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventType = line.slice("event:".length).trim();
+      if (line.startsWith("data:")) data.push(line.slice("data:".length).trimStart());
+    }
+    let payload = null;
+    if (data.length > 0) {
+      try {
+        payload = JSON.parse(data.join("\n"));
+      } catch {
+        visible = true;
+        continue;
+      }
+    }
+    if (!eventType && typeof payload?.type === "string") eventType = payload.type;
+    if (!eventType) {
+      if (data.length > 0) visible = true;
+      continue;
+    }
+    if (eventType === "response.completed") {
+      completed = true;
+    } else if (eventType === "error" || eventType === "response.failed") {
+      failed = true;
+      if (isOpenAIInternalServerError(payload)) internalServerError = true;
+    } else if (!["response.created", "response.in_progress", "response.queued"].includes(eventType)) {
+      visible = true;
+    }
+  }
+  return { completed, failed, internalServerError, visible };
+}
+
+function waitForOpenAIInternalErrorRetry(signal) {
+  if (signal.aborted) {
+    return Promise.reject(new BridgeError("OpenAI request was cancelled", 499, "cancelled"));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, OPENAI_INTERNAL_ERROR_RETRY_DELAY_MS);
+    const abort = () => finish(new BridgeError("OpenAI request was cancelled", 499, "cancelled"));
+    function finish(error = null) {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else resolve();
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function writeOpenAIResponseChunk(response, chunk, signal) {
+  if (signal.aborted || response.destroyed) {
+    return Promise.reject(new BridgeError("OpenAI request was cancelled", 499, "cancelled"));
+  }
+  if (response.write(chunk)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const drain = () => finish();
+    const abort = () => finish(new BridgeError("OpenAI request was cancelled", 499, "cancelled"));
+    function finish(error = null) {
+      response.removeListener("drain", drain);
+      signal.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else resolve();
+    }
+    response.once("drain", drain);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function openAIUpstreamResponse({ target, headers, rawBody, timeoutMs, signal }) {
+  const transport = target.protocol === "https:" ? https : http;
+  return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (callback) => {
       if (settled) return;
@@ -4282,16 +4371,7 @@ async function proxyOpenAIResponse({
       method: "POST",
       headers,
       signal,
-    }, (upstreamResponse) => {
-      response.writeHead(
-        upstreamResponse.statusCode ?? 502,
-        openAIResponseHeaders(upstreamResponse.headers),
-      );
-      pipeline(upstreamResponse, response, { signal }).then(
-        () => finish(resolve),
-        (error) => finish(() => reject(error)),
-      );
-    });
+    }, (upstreamResponse) => finish(() => resolve(upstreamResponse)));
     upstreamRequest.setTimeout(timeoutMs, () => {
       upstreamRequest.destroy(new BridgeError("OpenAI upstream timed out", 504, "upstream_timeout"));
     });
@@ -4308,6 +4388,91 @@ async function proxyOpenAIResponse({
     });
     upstreamRequest.end(rawBody);
   });
+}
+
+async function proxyOpenAIResponse({
+  request,
+  response,
+  rawBody,
+  bridgeToken,
+  timeoutMs,
+  signal,
+  targets,
+}) {
+  const hasChatGPTAccount = typeof request.headers["chatgpt-account-id"] === "string" &&
+    request.headers["chatgpt-account-id"].length > 0;
+  const target = hasChatGPTAccount ? targets.chatGPT : targets.api;
+  const headers = openAIRequestHeaders(request, rawBody, bridgeToken);
+  for (let attempt = 1; attempt <= OPENAI_INTERNAL_ERROR_MAX_ATTEMPTS; attempt += 1) {
+    const upstreamResponse = await openAIUpstreamResponse({
+      target,
+      headers,
+      rawBody,
+      timeoutMs,
+      signal,
+    });
+    const statusCode = upstreamResponse.statusCode ?? 502;
+    const responseHeaders = openAIResponseHeaders(upstreamResponse.headers);
+    const canRetry = attempt < OPENAI_INTERNAL_ERROR_MAX_ATTEMPTS;
+    if (statusCode === 500 && canRetry) {
+      upstreamResponse.destroy();
+      await waitForOpenAIInternalErrorRetry(signal);
+      continue;
+    }
+    const contentType = String(upstreamResponse.headers["content-type"] ?? "").toLowerCase();
+    if (statusCode < 200 || statusCode >= 300 || !contentType.startsWith("text/event-stream")) {
+      response.writeHead(statusCode, responseHeaders);
+      await pipeline(upstreamResponse, response, { signal });
+      return;
+    }
+
+    const prefix = [];
+    let prefixBytes = 0;
+    let released = false;
+    let retryInternalServerError = false;
+    let streamError = null;
+    try {
+      for await (const rawChunk of upstreamResponse) {
+        const chunk = Buffer.from(rawChunk);
+        if (released) {
+          await writeOpenAIResponseChunk(response, chunk, signal);
+          continue;
+        }
+        prefix.push(chunk);
+        prefixBytes += chunk.length;
+        const state = openAIStreamPrefixState(Buffer.concat(prefix, prefixBytes));
+        if (state.internalServerError && !state.visible && canRetry) {
+          retryInternalServerError = true;
+          break;
+        }
+        if (state.visible || state.failed || state.completed ||
+            prefixBytes >= OPENAI_RETRY_PREFIX_BYTES) {
+          response.writeHead(statusCode, responseHeaders);
+          await writeOpenAIResponseChunk(response, Buffer.concat(prefix, prefixBytes), signal);
+          released = true;
+        }
+      }
+    } catch (error) {
+      streamError = error;
+    }
+
+    if (retryInternalServerError) {
+      upstreamResponse.destroy();
+      await waitForOpenAIInternalErrorRetry(signal);
+      continue;
+    }
+    if (released) {
+      if (streamError) response.destroy(streamError);
+      else response.end();
+      return;
+    }
+    response.writeHead(statusCode, responseHeaders);
+    const buffered = Buffer.concat(prefix, prefixBytes);
+    if (buffered.length > 0) await writeOpenAIResponseChunk(response, buffered, signal);
+    if (streamError) response.destroy(streamError);
+    else response.end();
+    return;
+  }
 }
 
 export function createBridgeServer(config, testHooks, restoredSessionRegistry = null) {

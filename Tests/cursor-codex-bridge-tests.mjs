@@ -3231,6 +3231,7 @@ test("native Codex models proxy only to branded official-upstream test targets",
   const workspace = path.join(root, "workspace");
   const bridgeToken = "d".repeat(64);
   const observed = [];
+  const requestCounts = new Map();
   let redirectedRequests = 0;
   let cancelledUpstream;
   const cancelledUpstreamPromise = new Promise((resolve) => {
@@ -3259,6 +3260,67 @@ test("native Codex models proxy only to branded official-upstream test targets",
       return;
     }
     const parsed = JSON.parse(rawBody);
+    requestCounts.set(parsed.input, (requestCounts.get(parsed.input) ?? 0) + 1);
+    const attempt = requestCounts.get(parsed.input);
+    if (parsed.input === "http-internal-error") {
+      if (attempt === 1) {
+        response.writeHead(500, {
+          "content-type": "application/json",
+          "x-request-id": "http-internal-request-1",
+        });
+        response.end('{"error":{"type":"server_error","message":"temporary fixture"}}');
+      } else {
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "x-openai-request-id": `http-internal-request-${attempt}`,
+        });
+        response.end("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n");
+      }
+      return;
+    }
+    if (parsed.input === "sse-internal-error") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "x-openai-request-id": `sse-internal-request-${attempt}`,
+      });
+      response.write("event: response.created\ndata: {\"type\":\"response.created\"}\n\n");
+      if (attempt === 1) {
+        response.end("event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"temporary fixture\"}\n\n");
+      } else {
+        response.end("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n");
+      }
+      return;
+    }
+    if (parsed.input === "sse-generic-internal-error") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "x-openai-request-id": `sse-generic-request-${attempt}`,
+      });
+      if (attempt === 1) {
+        response.end("event: error\ndata: {\"type\":\"error\",\"message\":\"An error occurred while processing your request.\"}\n\n");
+      } else {
+        response.end("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n");
+      }
+      return;
+    }
+    if (parsed.input === "visible-internal-error") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "x-openai-request-id": "visible-internal-request",
+      });
+      response.write("event: response.created\ndata: {\"type\":\"response.created\"}\n\n");
+      response.write("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\"}\n\n");
+      response.end("event: error\ndata: {\"type\":\"error\",\"code\":\"server_error\",\"message\":\"visible fixture\"}\n\n");
+      return;
+    }
+    if (parsed.input === "sse-rate-limit-error") {
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "x-openai-request-id": "sse-rate-limit-request",
+      });
+      response.end("event: error\ndata: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"rate fixture\"}\n\n");
+      return;
+    }
     if (parsed.input === "redirect") {
       response.writeHead(302, { location: "/redirected", "content-type": "text/plain" });
       response.end("redirect refused");
@@ -3382,6 +3444,7 @@ test("native Codex models proxy only to branded official-upstream test targets",
     );
     assert.equal(compressedBuiltInProviderResponse.status, 429);
     assert.equal(observed.at(-1).rawBody, chatGPTBody);
+    assert.equal(observed.filter((item) => item.path === "/chatgpt/responses").length, 3);
 
     const wrongPathToken = await fetch(
       `http://127.0.0.1:${address.port}/v1/${"0".repeat(64)}/responses`,
@@ -3419,6 +3482,56 @@ test("native Codex models proxy only to branded official-upstream test targets",
     assert.equal(apiObserved.headers["openai-organization"], "org-fixture");
     assert.equal(apiObserved.headers["openai-project"], "project-fixture");
     assert.equal(apiObserved.headers["x-client-request-id"], "client-request-fixture");
+
+    const nativeRequest = async (input) => fetch(
+      `http://127.0.0.1:${address.port}/v1/responses`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer openai-api-key",
+          "content-type": "application/json",
+          "x-syncbar-bridge-token": bridgeToken,
+        },
+        body: JSON.stringify(baseRequest({ model: "gpt-5.6-sol", input, tools: [] })),
+      },
+    );
+
+    const httpInternalResponse = await nativeRequest("http-internal-error");
+    const httpInternalBody = await httpInternalResponse.text();
+    assert.equal(httpInternalResponse.status, 200);
+    assert.equal(httpInternalResponse.headers.get("x-openai-request-id"), "http-internal-request-2");
+    assert.equal(requestCounts.get("http-internal-error"), 2);
+    assert.match(httpInternalBody, /response\.completed/);
+    assert.doesNotMatch(httpInternalBody, /temporary fixture/);
+
+    const sseInternalResponse = await nativeRequest("sse-internal-error");
+    const sseInternalBody = await sseInternalResponse.text();
+    assert.equal(sseInternalResponse.status, 200);
+    assert.equal(sseInternalResponse.headers.get("x-openai-request-id"), "sse-internal-request-2");
+    assert.equal(requestCounts.get("sse-internal-error"), 2);
+    assert.match(sseInternalBody, /response\.completed/);
+    assert.doesNotMatch(sseInternalBody, /temporary fixture/);
+
+    const genericInternalResponse = await nativeRequest("sse-generic-internal-error");
+    const genericInternalBody = await genericInternalResponse.text();
+    assert.equal(genericInternalResponse.status, 200);
+    assert.equal(genericInternalResponse.headers.get("x-openai-request-id"), "sse-generic-request-2");
+    assert.equal(requestCounts.get("sse-generic-internal-error"), 2);
+    assert.match(genericInternalBody, /response\.completed/);
+    assert.doesNotMatch(genericInternalBody, /An error occurred/);
+
+    const visibleInternalResponse = await nativeRequest("visible-internal-error");
+    const visibleInternalBody = await visibleInternalResponse.text();
+    assert.equal(visibleInternalResponse.status, 200);
+    assert.equal(requestCounts.get("visible-internal-error"), 1);
+    assert.match(visibleInternalBody, /response\.output_item\.added/);
+    assert.match(visibleInternalBody, /visible fixture/);
+
+    const sseRateLimitResponse = await nativeRequest("sse-rate-limit-error");
+    const sseRateLimitBody = await sseRateLimitResponse.text();
+    assert.equal(sseRateLimitResponse.status, 200);
+    assert.equal(requestCounts.get("sse-rate-limit-error"), 1);
+    assert.match(sseRateLimitBody, /rate_limit_exceeded/);
 
     const missingUpstreamAuth = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
