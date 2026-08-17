@@ -50,10 +50,8 @@ struct SettingsView: View {
     @State private var deviceToRemove: SSHDeviceConfiguration?
     @State private var cursorModelDraft: String
     @State private var cursorPortDraft: String
-    @State private var cursorAgentPathDraft: String
     @State private var cursorExposedModelIDsDraft: Set<String>
     @State private var cursorExposureDraftInitialized = false
-    @State private var cursorAPIKeyDraft = ""
     @State private var cursorAccountRemovalRequested = false
 
     init(model: AppModel, readmeDetailOnly: Bool = false) {
@@ -61,7 +59,6 @@ struct SettingsView: View {
         self.readmeDetailOnly = readmeDetailOnly
         _cursorModelDraft = State(initialValue: model.cursorBridgePreferences.model)
         _cursorPortDraft = State(initialValue: String(model.cursorBridgePreferences.port))
-        _cursorAgentPathDraft = State(initialValue: model.cursorBridgePreferences.agentPath ?? "")
         _cursorExposedModelIDsDraft = State(initialValue: Set(
             model.cursorBridgePreferences.exposedModelIDs ?? []))
     }
@@ -86,7 +83,7 @@ struct SettingsView: View {
         .preferredColorScheme(.dark)
         .task {
             await model.start()
-            await model.refreshCursorAccount(agentPath: cursorAgentPathDraft)
+            await model.refreshCursorAccount()
             await model.refreshCursorMonthlyUsage()
         }
         .onDisappear {
@@ -150,7 +147,7 @@ struct SettingsView: View {
                 Task { await model.removeCursorAccount() }
             }
         } message: {
-            Text("이전 Codex provider를 복구하고 브리지를 중지한 뒤, 이 Mac의 CLI·사용량 로그인과 등록된 SSH 장치의 Cursor 자격증명 및 Keychain API key를 정리합니다. Cursor.com 웹 계정과 구독은 삭제되지 않습니다.")
+            Text("이전 Codex provider를 복구하고 브리지를 중지한 뒤, 이 Mac의 SDK·사용량 로그인과 등록된 SSH 장치의 Cursor 자격증명을 정리합니다. Cursor.com 웹 계정과 구독은 삭제되지 않습니다.")
         }
     }
 
@@ -484,10 +481,10 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("실험 기능")
                             .font(.system(size: 13, weight: .bold))
-                        Text("Cursor의 공식 raw API가 아니라 로그인된 Cursor CLI agent를 사용합니다. 호출은 Cursor 구독의 agent workflow로 계산되며 Codex/OpenAI 사용량과 합산되지 않습니다.")
+                        Text("Cursor 공식 SDK의 로컬 코딩 에이전트를 사용합니다. 브라우저로 Cursor 구독에 로그인하면 SDK가 발급한 만료형 자격증명으로 호출하며 Codex/OpenAI 사용량과 합산되지 않습니다.")
                             .font(.system(size: 10))
                             .foregroundStyle(AppTheme.muted)
-                        Text("Cursor CLI에는 실제 저장소 대신 전용 빈 작업공간과 deny 정책을 전달합니다. 다만 사용자 전역 rules·hooks·MCP와 모든 native 도구를 완전히 격리한다고 보장할 수는 없습니다.")
+                        Text("SDK의 기본 코딩 프롬프트는 유지하고 Codex 지침은 전용 project rule로, Codex 도구는 callback tool로 연결합니다. 실제 저장소 대신 격리된 작업공간만 사용합니다.")
                             .font(.system(size: 10))
                             .foregroundStyle(AppTheme.muted)
                     }
@@ -511,6 +508,12 @@ struct SettingsView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(AppTheme.muted)
                                     .textSelection(.enabled)
+                                if let credential = model.cursorSDKCredential {
+                                    Text("SDK 자격증명 만료: \(credential.expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(
+                                            credential.isExpired() ? AppTheme.yellow : AppTheme.muted)
+                                }
                             } else if case let .failed(message) = model.cursorAccountState {
                                 Text(message)
                                     .font(.system(size: 9))
@@ -521,9 +524,9 @@ struct SettingsView: View {
                         Spacer()
                         if case .loading = model.cursorAccountState {
                             ProgressView().controlSize(.small)
-                        } else {
+                        } else if model.hasCursorSDKCredential {
                             Button {
-                                Task { await model.refreshCursorAccount(agentPath: cursorAgentPathDraft) }
+                                Task { await model.refreshCursorAccount() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                             }
@@ -531,6 +534,11 @@ struct SettingsView: View {
                             .disabled(settingsMutationDisabled)
                             .accessibilityIdentifier("cursor-account-refresh-button")
                         }
+                        Button(model.hasCursorSDKCredential ? "다시 로그인" : "Cursor 구독으로 로그인") {
+                            Task { await model.loginCursorSubscription() }
+                        }
+                        .disabled(settingsMutationDisabled)
+                        .accessibilityIdentifier("cursor-sdk-login-button")
                     }
                     .padding(.vertical, 8)
 
@@ -572,7 +580,7 @@ struct SettingsView: View {
                     .padding(.vertical, 8)
 
                     if model.cursorAccountState.email != nil
-                        || model.hasCursorAPIKey
+                        || model.cursorSDKCredential != nil
                         || model.cursorMonthlyUsageState.snapshot != nil
                     {
                         Divider().overlay(AppTheme.border)
@@ -580,7 +588,7 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("로컬 계정 연결")
                                     .font(.system(size: 11, weight: .semibold))
-                                Text("웹 계정은 유지하고 이 Mac의 CLI·사용량 로그인과 SSH 자격증명만 정리합니다.")
+                                Text("웹 계정은 유지하고 이 Mac의 SDK·사용량 로그인과 SSH 자격증명만 정리합니다.")
                                     .font(.system(size: 9))
                                     .foregroundStyle(AppTheme.muted)
                             }
@@ -634,9 +642,9 @@ struct SettingsView: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text("Cursor CLI")
+                            Text("Cursor SDK")
                                 .font(.system(size: 11, weight: .semibold))
-                            Text(model.cursorResolvedAgentPath ?? "찾지 못함")
+                            Text(model.hasCursorSDKCredential ? "1.0.28 · 구독 인증" : "1.0.28 · 로그인 필요")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundStyle(AppTheme.muted)
                                 .lineLimit(1)
@@ -667,7 +675,7 @@ struct SettingsView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 74, alignment: .leading)
                         if model.cursorModelCatalog.families.isEmpty {
-                            TextField("auto 또는 cursor-agent --list-models의 slug", text: $cursorModelDraft)
+                            TextField("Cursor SDK model ID", text: $cursorModelDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .accessibilityIdentifier("cursor-model-field")
                         } else {
@@ -751,12 +759,12 @@ struct SettingsView: View {
                             ProgressView().controlSize(.small)
                         } else {
                             Button {
-                                Task { await model.refreshCursorModels(agentPath: cursorAgentPathDraft) }
+                                Task { await model.refreshCursorModels() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                             }
                             .help("Cursor 모델 목록 새로고침")
-                            .disabled(settingsMutationDisabled)
+                            .disabled(settingsMutationDisabled || !model.hasCursorSDKCredential)
                             .accessibilityIdentifier("cursor-model-refresh-button")
                         }
                     }
@@ -811,22 +819,13 @@ struct SettingsView: View {
                             .frame(width: 76)
                             .accessibilityIdentifier("cursor-port-field")
                     }
-                    HStack(spacing: 10) {
-                        Text("agent 경로")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 74, alignment: .leading)
-                        TextField("비워 두면 자동 탐색", text: $cursorAgentPathDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 10, design: .monospaced))
-                            .accessibilityIdentifier("cursor-agent-path-field")
-                    }
                     if let catalogError = model.cursorModelCatalogError {
                         Label(catalogError, systemImage: "exclamationmark.triangle.fill")
                             .font(.system(size: 9))
                             .foregroundStyle(AppTheme.yellow)
                             .textSelection(.enabled)
                     }
-                    Text("현재 Cursor 계정의 `cursor-agent --list-models` 결과를 사용합니다. 선택한 Cursor 모델만 Codex 모델 선택기에 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 고르면 실제 Cursor variant로 변환됩니다. Anthropic Claude는 Thinking을 항상 켠 단일 모델로 표시됩니다. 이미지와 Computer Use 스크린샷은 Cursor ACP로 전달됩니다.")
+                    Text("현재 SDK 구독 계정의 모델 목록을 사용합니다. 선택한 Cursor 모델만 Codex 모델 선택기에 추가되고, 추론 강도와 Fast는 Codex 앱의 기존 선택창에서 실제 SDK variant로 변환됩니다. 이미지·Computer Use·브라우저를 포함한 Codex 도구는 SDK callback tool로 연결됩니다.")
                         .font(.system(size: 9))
                         .foregroundStyle(AppTheme.muted)
                 }
@@ -841,52 +840,39 @@ struct SettingsView: View {
                 Divider().overlay(AppTheme.border)
                 SettingsGroupTitle("SSH 원격 Cursor")
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("macOS Cursor 로그인 저장소는 Linux로 복사할 수 없습니다. Cursor User API Key는 이 Mac의 Keychain에 저장되며, SSH stdin으로 전송된 뒤 각 원격 장치의 ~/.local/share/gpt-switch/cursor-remote-runtime.json과 전용 cursor-remote-xdg/에 소유자 전용으로 저장됩니다. Cursor provider 전체 해제가 성공한 원격 장치에서는 두 저장소를 함께 제거합니다.")
+                    Text("SDK 구독 로그인에서 발급된 만료형 자격증명만 이 Mac의 Keychain에 저장합니다. SSH에는 stdin으로 전달한 뒤 각 원격 장치의 ~/.local/share/gpt-switch/cursor-remote-runtime.json과 전용 cursor-remote-xdg/에 소유자 전용으로 저장합니다. 수동 API key 입력은 사용하지 않습니다.")
                         .font(.system(size: 9))
                         .foregroundStyle(AppTheme.muted)
-                    HStack(spacing: 10) {
-                        SecureField(
-                            model.hasCursorAPIKey ? "저장됨 · 새 값으로 교체" : "Cursor User API Key",
-                            text: $cursorAPIKeyDraft)
-                            .textFieldStyle(.roundedBorder)
-                            .accessibilityIdentifier("cursor-api-key-field")
-                        Button(model.hasCursorAPIKey ? "교체 및 동기화" : "저장 및 동기화") {
-                            let key = cursorAPIKeyDraft
-                            Task {
-                                if await model.saveCursorAPIKeyAndSync(key) {
-                                    cursorAPIKeyDraft = ""
-                                }
-                            }
-                        }
-                        .disabled(settingsMutationDisabled || cursorAPIKeyDraft.isEmpty)
-                        if model.hasCursorAPIKey {
+                    HStack {
+                        Label(
+                            model.hasCursorSDKCredential
+                                ? "SDK 자격증명 저장됨 · SSH 동기화 가능"
+                                : (model.cursorSDKCredentialIsExpired
+                                    ? "SDK 로그인이 만료됨 · 다시 로그인 필요"
+                                    : "Cursor 구독 로그인이 필요함"),
+                            systemImage: model.hasCursorSDKCredential ? "key.fill" : "key.slash")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(
+                                model.hasCursorSDKCredential ? AppTheme.green : AppTheme.yellow)
+                        Spacer()
+                        if model.cursorSDKCredential != nil {
                             Button("이 Mac에서 삭제", role: .destructive) {
-                                model.deleteCursorAPIKey()
+                                Task { await model.deleteCursorSubscriptionCredential() }
                             }
                             .disabled(settingsMutationDisabled)
                         }
-                    }
-                    HStack {
-                        Label(
-                            model.hasCursorAPIKey ? "Keychain에 저장됨" : "API key가 저장되지 않음",
-                            systemImage: model.hasCursorAPIKey ? "key.fill" : "key.slash")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(model.hasCursorAPIKey ? AppTheme.green : AppTheme.muted)
-                        Spacer()
                         Button("활성 SSH 장치에 동기화") {
                             Task { await model.syncCursorProviderToSSHDevices() }
                         }
                         .disabled(
                             settingsMutationDisabled
-                                || !model.hasCursorAPIKey
+                                || !model.hasCursorSDKCredential
                                 || !model.isCursorProviderActive)
                         .accessibilityIdentifier("cursor-ssh-sync-button")
                     }
                 }
 
                 HStack(spacing: 8) {
-                    Button("CLI 설치 안내") { model.openCursorCLIInstallationGuide() }
-                    Button("cursor-agent login 복사") { model.copyCursorLoginCommand() }
                     Spacer()
                     if model.isCursorProviderActive {
                         Button("이전 Codex 모델로 복구", role: .destructive) {
@@ -903,13 +889,14 @@ struct SettingsView: View {
                             await model.enableCursorProvider(
                                 model: cursorModelDraft,
                                 port: port,
-                                agentPath: cursorAgentPathDraft,
+                                agentPath: nil,
                                 exposedModelIDs: exposedModelIDs)
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(
                         settingsMutationDisabled
+                            || !model.hasCursorSDKCredential
                             || Int(cursorPortDraft) == nil
                             || !cursorExposureSelectionIsValid)
                     .accessibilityIdentifier("cursor-provider-enable-button")
@@ -920,7 +907,6 @@ struct SettingsView: View {
         .onAppear {
             cursorModelDraft = model.cursorBridgePreferences.model
             cursorPortDraft = String(model.cursorBridgePreferences.port)
-            cursorAgentPathDraft = model.cursorBridgePreferences.agentPath ?? ""
             normalizeAnthropicThinkingSelection()
             synchronizeCursorExposureDraft(reset: true)
         }
@@ -934,9 +920,9 @@ struct SettingsView: View {
             }
         }
         .task {
-            await model.refreshCursorAccount(agentPath: cursorAgentPathDraft)
+            await model.refreshCursorAccount()
             if model.cursorModelCatalog.families.isEmpty {
-                await model.refreshCursorModels(agentPath: cursorAgentPathDraft)
+                await model.refreshCursorModels()
             }
         }
     }
@@ -1130,8 +1116,8 @@ struct SettingsView: View {
     private var cursorAccountStatusTitle: String {
         switch model.cursorAccountState {
         case .unknown, .loading: "Cursor 계정 확인 중"
-        case .signedOut: "Cursor CLI 로그인 필요"
-        case .signedIn: "Cursor CLI 인증 정상"
+        case .signedOut: "Cursor 구독 로그인 필요"
+        case .signedIn: "Cursor SDK 구독 인증 정상"
         case .failed: "Cursor 계정 확인 실패"
         }
     }

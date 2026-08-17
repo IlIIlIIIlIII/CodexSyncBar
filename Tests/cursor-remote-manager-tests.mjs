@@ -115,9 +115,10 @@ async function makeFixture(options = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "cursor-remote-manager-test-"));
   roots.add(home);
   const agentPath = path.join(home, "fake-agent.mjs");
-  const bridgePath = options.productionBridge
-    ? productionBridgePath
-    : path.join(home, "fake-bridge.mjs");
+  const bridgePath = path.join(
+    home,
+    options.productionBridge ? "cursor-codex-bridge.mjs" : "fake-bridge.mjs",
+  );
   const bridgeLaunchLog = path.join(home, "bridge-launches.jsonl");
   const statusHold = options.holdAgentStatus ? path.join(home, "hold-agent-status") : "";
   const statusEntered = options.holdAgentStatus ? path.join(home, "agent-status-entered") : "";
@@ -206,27 +207,147 @@ process.exit(93);
 `, { mode: 0o700 });
   await chmod(agentPath, 0o700);
 
+  if (options.productionBridge) {
+    await writeFile(bridgePath, await readFile(productionBridgePath), { mode: 0o700 });
+    await chmod(bridgePath, 0o700);
+    const sdkRoot = path.join(home, "node_modules", "@cursor", "sdk");
+    const sdkModuleRoot = path.join(sdkRoot, "dist", "esm");
+    await mkdir(sdkModuleRoot, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(sdkRoot, "package.json"), `${JSON.stringify({
+      name: "@cursor/sdk",
+      version: "1.0.28",
+      type: "module",
+    })}\n`, { mode: 0o600 });
+    await writeFile(path.join(sdkModuleRoot, "index.js"), `
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+export const CURSOR_SDK_VERSION = "1.0.28";
+export class JsonlLocalAgentStore {
+  constructor(root) { this.root = root; }
+}
+export class Cursor {
+  static configure(options) { Cursor.options = options; }
+  static async me(options = {}) {
+    if (options.apiKey !== ${JSON.stringify(apiKey)}) throw new Error("unauthenticated");
+    return { userEmail: "sdk-fixture@example.com" };
+  }
+}
+Cursor.models = {
+  async list(options = {}) {
+    if (options.apiKey !== ${JSON.stringify(apiKey)}) throw new Error("unauthenticated");
+    return [
+      { id: "composer-2.5", displayName: "Composer 2.5" },
+      {
+        id: "gpt-5.6-sol",
+        displayName: "GPT 5.6 Sol",
+        variants: [{
+          displayName: "High Fast",
+          params: [
+            { id: "reasoning", value: "high" },
+            { id: "fast", value: "true" },
+          ],
+        }],
+      },
+    ];
+  },
+};
+
+function createAgent(options, agentId = "sdk-fixture-agent") {
+  return {
+    agentId,
+    async send(message, sendOptions = {}) {
+      const secret = process.env.CURSOR_API_KEY ?? "";
+      const rulePath = path.join(options.local?.cwd ?? "", ".cursor", "rules", "codex-host-policy.mdc");
+      const rule = readFileSync(rulePath, "utf8");
+      const text = typeof message === "string" ? message : message?.text ?? "";
+      writeFileSync(path.join(process.env.HOME, "agent-e2e-observation.json"), JSON.stringify({
+        apiKeyInArgv: process.argv.some((value) => secret && value.includes(secret)),
+        apiKeyMatched: secret === ${JSON.stringify(apiKey)},
+        isolatedHome: process.env.HOME?.endsWith("/cursor-remote-xdg/home") === true,
+        fileCredentialStore: process.env.AGENT_CLI_CREDENTIAL_STORE === "file",
+        sdkBackend: process.env.SYNCBAR_CURSOR_BACKEND === "sdk",
+        model: options.model?.id ?? null,
+        tools: options.tools ?? null,
+        mcpServersEmpty: Object.keys(options.mcpServers ?? {}).length === 0,
+        settingSources: options.local?.settingSources ?? null,
+        sandboxEnabled: options.local?.sandboxOptions?.enabled ?? null,
+        customToolCount: Object.keys(sendOptions.local?.customTools ?? {}).length,
+        userMessageSeen: text.includes("Reply with exactly bridge-e2e-ok"),
+        projectRuleSeen: rule.includes("outer host agent") && rule.includes("outer_host_instructions_json"),
+      }), { mode: 0o600 });
+      await sendOptions.onDelta?.({ update: { type: "text-delta", text: "bridge-e2e-ok" } });
+      return {
+        id: "sdk-fixture-run",
+        agentId,
+        wait: async () => ({
+          id: "sdk-fixture-run",
+          status: "finished",
+          result: "bridge-e2e-ok",
+          durationMs: 1,
+          usage: {
+            inputTokens: 10,
+            outputTokens: 2,
+            cacheReadTokens: 6,
+            cacheWriteTokens: 1,
+            totalTokens: 12,
+          },
+        }),
+        cancel: async () => {},
+      };
+    },
+    close() {},
+  };
+}
+
+export class Agent {
+  static async create(options) { return createAgent(options); }
+  static async resume(agentId, options) { return createAgent(options, agentId); }
+}
+`, { mode: 0o600 });
+  }
+
   if (!options.productionBridge) await writeFile(bridgePath, `#!/usr/bin/env node
 import http from 'node:http';
 import {createHash} from 'node:crypto';
-import {appendFileSync, existsSync, readFileSync} from 'node:fs';
+import {appendFileSync, existsSync, readFileSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 const args = process.argv.slice(2);
 const bridgeToken = process.env.SYNCBAR_CURSOR_BRIDGE_TOKEN ?? '';
 const apiKey = process.env.CURSOR_API_KEY ?? '';
+const realHome = ${JSON.stringify(home)};
+if (!apiKey || args.some((value) => value.includes(apiKey))) process.exit(81);
+if (!process.env.HOME?.endsWith('/cursor-remote-xdg/home')) process.exit(82);
+if (!process.env.XDG_CONFIG_HOME?.endsWith('/cursor-remote-xdg/config')) process.exit(83);
+if (process.env.AGENT_CLI_CREDENTIAL_STORE !== 'file') process.exit(87);
+if (args.length === 1 && args[0] === '--sdk-status') {
+  writeFileSync(path.join(process.env.HOME, 'credential-store-marker'), apiKey, {mode:0o600});
+  const hold = ${JSON.stringify(statusHold)};
+  const entered = ${JSON.stringify(statusEntered)};
+  if (entered) writeFileSync(entered, 'entered', {mode:0o600});
+  while (hold && existsSync(hold)) await new Promise((resolve) => setTimeout(resolve, 25));
+  process.stdout.write('{"schema_version":1,"email":"sdk-fixture@example.com"}\\n');
+  process.exit(0);
+}
+if (args.length === 1 && args[0] === '--sdk-list-models') {
+  if (existsSync(path.join(realHome, 'fail-model-validation'))) {
+    writeFileSync(path.join(process.env.HOME, 'api-key-marker'), apiKey, {mode:0o600});
+    process.stdout.write('different-model - Different Model\\n');
+    process.exit(0);
+  }
+  process.stdout.write('composer-2.5 - Composer 2.5\\ngpt-5.6-sol-high-fast - GPT 5.6 Sol High Fast\\n');
+  process.exit(0);
+}
 const modelParameters = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON ?? 'null');
 const modelRoutes = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_ROUTES_JSON ?? 'null');
 const nativeModels = JSON.parse(process.env.SYNCBAR_NATIVE_MODELS_JSON ?? 'null');
-if (!bridgeToken || !apiKey || args.some((value) => value.includes(bridgeToken) || value.includes(apiKey))) process.exit(81);
+if (!bridgeToken || args.some((value) => value.includes(bridgeToken))) process.exit(81);
 if (!modelParameters || typeof modelParameters !== 'object') process.exit(85);
 if ((modelRoutes !== null && typeof modelRoutes !== 'object') ||
     (nativeModels !== null && !Array.isArray(nativeModels))) process.exit(86);
-if (!process.env.HOME?.endsWith('/cursor-remote-xdg/home')) process.exit(82);
-if (process.env.AGENT_CLI_CREDENTIAL_STORE !== 'file') process.exit(83);
 const value = (name) => args[args.indexOf(name) + 1];
 const port = Number(value('--port'));
 const model = value('--model');
-const realHome = ${JSON.stringify(home)};
 const launchLog = path.join(realHome, 'bridge-launches.jsonl');
 const secretFingerprint = createHash('sha256').update(apiKey).digest('hex');
 const generation = existsSync(launchLog)
@@ -244,7 +365,10 @@ const server = http.createServer((request, response) => {
   }
   const respond = () => {
     response.writeHead(200, {'content-type':'application/json'});
-    response.end(JSON.stringify({status:'ok', protocol:'responses', model, pid:process.pid, generation, secretFingerprint}));
+    response.end(JSON.stringify({
+      status:'ok', protocol:'responses', cursor_backend:'sdk', model,
+      pid:process.pid, generation, secretFingerprint,
+    }));
   };
   if (existsSync(path.join(realHome, 'delay-bridge-health'))) setTimeout(respond, 800);
   else respond();
@@ -478,7 +602,7 @@ test("a live manager lock is not stolen and SIGKILL releases it for the next ope
   }
 });
 
-test("provision writes a 0600 runtime, validates isolated Cursor CLI, and preserves unrelated TOML", async () => {
+test("provision writes a 0600 runtime, validates isolated Cursor SDK, and preserves unrelated TOML", async () => {
   const fixture = await makeFixture();
   const result = await provision(fixture.input, { home: fixture.home, env: fixture.env });
   const paths = managerPaths({ home: fixture.home, env: fixture.env });
@@ -1442,7 +1566,7 @@ test("readRuntime migrates legacy model slugs without guessing context", async (
   assert.equal(launches.at(-1).nativeModels, null);
 });
 
-test("provision can use an injected installer URL without putting the API key in installer argv or env", async () => {
+test("provision keeps credentials out of an injected installer and never invokes its agent for SDK validation", async () => {
   const fixture = await makeFixture();
   await rm(fixture.agentPath, { force: true });
   const installedAgent = path.join(fixture.home, ".local", "bin", "agent");
@@ -1450,20 +1574,12 @@ test("provision can use an injected installer URL without putting the API key in
   const agentSource = `#!/usr/bin/env node
 import {writeFileSync} from 'node:fs';
 import path from 'node:path';
-const args = process.argv.slice(2);
-if (process.env.CURSOR_API_KEY === undefined) process.exit(72);
-if (args.some((value) => value.includes(process.env.CURSOR_API_KEY))) process.exit(74);
-if (!process.env.HOME?.endsWith('/cursor-remote-xdg/home')) process.exit(75);
-if (process.env.AGENT_CLI_CREDENTIAL_STORE !== 'file') process.exit(76);
-if (args[0] === 'status') {
-  writeFileSync(path.join(process.env.HOME, 'installed-agent-environment-ok'), 'ok', {mode:0o600});
-  process.exit(0);
-}
-if (args[0] === '--list-models') {
-  process.stdout.write('composer-2.5 - Composer 2.5\\ngpt-5.6-sol-high-fast - GPT 5.6 Sol High Fast\\n');
-  process.exit(0);
-}
-process.exit(73);
+writeFileSync(
+  path.join(${JSON.stringify(fixture.home)}, 'installed-agent-was-invoked'),
+  'unexpected',
+  {mode:0o600},
+);
+process.exit(78);
 `;
   const encoded = Buffer.from(agentSource).toString("base64");
   await writeFile(installer, `#!/bin/sh
@@ -1485,11 +1601,9 @@ chmod 700 "$HOME/.local/bin/agent"
   await provision(fixture.input, { home: fixture.home, env });
   assert.equal((await stat(installedAgent)).mode & 0o777, 0o700);
   assert.equal(await readFile(path.join(fixture.home, "installer-environment-ok"), "utf8"), "ok");
-  const paths = managerPaths({ home: fixture.home, env });
-  assert.equal(
-    await readFile(path.join(paths.cursorHome, "installed-agent-environment-ok"), "utf8"),
-    "ok",
-  );
+  await assert.rejects(stat(path.join(fixture.home, "installed-agent-was-invoked")), {
+    code: "ENOENT",
+  });
   const runtime = await readRuntime({ home: fixture.home, env });
   assert.equal(runtime.agentPath, await realpath(installedAgent));
 });
@@ -1562,14 +1676,23 @@ test("generated provider and command auth complete a bundled Codex exec through 
     "agent-e2e-observation.json",
   );
   assert.equal((await waitForFile(observationPath)).mode & 0o777, 0o600);
-  assert.deepEqual(JSON.parse(await readFile(observationPath, "utf8")), {
+  const sdkObservation = JSON.parse(await readFile(observationPath, "utf8"));
+  assert.deepEqual({ ...sdkObservation, customToolCount: undefined }, {
     apiKeyInArgv: false,
-    bridgeTokenEnvAbsent: true,
-    promptSeen: true,
+    apiKeyMatched: true,
     isolatedHome: true,
     fileCredentialStore: true,
-    sandboxMode: "disabled",
+    sdkBackend: true,
+    model: "composer-2.5",
+    tools: ["mcp"],
+    mcpServersEmpty: true,
+    settingSources: ["project"],
+    sandboxEnabled: false,
+    customToolCount: undefined,
+    userMessageSeen: true,
+    projectRuleSeen: true,
   });
+  assert.ok(sdkObservation.customToolCount > 0);
 
   for (const output of [result.stdout, result.stderr, JSON.stringify(codexArgs)]) {
     assert.doesNotMatch(output, new RegExp(fixture.apiKey));

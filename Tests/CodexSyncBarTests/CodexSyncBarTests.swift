@@ -1,4 +1,5 @@
 import Darwin
+import CryptoKit
 import XCTest
 @testable import CodexSyncBar
 
@@ -6,7 +7,7 @@ final class CodexSyncBarTests: XCTestCase {
     func testCursorRemoteReconciliationRequiresEverySafeStartupPrecondition() {
         XCTAssertTrue(CursorRemoteReconciliationPolicy.shouldRun(
             providerActive: true,
-            hasAPIKey: true,
+            hasCredential: true,
             hasEnabledDevices: true,
             configurationReady: true,
             isReadmeDemo: false))
@@ -21,7 +22,7 @@ final class CodexSyncBarTests: XCTestCase {
         for state in blockedStates {
             XCTAssertFalse(CursorRemoteReconciliationPolicy.shouldRun(
                 providerActive: state.0,
-                hasAPIKey: state.1,
+                hasCredential: state.1,
                 hasEnabledDevices: state.2,
                 configurationReady: state.3,
                 isReadmeDemo: state.4))
@@ -922,12 +923,52 @@ final class CodexSyncBarTests: XCTestCase {
         let cursorBridge = resources.appendingPathComponent("cursor-codex-bridge.mjs")
         let cursorFileExtractor = resources.appendingPathComponent("cursor-file-extractor")
         let cursorRemoteManager = resources.appendingPathComponent("cursor-remote-manager.mjs")
+        let cursorSDKRuntime = resources.appendingPathComponent("cursor-sdk-runtime.tar.gz")
+        let cursorSDKManifest = resources.appendingPathComponent("cursor-sdk-runtime.manifest")
         try Data("#!/bin/bash\nprintf '2.0.0\\n'\n".utf8).write(to: helper)
         try Data("#!/bin/bash\nprintf 'secret'\n".utf8).write(to: askpass)
         try Data("#!/usr/bin/env node\nconsole.log('{}')\n".utf8).write(to: usageSummary)
         try Data("#!/usr/bin/env node\nconsole.log('ready')\n".utf8).write(to: cursorBridge)
         try Data("#!/bin/sh\nprintf '{}'\n".utf8).write(to: cursorFileExtractor)
         try Data("#!/usr/bin/env node\nconsole.log('managed')\n".utf8).write(to: cursorRemoteManager)
+        let runtimeSource = root.appendingPathComponent("runtime-source", isDirectory: true)
+        let runtimeModules = runtimeSource.appendingPathComponent("node_modules", isDirectory: true)
+        for package in [
+            "sdk", "sdk-darwin-arm64", "sdk-darwin-x64", "sdk-linux-arm64", "sdk-linux-x64",
+        ] {
+            let directory = runtimeModules.appendingPathComponent(
+                "@cursor/\(package)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o755])
+            let metadata = try JSONSerialization.data(withJSONObject: [
+                "name": "@cursor/\(package)",
+                "version": "1.0.28",
+            ])
+            try metadata.write(to: directory.appendingPathComponent("package.json"))
+        }
+        let tar = Process()
+        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        tar.arguments = ["-czf", cursorSDKRuntime.path, "-C", runtimeSource.path, "node_modules"]
+        tar.standardInput = FileHandle.nullDevice
+        tar.standardOutput = FileHandle.nullDevice
+        tar.standardError = FileHandle.nullDevice
+        try tar.run()
+        tar.waitUntilExit()
+        XCTAssertEqual(tar.terminationStatus, 0)
+        let archiveData = try Data(contentsOf: cursorSDKRuntime)
+        let archiveHash = SHA256.hash(data: archiveData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let manifest = [
+            "schema_version=1",
+            "sdk_version=1.0.28",
+            "lock_sha256=\(String(repeating: "a", count: 64))",
+            "archive_sha256=\(archiveHash)",
+            "",
+        ].joined(separator: "\n")
+        try Data(manifest.utf8).write(to: cursorSDKManifest)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: askpass.path)
 
@@ -939,24 +980,38 @@ final class CodexSyncBarTests: XCTestCase {
         let installedCursorBridge = home.appendingPathComponent(".local/lib/gpt-switch/cursor-codex-bridge.mjs")
         let installedCursorFileExtractor = home.appendingPathComponent(".local/lib/gpt-switch/cursor-file-extractor")
         let installedCursorRemoteManager = home.appendingPathComponent(".local/lib/gpt-switch/cursor-remote-manager.mjs")
+        let installedCursorSDKRuntime = home.appendingPathComponent(".local/lib/gpt-switch/cursor-sdk-runtime.tar.gz")
+        let installedCursorSDKManifest = home.appendingPathComponent(".local/lib/gpt-switch/cursor-sdk-runtime.manifest")
+        let installedCursorSDKModules = home.appendingPathComponent(".local/lib/gpt-switch/node_modules")
         XCTAssertEqual(try Data(contentsOf: installedHelper), try Data(contentsOf: helper))
         XCTAssertEqual(try Data(contentsOf: installedAskpass), try Data(contentsOf: askpass))
         XCTAssertEqual(try Data(contentsOf: installedUsageSummary), try Data(contentsOf: usageSummary))
         XCTAssertEqual(try Data(contentsOf: installedCursorBridge), try Data(contentsOf: cursorBridge))
         XCTAssertEqual(try Data(contentsOf: installedCursorFileExtractor), try Data(contentsOf: cursorFileExtractor))
         XCTAssertEqual(try Data(contentsOf: installedCursorRemoteManager), try Data(contentsOf: cursorRemoteManager))
+        XCTAssertEqual(try Data(contentsOf: installedCursorSDKRuntime), archiveData)
+        XCTAssertEqual(try Data(contentsOf: installedCursorSDKManifest), Data(manifest.utf8))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: installedCursorSDKModules.path))
         let helperMode = try FileManager.default.attributesOfItem(atPath: installedHelper.path)[.posixPermissions] as? NSNumber
         let askpassMode = try FileManager.default.attributesOfItem(atPath: installedAskpass.path)[.posixPermissions] as? NSNumber
         let usageMode = try FileManager.default.attributesOfItem(atPath: installedUsageSummary.path)[.posixPermissions] as? NSNumber
         let cursorBridgeMode = try FileManager.default.attributesOfItem(atPath: installedCursorBridge.path)[.posixPermissions] as? NSNumber
         let cursorFileExtractorMode = try FileManager.default.attributesOfItem(atPath: installedCursorFileExtractor.path)[.posixPermissions] as? NSNumber
         let cursorRemoteManagerMode = try FileManager.default.attributesOfItem(atPath: installedCursorRemoteManager.path)[.posixPermissions] as? NSNumber
+        let cursorSDKRuntimeMode = try FileManager.default.attributesOfItem(atPath: installedCursorSDKRuntime.path)[.posixPermissions] as? NSNumber
+        let cursorSDKManifestMode = try FileManager.default.attributesOfItem(atPath: installedCursorSDKManifest.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(helperMode?.intValue, 0o755)
         XCTAssertEqual(askpassMode?.intValue, 0o700)
         XCTAssertEqual(usageMode?.intValue, 0o755)
         XCTAssertEqual(cursorBridgeMode?.intValue, 0o755)
         XCTAssertEqual(cursorFileExtractorMode?.intValue, 0o755)
         XCTAssertEqual(cursorRemoteManagerMode?.intValue, 0o755)
+        XCTAssertEqual(cursorSDKRuntimeMode?.intValue, 0o600)
+        XCTAssertEqual(cursorSDKManifestMode?.intValue, 0o600)
+        let helperEntries = try FileManager.default.contentsOfDirectory(atPath: installedCursorSDKModules
+            .deletingLastPathComponent().path)
+        XCTAssertFalse(helperEntries.contains { $0.hasPrefix(".cursor-sdk-runtime-stage.") })
+        XCTAssertFalse(helperEntries.contains { $0.hasPrefix(".cursor-sdk-runtime-backup.") })
     }
 
     func testConfigurationBootstrapsExistingAccountsAndDevicesWithoutTouchingAuth() throws {

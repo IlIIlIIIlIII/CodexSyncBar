@@ -166,7 +166,11 @@ final class CursorRemoteProvisioningTests: XCTestCase {
         let script = """
         #!/bin/bash
         printf '%s' "$0" >"\(invocation.path)"
-        printf '%s\n%s\n' "$GPT_SWITCH_CURSOR_BRIDGE_HELPER" "$GPT_SWITCH_CURSOR_REMOTE_MANAGER" >"\(helperEnvironment.path)"
+        printf '%s\n%s\n%s\n%s\n' \
+          "$GPT_SWITCH_CURSOR_BRIDGE_HELPER" \
+          "$GPT_SWITCH_CURSOR_REMOTE_MANAGER" \
+          "$GPT_SWITCH_CURSOR_SDK_RUNTIME" \
+          "$GPT_SWITCH_CURSOR_SDK_MANIFEST" >"\(helperEnvironment.path)"
         case "$1" in
           provision-cursor)
             cat >/dev/null
@@ -205,6 +209,8 @@ final class CursorRemoteProvisioningTests: XCTestCase {
         XCTAssertEqual(snapshotHelpers.map { URL(fileURLWithPath: $0).lastPathComponent }, [
             "cursor-codex-bridge.mjs",
             "cursor-remote-manager.mjs",
+            "cursor-sdk-runtime.tar.gz",
+            "cursor-sdk-runtime.manifest",
         ])
         XCTAssertTrue(snapshotHelpers.allSatisfy { $0.contains("CodexSyncBarProvisioning-") })
         XCTAssertTrue(snapshotHelpers.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
@@ -288,8 +294,12 @@ final class CursorRemoteProvisioningTests: XCTestCase {
         #!/bin/bash
         printf 'replaced manager\n' >"\(support.trustedManager.path)"
         printf 'replaced bridge\n' >"\(support.trustedBridge.path)"
+        printf 'replaced runtime\n' >"\(support.trustedSDKRuntime.path)"
+        printf 'replaced manifest\n' >"\(support.trustedSDKManifest.path)"
         if /usr/bin/grep -Fq 'trusted cursor remote manager' "$GPT_SWITCH_CURSOR_REMOTE_MANAGER" &&
-           /usr/bin/grep -Fq 'trusted cursor bridge' "$GPT_SWITCH_CURSOR_BRIDGE_HELPER"; then
+           /usr/bin/grep -Fq 'trusted cursor bridge' "$GPT_SWITCH_CURSOR_BRIDGE_HELPER" &&
+           /usr/bin/grep -Fq 'trusted cursor sdk runtime' "$GPT_SWITCH_CURSOR_SDK_RUNTIME" &&
+           /usr/bin/grep -Fq 'trusted cursor sdk manifest' "$GPT_SWITCH_CURSOR_SDK_MANIFEST"; then
           /usr/bin/touch "\(marker.path)"
         fi
         /bin/cat >/dev/null
@@ -449,8 +459,12 @@ final class CursorRemoteProvisioningTests: XCTestCase {
     private struct CursorSupportHelpers {
         let installedManager: URL
         let installedBridge: URL
+        let installedSDKRuntime: URL
+        let installedSDKManifest: URL
         let trustedManager: URL
         let trustedBridge: URL
+        let trustedSDKRuntime: URL
+        let trustedSDKManifest: URL
     }
 
     private func writeMatchingCursorSupportHelpers(to root: URL) throws
@@ -459,14 +473,24 @@ final class CursorRemoteProvisioningTests: XCTestCase {
         let helpers = CursorSupportHelpers(
             installedManager: root.appendingPathComponent("installed-cursor-remote-manager.mjs"),
             installedBridge: root.appendingPathComponent("installed-cursor-codex-bridge.mjs"),
+            installedSDKRuntime: root.appendingPathComponent("installed-cursor-sdk-runtime.tar.gz"),
+            installedSDKManifest: root.appendingPathComponent("installed-cursor-sdk-runtime.manifest"),
             trustedManager: root.appendingPathComponent("cursor-remote-manager.mjs"),
-            trustedBridge: root.appendingPathComponent("cursor-codex-bridge.mjs"))
+            trustedBridge: root.appendingPathComponent("cursor-codex-bridge.mjs"),
+            trustedSDKRuntime: root.appendingPathComponent("cursor-sdk-runtime.tar.gz"),
+            trustedSDKManifest: root.appendingPathComponent("cursor-sdk-runtime.manifest"))
         let manager = "#!/usr/bin/env node\n// trusted cursor remote manager\n"
         let bridge = "#!/usr/bin/env node\n// trusted cursor bridge\n"
+        let runtime = "trusted cursor sdk runtime\n"
+        let manifest = "trusted cursor sdk manifest\n"
         try writeHelper(manager, to: helpers.installedManager)
         try writeHelper(manager, to: helpers.trustedManager)
         try writeHelper(bridge, to: helpers.installedBridge)
         try writeHelper(bridge, to: helpers.trustedBridge)
+        try writeHelper(runtime, to: helpers.installedSDKRuntime, permissions: 0o600)
+        try writeHelper(runtime, to: helpers.trustedSDKRuntime, permissions: 0o600)
+        try writeHelper(manifest, to: helpers.installedSDKManifest, permissions: 0o600)
+        try writeHelper(manifest, to: helpers.trustedSDKManifest, permissions: 0o600)
         return helpers
     }
 
@@ -480,8 +504,12 @@ final class CursorRemoteProvisioningTests: XCTestCase {
             trustedProvisioningExecutable: trusted,
             installedCursorRemoteManager: support.installedManager,
             installedCursorBridgeHelper: support.installedBridge,
+            installedCursorSDKRuntime: support.installedSDKRuntime,
+            installedCursorSDKManifest: support.installedSDKManifest,
             trustedCursorRemoteManager: support.trustedManager,
-            trustedCursorBridgeHelper: support.trustedBridge)
+            trustedCursorBridgeHelper: support.trustedBridge,
+            trustedCursorSDKRuntime: support.trustedSDKRuntime,
+            trustedCursorSDKManifest: support.trustedSDKManifest)
     }
 
     private func request(

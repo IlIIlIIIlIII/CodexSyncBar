@@ -31,6 +31,8 @@ ASKPASS_HELPER="${GPT_SWITCH_ASKPASS_HELPER:-$HOME/.local/lib/gpt-switch/codex-s
 USAGE_HELPER="${GPT_SWITCH_USAGE_HELPER:-$HOME/.local/lib/gpt-switch/usage-summary.mjs}"
 CURSOR_BRIDGE_HELPER="${GPT_SWITCH_CURSOR_BRIDGE_HELPER:-$HOME/.local/lib/gpt-switch/cursor-codex-bridge.mjs}"
 CURSOR_REMOTE_MANAGER="${GPT_SWITCH_CURSOR_REMOTE_MANAGER:-$HOME/.local/lib/gpt-switch/cursor-remote-manager.mjs}"
+CURSOR_SDK_RUNTIME="${GPT_SWITCH_CURSOR_SDK_RUNTIME:-$HOME/.local/lib/gpt-switch/cursor-sdk-runtime.tar.gz}"
+CURSOR_SDK_MANIFEST="${GPT_SWITCH_CURSOR_SDK_MANIFEST:-$HOME/.local/lib/gpt-switch/cursor-sdk-runtime.manifest}"
 CODEX_APP_SERVER_PATTERN='^(([^[:space:]]*/)?[c]odex([.]js)?|([^[:space:]]*/)?node[[:space:]]+[^[:space:]]*/codex([.]js)?)([[:space:]]+-c[[:space:]]+[^[:space:]]+)*[[:space:]]+app-server[[:space:]]+(proxy([[:space:]]|$)|--listen[[:space:]]+unix://)'
 OSASCRIPT_BIN="${GPT_SWITCH_OSASCRIPT_BIN:-/usr/bin/osascript}"
 OPEN_BIN="${GPT_SWITCH_OPEN_BIN:-/usr/bin/open}"
@@ -2143,7 +2145,7 @@ validate_cursor_helper_source() {
   local label="$2"
   local owner descriptor=0
   case "$source" in
-    /dev/fd/5|/dev/fd/6|/dev/fd/7)
+    /dev/fd/3|/dev/fd/4|/dev/fd/5|/dev/fd/6|/dev/fd/7)
       [ -f "$source" ] || die "$label descriptor is unavailable"
       descriptor=1
       ;;
@@ -2156,9 +2158,9 @@ validate_cursor_helper_source() {
   if [ "$descriptor" -eq 1 ]; then
     # macOS devfs exposes an already-open read-only descriptor as mode 0444;
     # Linux commonly reports the underlying file mode instead.
-    case "$(file_mode "$source")" in 400|440|444|500|700|755) ;; *) die "$label descriptor permissions are unsafe" ;; esac
+    case "$(file_mode "$source")" in 400|440|444|500|600|700|755) ;; *) die "$label descriptor permissions are unsafe" ;; esac
   else
-    case "$(file_mode "$source")" in 500|700|755) ;; *) die "$label permissions are unsafe" ;; esac
+    case "$(file_mode "$source")" in 500|600|700|755) ;; *) die "$label permissions are unsafe" ;; esac
   fi
 }
 
@@ -2166,17 +2168,25 @@ open_cursor_provisioning_source_fds() {
   local self_source="$0"
   local bridge_source="$CURSOR_BRIDGE_HELPER"
   local manager_source="$CURSOR_REMOTE_MANAGER"
-  local self_identity bridge_identity manager_identity
+  local sdk_runtime_source="$CURSOR_SDK_RUNTIME"
+  local sdk_manifest_source="$CURSOR_SDK_MANIFEST"
+  local self_identity bridge_identity manager_identity sdk_runtime_identity sdk_manifest_identity
 
   validate_cursor_helper_source "$self_source" "controller helper source"
   validate_cursor_helper_source "$bridge_source" "Cursor bridge helper"
   validate_cursor_helper_source "$manager_source" "Cursor remote manager"
+  validate_cursor_helper_source "$sdk_runtime_source" "Cursor SDK runtime"
+  validate_cursor_helper_source "$sdk_manifest_source" "Cursor SDK manifest"
   self_identity=$(file_identity_following_symlinks "$self_source") || \
     die "could not identify controller helper source"
   bridge_identity=$(file_identity_following_symlinks "$bridge_source") || \
     die "could not identify Cursor bridge helper"
   manager_identity=$(file_identity_following_symlinks "$manager_source") || \
     die "could not identify Cursor remote manager"
+  sdk_runtime_identity=$(file_identity_following_symlinks "$sdk_runtime_source") || \
+    die "could not identify Cursor SDK runtime"
+  sdk_manifest_identity=$(file_identity_following_symlinks "$sdk_manifest_source") || \
+    die "could not identify Cursor SDK manifest"
   exec 7<"$self_source" || die "could not pin controller helper source"
   exec 6<"$bridge_source" || { exec 7>&-; die "could not pin Cursor bridge helper"; }
   exec 5<"$manager_source" || {
@@ -2184,13 +2194,30 @@ open_cursor_provisioning_source_fds() {
     exec 7>&-
     die "could not pin Cursor remote manager"
   }
+  exec 4<"$sdk_runtime_source" || {
+    exec 5>&-
+    exec 6>&-
+    exec 7>&-
+    die "could not pin Cursor SDK runtime"
+  }
+  exec 3<"$sdk_manifest_source" || {
+    exec 4>&-
+    exec 5>&-
+    exec 6>&-
+    exec 7>&-
+    die "could not pin Cursor SDK manifest"
+  }
 
   # Compare the pre-open identities to the descriptors, then never read the
   # private snapshot pathnames again. A swap between validation and open(2)
   # therefore fails instead of becoming the packaged helper.
   if [ "$self_identity" != "$(file_identity_following_symlinks /dev/fd/7)" ] || \
      [ "$bridge_identity" != "$(file_identity_following_symlinks /dev/fd/6)" ] || \
-     [ "$manager_identity" != "$(file_identity_following_symlinks /dev/fd/5)" ]; then
+     [ "$manager_identity" != "$(file_identity_following_symlinks /dev/fd/5)" ] || \
+     [ "$sdk_runtime_identity" != "$(file_identity_following_symlinks /dev/fd/4)" ] || \
+     [ "$sdk_manifest_identity" != "$(file_identity_following_symlinks /dev/fd/3)" ]; then
+    exec 3>&-
+    exec 4>&-
     exec 5>&-
     exec 6>&-
     exec 7>&-
@@ -2199,15 +2226,21 @@ open_cursor_provisioning_source_fds() {
   validate_cursor_helper_source /dev/fd/7 "controller helper source"
   validate_cursor_helper_source /dev/fd/6 "Cursor bridge helper"
   validate_cursor_helper_source /dev/fd/5 "Cursor remote manager"
+  validate_cursor_helper_source /dev/fd/4 "Cursor SDK runtime"
+  validate_cursor_helper_source /dev/fd/3 "Cursor SDK manifest"
 }
 
 remote_install_cursor_helpers() {
   local index="$1"
   local bridge_source="${2:-$CURSOR_BRIDGE_HELPER}"
   local manager_source="${3:-$CURSOR_REMOTE_MANAGER}"
+  local sdk_runtime_source="${4:-$CURSOR_SDK_RUNTIME}"
+  local sdk_manifest_source="${5:-$CURSOR_SDK_MANIFEST}"
   local payload_dir archive command
   validate_cursor_helper_source "$bridge_source" "Cursor bridge helper"
   validate_cursor_helper_source "$manager_source" "Cursor remote manager"
+  validate_cursor_helper_source "$sdk_runtime_source" "Cursor SDK runtime"
+  validate_cursor_helper_source "$sdk_manifest_source" "Cursor SDK manifest"
   command -v tar >/dev/null 2>&1 || die "tar is required to install Cursor helpers"
 
   ensure_dirs
@@ -2221,8 +2254,13 @@ remote_install_cursor_helpers() {
   chmod 600 "$archive"
   if ! cp "$bridge_source" "$payload_dir/cursor-codex-bridge.mjs" || \
      ! cp "$manager_source" "$payload_dir/cursor-remote-manager.mjs" || \
+     ! cp "$sdk_runtime_source" "$payload_dir/cursor-sdk-runtime.tar.gz" || \
+     ! cp "$sdk_manifest_source" "$payload_dir/cursor-sdk-runtime.manifest" || \
      ! chmod 755 "$payload_dir/cursor-codex-bridge.mjs" "$payload_dir/cursor-remote-manager.mjs" || \
-     ! tar -cf "$archive" -C "$payload_dir" cursor-codex-bridge.mjs cursor-remote-manager.mjs; then
+     ! chmod 600 "$payload_dir/cursor-sdk-runtime.tar.gz" "$payload_dir/cursor-sdk-runtime.manifest" || \
+     ! tar -cf "$archive" -C "$payload_dir" \
+       cursor-codex-bridge.mjs cursor-remote-manager.mjs \
+       cursor-sdk-runtime.tar.gz cursor-sdk-runtime.manifest; then
     rm -f "$archive"
     rm -rf "$payload_dir"
     die "could not build Cursor helper payload"
@@ -2232,6 +2270,13 @@ remote_install_cursor_helpers() {
 umask 077
 mode_of() { stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }
 owner_of() { stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"; }
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk "{print \$1}"
+  else
+    shasum -a 256 "$1" | awk "{print \$1}"
+  fi
+}
 ensure_owned_directory() {
   directory="$1"
   requested_mode="$2"
@@ -2290,12 +2335,15 @@ done
 stage=$(mktemp -d "$state/.cursor-install.XXXXXX")
 bridge="$lib/cursor-codex-bridge.mjs"
 manager="$lib/cursor-remote-manager.mjs"
+sdk_runtime="$lib/node_modules"
 bridge_new=""
 manager_new=""
 bridge_touched=0
 manager_touched=0
+sdk_runtime_touched=0
 bridge_existed=0
 manager_existed=0
+sdk_runtime_existed=0
 committed=0
 rollback_failed=0
 restore_one() {
@@ -2311,12 +2359,21 @@ restore_one() {
     rm -f "$destination"
   fi
 }
+restore_sdk_runtime() {
+  if [ -e "$sdk_runtime" ] || [ -L "$sdk_runtime" ]; then
+    [ -d "$sdk_runtime" ] && [ ! -L "$sdk_runtime" ] && rm -rf "$sdk_runtime"
+  fi
+  if [ "$sdk_runtime_existed" -eq 1 ]; then
+    mv "$stage/node_modules.backup" "$sdk_runtime"
+  fi
+}
 cleanup_cursor_install() {
   rc=$?
   trap - EXIT HUP INT TERM
   if [ "$committed" -ne 1 ]; then
     [ "$bridge_touched" -eq 0 ] || restore_one "$bridge" "$stage/bridge.backup" "$bridge_existed" || rollback_failed=1
     [ "$manager_touched" -eq 0 ] || restore_one "$manager" "$stage/manager.backup" "$manager_existed" || rollback_failed=1
+    [ "$sdk_runtime_touched" -eq 0 ] || restore_sdk_runtime || rollback_failed=1
   fi
   [ -z "$bridge_new" ] || rm -f "$bridge_new"
   [ -z "$manager_new" ] || rm -f "$manager_new"
@@ -2331,6 +2388,30 @@ trap cleanup_cursor_install EXIT HUP INT TERM
 tar -xf - -C "$stage"
 [ -f "$stage/cursor-codex-bridge.mjs" ] && [ ! -L "$stage/cursor-codex-bridge.mjs" ]
 [ -f "$stage/cursor-remote-manager.mjs" ] && [ ! -L "$stage/cursor-remote-manager.mjs" ]
+[ -f "$stage/cursor-sdk-runtime.tar.gz" ] && [ ! -L "$stage/cursor-sdk-runtime.tar.gz" ]
+[ -f "$stage/cursor-sdk-runtime.manifest" ] && [ ! -L "$stage/cursor-sdk-runtime.manifest" ]
+[ "$(wc -l <"$stage/cursor-sdk-runtime.manifest" | tr -d " ")" = 4 ]
+grep -qx "schema_version=1" "$stage/cursor-sdk-runtime.manifest"
+grep -qx "sdk_version=1.0.28" "$stage/cursor-sdk-runtime.manifest"
+lock_hash=$(sed -n "s/^lock_sha256=\\([a-f0-9]\\{64\\}\\)$/\\1/p" "$stage/cursor-sdk-runtime.manifest")
+archive_hash=$(sed -n "s/^archive_sha256=\\([a-f0-9]\\{64\\}\\)$/\\1/p" "$stage/cursor-sdk-runtime.manifest")
+[ "${#lock_hash}" -eq 64 ] && [ "${#archive_hash}" -eq 64 ]
+[ "$(sha256_file "$stage/cursor-sdk-runtime.tar.gz")" = "$archive_hash" ]
+mkdir -m 700 "$stage/sdk-runtime"
+tar -tzf "$stage/cursor-sdk-runtime.tar.gz" | while IFS= read -r entry; do
+  case "$entry" in node_modules|node_modules/*) ;; *) exit 65 ;; esac
+  case "/$entry/" in */../*|*/./*) exit 65 ;; esac
+done
+tar -tvzf "$stage/cursor-sdk-runtime.tar.gz" | awk "substr(\$1,1,1) != \"-\" && substr(\$1,1,1) != \"d\" { exit 65 }"
+tar -xzf "$stage/cursor-sdk-runtime.tar.gz" -C "$stage/sdk-runtime" --no-same-owner
+[ -d "$stage/sdk-runtime/node_modules" ] && [ ! -L "$stage/sdk-runtime/node_modules" ]
+if find "$stage/sdk-runtime/node_modules" -type l -print | grep -q .; then exit 65; fi
+for package in sdk sdk-darwin-arm64 sdk-darwin-x64 sdk-linux-arm64 sdk-linux-x64; do
+  metadata="$stage/sdk-runtime/node_modules/@cursor/$package/package.json"
+  [ -f "$metadata" ] && [ ! -L "$metadata" ]
+  grep -q "\\\"name\\\": \\\"@cursor/$package\\\"" "$metadata"
+  grep -q "\\\"version\\\": \\\"1.0.28\\\"" "$metadata"
+done
 if [ -e "$bridge" ] || [ -L "$bridge" ]; then
   [ -f "$bridge" ] && [ ! -L "$bridge" ] && [ "$(owner_of "$bridge")" = "$(id -u)" ]
   cp "$bridge" "$stage/bridge.backup"
@@ -2341,6 +2422,11 @@ if [ -e "$manager" ] || [ -L "$manager" ]; then
   cp "$manager" "$stage/manager.backup"
   manager_existed=1
 fi
+if [ -e "$sdk_runtime" ] || [ -L "$sdk_runtime" ]; then
+  [ -d "$sdk_runtime" ] && [ ! -L "$sdk_runtime" ] && [ "$(owner_of "$sdk_runtime")" = "$(id -u)" ]
+  mv "$sdk_runtime" "$stage/node_modules.backup"
+  sdk_runtime_existed=1
+fi
 manager_new=$(mktemp "$lib/.cursor-remote-manager.XXXXXX.mjs")
 bridge_new=$(mktemp "$lib/.cursor-codex-bridge.XXXXXX.mjs")
 cp "$stage/cursor-remote-manager.mjs" "$manager_new"
@@ -2348,6 +2434,9 @@ cp "$stage/cursor-codex-bridge.mjs" "$bridge_new"
 chmod 755 "$manager_new" "$bridge_new"
 [ "$(owner_of "$manager_new")" = "$(id -u)" ] && [ "$(mode_of "$manager_new")" = 755 ]
 [ "$(owner_of "$bridge_new")" = "$(id -u)" ] && [ "$(mode_of "$bridge_new")" = 755 ]
+sdk_runtime_touched=1
+mv "$stage/sdk-runtime/node_modules" "$sdk_runtime"
+[ -d "$sdk_runtime/@cursor/sdk" ] && [ ! -L "$sdk_runtime/@cursor/sdk" ]
 mv -f "$manager_new" "$manager"
 manager_new=""
 manager_touched=1
@@ -2926,13 +3015,14 @@ resolve_cursor_runtime() {
 
   if [ -n "${CURSOR_REMOTE_NODE_PATH:-}" ]; then
     node_candidate="$CURSOR_REMOTE_NODE_PATH"
+  elif [ -x "$(dirname "$agent_resolved")/node" ]; then
+    # The official Cursor package includes the exact Node runtime expected by
+    # its CLI and SDK. Prefer it over an older system Node on SSH replicas.
+    node_candidate="$(dirname "$agent_resolved")/node"
   elif command -v "$NODE_BIN" >/dev/null 2>&1; then
     node_candidate=$(command -v "$NODE_BIN")
   else
-    # The official Cursor package includes the exact Node runtime expected by
-    # its CLI. This removes the former circular dependency where Node was
-    # required to run the manager that installed Cursor (and its bundled Node).
-    node_candidate="$(dirname "$agent_resolved")/node"
+    die "could not find a Node runtime for Cursor provisioning"
   fi
   node_resolved=$(realpath "$node_candidate" 2>/dev/null) || \
     die "could not resolve a Node runtime for Cursor provisioning"
@@ -2942,6 +3032,10 @@ resolve_cursor_runtime() {
     [ "$(file_owner_id "$node_resolved")" = 0 ] || \
     die "Cursor provisioning Node runtime owner is unsafe"
   case "$(file_mode "$node_resolved")" in 500|555|700|755) ;; *) die "Cursor provisioning Node runtime permissions are unsafe" ;; esac
+  "$node_resolved" -e '
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    if (!(major > 22 || (major === 22 && minor >= 13))) process.exit(1);
+  ' >/dev/null 2>&1 || die "Cursor SDK requires Node.js 22.13 or newer"
 
   CURSOR_REMOTE_AGENT_PATH="$agent_resolved"
   CURSOR_REMOTE_NODE_PATH="$node_resolved"
@@ -4416,7 +4510,7 @@ controller_provision_cursor() {
   # Build and send the Cursor archive before the first untrusted SSH process
   # can replace the private snapshot pathnames. The archive reads only the
   # already-open descriptors, so a later pathname swap cannot change its bytes.
-  remote_install_cursor_helpers "$index" /dev/fd/6 /dev/fd/5 || \
+  remote_install_cursor_helpers "$index" /dev/fd/6 /dev/fd/5 /dev/fd/4 /dev/fd/3 || \
     die "Cursor helper installation failed for $wanted"
   remote_install_helpers "$index" /dev/fd/7 >/dev/null || \
     die "helper installation failed for $wanted"
@@ -4454,7 +4548,7 @@ controller_deprovision_cursor() {
   index=$found
 
   open_cursor_provisioning_source_fds
-  remote_install_cursor_helpers "$index" /dev/fd/6 /dev/fd/5 || \
+  remote_install_cursor_helpers "$index" /dev/fd/6 /dev/fd/5 /dev/fd/4 /dev/fd/3 || \
     die "Cursor helper installation failed for $wanted"
   remote_install_helpers "$index" /dev/fd/7 >/dev/null || \
     die "helper installation failed for $wanted"

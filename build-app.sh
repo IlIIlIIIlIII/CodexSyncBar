@@ -10,6 +10,13 @@ APP="$STAGE_DIR/$APP_NAME.app"
 OUTPUT_DIR="${1:-$ROOT/../../outputs}"
 
 cd "$ROOT"
+SDK_RUNTIME_OUTPUT=$("$ROOT/Support/build-cursor-sdk-runtime.sh")
+SDK_RUNTIME_ARCHIVE=$(printf '%s\n' "$SDK_RUNTIME_OUTPUT" | sed -n '1p')
+SDK_RUNTIME_MANIFEST=$(printf '%s\n' "$SDK_RUNTIME_OUTPUT" | sed -n '2p')
+[ -f "$SDK_RUNTIME_ARCHIVE" ] && [ -f "$SDK_RUNTIME_MANIFEST" ] || {
+  printf '%s\n' "Cursor SDK runtime packaging failed" >&2
+  exit 1
+}
 if [ "${CODEX_SYNCBAR_UNIVERSAL:-0}" = 1 ]; then
   ARM_SCRATCH="$ROOT/.build/release-arm64"
   INTEL_SCRATCH="$ROOT/.build/release-x86_64"
@@ -44,6 +51,8 @@ cp "$ROOT/Support/usage-summary.mjs" "$APP/Contents/Resources/usage-summary.mjs"
 cp "$ROOT/Support/cursor-codex-bridge.mjs" "$APP/Contents/Resources/cursor-codex-bridge.mjs"
 cp "$BUILD_DIR/cursor-file-extractor" "$APP/Contents/Resources/cursor-file-extractor"
 cp "$ROOT/Support/cursor-remote-manager.mjs" "$APP/Contents/Resources/cursor-remote-manager.mjs"
+cp "$SDK_RUNTIME_ARCHIVE" "$APP/Contents/Resources/cursor-sdk-runtime.tar.gz"
+cp "$SDK_RUNTIME_MANIFEST" "$APP/Contents/Resources/cursor-sdk-runtime.manifest"
 chmod 755 "$APP/Contents/MacOS/CodexSyncBar"
 chmod 755 "$APP/Contents/Resources/gpt-switch"
 chmod 700 "$APP/Contents/Resources/codex-syncbar-askpass"
@@ -51,6 +60,8 @@ chmod 755 "$APP/Contents/Resources/usage-summary.mjs"
 chmod 755 "$APP/Contents/Resources/cursor-codex-bridge.mjs"
 chmod 755 "$APP/Contents/Resources/cursor-file-extractor"
 chmod 755 "$APP/Contents/Resources/cursor-remote-manager.mjs"
+chmod 600 "$APP/Contents/Resources/cursor-sdk-runtime.tar.gz"
+chmod 600 "$APP/Contents/Resources/cursor-sdk-runtime.manifest"
 
 if [ -n "${CODEX_SYNCBAR_SIGN_IDENTITY:-}" ]; then
   codesign --force --sign "$CODEX_SYNCBAR_SIGN_IDENTITY" \

@@ -4,74 +4,11 @@ import XCTest
 private let testCursorBridgeToken = String(repeating: "a", count: 64)
 
 final class CursorBridgeTests: XCTestCase {
-    func testCursorCLIAccountParsesStatusWithoutDecorations() throws {
-        XCTAssertEqual(
-            CursorCLIAccount(statusOutput: "✓ Logged in as user@example.com\n")?.email,
-            "user@example.com")
-        XCTAssertNil(CursorCLIAccount(statusOutput: "Not authenticated\n"))
-        XCTAssertNil(CursorCLIAccount(statusOutput: "✓ Logged in as not-an-email\n"))
-        XCTAssertNil(CursorCLIAccount(statusOutput: "✓ Logged in as bad user@example.com\n"))
-    }
-
-    @MainActor
-    func testCursorBridgeServiceLoadsAndLogsOutCLIAccount() async throws {
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CursorAccountService-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: home) }
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let agent = home.appendingPathComponent("cursor-agent")
-        let marker = home.appendingPathComponent("authenticated")
-        let script = """
-        #!/bin/sh
-        set -eu
-        marker='\(marker.path)'
-        case "${1:-}" in
-          status)
-            if [ -f "$marker" ]; then
-              echo '✓ Logged in as cursor@example.com'
-              exit 0
-            fi
-            echo 'Not authenticated'
-            exit 1
-            ;;
-          logout)
-            /bin/rm -f "$marker"
-            echo 'Logged out'
-            ;;
-          *) exit 64 ;;
-        esac
-        """
-        try Data(script.utf8).write(to: agent)
-        try Data().write(to: marker)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700],
-            ofItemAtPath: agent.path)
-        let service = CursorBridgeService(home: home)
-
-        let signedIn = try await service.loadAccount(preferredAgentPath: agent.path)
-        XCTAssertEqual(signedIn?.email, "cursor@example.com")
-        try await service.logout(preferredAgentPath: agent.path)
-        let signedOut = try await service.loadAccount(preferredAgentPath: agent.path)
-        XCTAssertNil(signedOut)
-    }
-
-    @MainActor
-    func testCursorBridgeServiceLoadsAccountModelCatalogFromCursorCLI() async throws {
-        let fixture = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/fake-cursor-agent.mjs")
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CursorModelsService-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: home) }
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let service = CursorBridgeService(home: home)
-
-        let catalog = try await service.loadModelCatalog(preferredAgentPath: fixture.path)
-
-        XCTAssertEqual(catalog.variants.count, 4)
-        XCTAssertEqual(catalog.family(baseSlug: "gpt-5.6-sol")?.group, .openAIGPT)
-        XCTAssertEqual(catalog.family(baseSlug: "gpt-5.3-codex")?.group, .openAICodex)
+    func testCursorSDKAccountValidatesEmail() throws {
+        XCTAssertEqual(CursorAccount(email: "user@example.com")?.email, "user@example.com")
+        XCTAssertNil(CursorAccount(email: "not-an-email"))
+        XCTAssertNil(CursorAccount(email: "bad user@example.com"))
+        XCTAssertNil(CursorAccount(email: "bad\u{200B}@example.com"))
     }
 
     func testCursorBridgePreferencesValidatePortModelAndAbsoluteAgentPath() throws {
@@ -129,12 +66,14 @@ final class CursorBridgeTests: XCTestCase {
         """)
 
         let environment = try CursorBridgeService.sidecarEnvironment(
-            inheriting: ["PRESERVED": "yes"],
+            inheriting: ["PRESERVED": "yes", "CURSOR_API_KEY": "must-not-leak"],
             bridgeToken: testCursorBridgeToken,
             modelCatalog: catalog,
             nativeModelSlugs: ["gpt-5.6-sol"])
 
         XCTAssertEqual(environment["PRESERVED"], "yes")
+        XCTAssertEqual(environment["SYNCBAR_CURSOR_BACKEND"], "sdk")
+        XCTAssertNil(environment["CURSOR_API_KEY"])
         XCTAssertEqual(environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"], testCursorBridgeToken)
         let slugsData = try XCTUnwrap(
             environment["SYNCBAR_CURSOR_MODELS_JSON"]?.data(using: .utf8))
@@ -158,6 +97,27 @@ final class CursorBridgeTests: XCTestCase {
             environment["SYNCBAR_NATIVE_MODELS_JSON"]?.data(using: .utf8))
         XCTAssertEqual(try JSONDecoder().decode([String].self, from: nativeData), ["gpt-5.6-sol"])
         XCTAssertNotNil(environment["SYNCBAR_CURSOR_MODEL_ROUTES_JSON"])
+    }
+
+    @MainActor
+    func testCursorBridgeSidecarEnvironmentPassesValidatedSDKKeyOnlyToChild() throws {
+        let catalog = CursorModelCatalog(cliOutput: "composer-2.5 - Composer 2.5")
+        let apiKey = "cursor_" + String(repeating: "a", count: 32)
+
+        let environment = try CursorBridgeService.sidecarEnvironment(
+            inheriting: ["OPENAI_API_KEY": "preserved-provider-key"],
+            bridgeToken: testCursorBridgeToken,
+            modelCatalog: catalog,
+            cursorAPIKey: apiKey)
+
+        XCTAssertEqual(environment["CURSOR_API_KEY"], apiKey)
+        XCTAssertEqual(environment["SYNCBAR_CURSOR_BACKEND"], "sdk")
+        XCTAssertEqual(environment["OPENAI_API_KEY"], "preserved-provider-key")
+        XCTAssertThrowsError(try CursorBridgeService.sidecarEnvironment(
+            inheriting: [:],
+            bridgeToken: testCursorBridgeToken,
+            modelCatalog: catalog,
+            cursorAPIKey: "invalid key"))
     }
 
     func testCodexCursorConfigRoundTripsExactlyAndPreservesCRLF() throws {

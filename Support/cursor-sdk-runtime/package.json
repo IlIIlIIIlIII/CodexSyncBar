@@ -1,0 +1,13 @@
+{
+  "name": "codex-syncbar-cursor-sdk-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned cross-platform Cursor SDK runtime for Codex SyncBar",
+  "dependencies": {
+    "@cursor/sdk": "1.0.28",
+    "@cursor/sdk-darwin-arm64": "1.0.28",
+    "@cursor/sdk-darwin-x64": "1.0.28",
+    "@cursor/sdk-linux-arm64": "1.0.28",
+    "@cursor/sdk-linux-x64": "1.0.28"
+  }
+}

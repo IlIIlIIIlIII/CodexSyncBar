@@ -38,7 +38,7 @@
 - 장치별 연결 상태, 적용 계정, 최근 30일 토큰 사용량과 API 가격 기준 추정 비용을 보여 줍니다.
 - macOS는 계정마다 별도의 영구 Chrome 프로필을 사용하고, Windows는 기본 브라우저의 Google 로그인·패스키 흐름을 사용합니다.
 - 로그인, 로그아웃, 인증 새로고침, 시작 프로그램 및 SSH 장치 관리는 설정 창에 모아 두었습니다.
-- 실험 기능으로 Cursor CLI 구독 모델을 로컬 Responses 브리지로 Codex의 기존 모델 선택기에 추가합니다. SyncBar 설정에서 Codex에 표시할 Cursor 모델을 고를 수 있고, 각 모델은 기본 모델 단위로 표시됩니다. Codex 앱의 추론 강도·Fast 선택은 실제 Cursor variant로 변환되며 원래 설정으로 복구할 수 있습니다.
+- 실험 기능으로 Cursor SDK 구독 모델을 로컬 Responses 브리지로 Codex의 기존 모델 선택기에 추가합니다. macOS에서는 SyncBar의 브라우저 로그인으로 구독을 연결하고, Codex 앱의 추론 강도·Fast 선택을 실제 Cursor SDK variant로 변환합니다. 원래 설정으로 복구할 수도 있습니다.
 
 ## 플랫폼 지원
 
@@ -113,7 +113,7 @@ Windows 앱은 다음 위치를 기본으로 사용합니다.
 - `/Applications/Google Chrome.app`에 설치된 Google Chrome
 - 공식 Codex CLI (`/opt/homebrew/bin/codex`, `/usr/local/bin/codex` 또는 `~/.local/bin/codex`)
 - 로컬 및 SSH 장치의 `bash`, `jq`, `node`, `tar`
-- Cursor 구독 모델 브리지를 이 Mac에서 사용할 경우 공식 Cursor CLI의 `cursor-agent`와 완료된 `cursor-agent login`
+- Cursor 구독 모델 브리지를 이 Mac에서 사용할 경우 Cursor 앱에 포함된 Node.js 22.13 이상 또는 같은 버전 조건을 만족하는 별도 Node.js
 - SSH 장치를 사용할 경우, 해당 호스트의 키를 미리 `known_hosts`에 등록해야 합니다.
 
 ## 릴리즈로 설치하기
@@ -164,27 +164,27 @@ shasum -a 256 -c SHA256SUMS
 
 ### 4. Cursor 구독 모델 연결 (실험)
 
-1. [공식 Cursor CLI](https://cursor.com/docs/cli/installation)를 설치하고 터미널에서 `cursor-agent login`을 완료합니다.
-2. 사용 가능한 exact slug는 `cursor-agent --list-models`로 확인할 수 있습니다. SyncBar도 같은 목록을 자동으로 불러옵니다.
-3. SyncBar의 **설정 → 모델**에서 base 모델과 필요한 경우 Thinking, localhost 포트를 선택한 뒤 **Codex 기본 모델로 사용**을 누릅니다.
-4. SyncBar가 기존 Codex 모델을 보존한 병합 카탈로그를 만들고 최상위 `model_catalog_json`에 연결합니다. Cursor의 exact variant는 기본 모델과 Thinking 여부로 묶어 `Cursor · GPT · …`, `Cursor · Codex · …`처럼 표시합니다. Reasoning과 Fast는 Codex 앱의 기존 선택창에서 고르며, 목록에 실제로 존재하는 조합만 광고하고 exact Cursor slug로 변환합니다.
+1. SyncBar의 **설정 → 모델**에서 **Cursor 구독으로 로그인**을 누르고 브라우저에서 현재 Cursor 구독 계정 로그인을 완료합니다. 수동 User API Key 입력은 사용하지 않습니다.
+2. SyncBar는 Cursor SDK가 발급한 만료형 자격증명으로 계정과 사용 가능한 모델·variant를 확인하고, 자격증명은 이 Mac의 기기 전용 Keychain에 저장합니다. SDK의 기본 인증 파일에는 별도로 저장하지 않습니다.
+3. base 모델과 필요한 경우 Thinking, localhost 포트를 선택한 뒤 **Codex 기본 모델로 사용**을 누릅니다.
+4. SyncBar가 기존 Codex 모델을 보존한 병합 카탈로그를 만들고 최상위 `model_catalog_json`에 연결합니다. Cursor의 exact variant는 기본 모델과 Thinking 여부로 묶어 `Cursor · GPT-5.6 Sol`, `Cursor · Opus 4.6`처럼 표시합니다. Reasoning과 Fast는 Codex 앱의 기존 선택창에서 고르며, 목록에 실제로 존재하는 조합만 광고하고 exact Cursor SDK variant로 변환합니다.
 5. SyncBar가 캐시된 로컬 Codex `app-server`만 종료해 시작 시 카탈로그와 설정을 다시 읽게 합니다. 새 Codex 작업은 `syncbar_cursor_bridge` provider를 사용하고, 실행 중인 일반 Codex CLI는 종료하지 않습니다.
    활성화 전에 만든 OpenAI 작업은 관리되는 `openai_base_url`을 통해 같은 로컬 브리지로 들어오므로, 작업 안에서 Cursor 모델로 바꿔도 ChatGPT 모델 검증 오류 없이 동작합니다. 기존 OpenAI 모델 요청은 인증 헤더를 보존한 채 공식 OpenAI/ChatGPT endpoint로만 전달합니다.
-6. SSH에서도 사용할 때는 Cursor Dashboard에서 만든 User API Key를 **설정 → 모델 → SSH 원격 Cursor**에 저장합니다. 키는 이 Mac의 기기 전용 Keychain에 보관되며, 활성 SSH 장치로 동기화할 때 stdin으로만 전달됩니다.
-7. 원격 호스트에는 공식 Cursor 설치 스크립트로 `agent`를 자동 설치하고 SyncBar 전용 bridge·manager와 격리된 Cursor 인증 저장소를 구성합니다. macOS Cursor 로그인/Keychain 파일을 Linux에 복사하거나 변환하지 않습니다.
+6. SSH에서도 사용할 때는 같은 SDK 발급 자격증명을 **활성 SSH 장치에 동기화**로 보냅니다. SSH 명령 인자에는 넣지 않고 stdin으로만 전달하며, 수동 User API Key는 받지 않습니다.
+7. 원격 호스트에는 필요할 때 공식 Cursor 설치 스크립트의 Node 런타임을 준비하고, SyncBar가 고정한 Cursor SDK runtime·bridge·manager와 격리된 상태 저장소를 구성합니다. macOS Keychain 파일을 Linux에 복사하거나 변환하지 않습니다.
 8. **이전 Codex 모델로 복구**를 누르면 SyncBar가 바꾼 로컬 및 연결 가능한 SSH 장치의 최상위 `model`·`model_provider`·`model_catalog_json`과 관리 provider 블록을 원래 값으로 되돌리고, 원격 전용 runtime·Cursor 인증 저장소도 제거합니다. 설정이 외부에서 바뀌었다면 덮어쓰지 않고 해당 장치를 정리 실패로 표시합니다.
-9. 설정의 **Cursor 계정**에서 현재 CLI 로그인 이메일을 확인하고, **Cursor 사용량 로그인**으로 SyncBar 전용 웹 프로필을 인증하면 Cursor Models·Other Models의 월간 잔여량과 초기화 시각을 계정 카드에서 볼 수 있습니다. **계정 연결 삭제**는 provider 복구, 브리지 중지, `cursor-agent logout`, 사용량 웹 세션, Keychain API key 및 원격 자격증명 정리를 수행하지만 Cursor.com 웹 계정과 구독 자체는 삭제하지 않습니다.
+9. 설정의 **Cursor 계정**에서 SDK 구독 로그인 이메일을 확인하고, **Cursor 사용량 로그인**으로 SyncBar 전용 웹 프로필을 인증하면 Cursor Models·Other Models의 월간 잔여량과 초기화 시각을 계정 카드에서 볼 수 있습니다. **계정 연결 삭제**는 provider 복구, 브리지 중지, 사용량 웹 세션, Keychain SDK 자격증명 및 원격 자격증명 정리를 수행하지만 Cursor.com 웹 계정과 구독 자체는 삭제하지 않습니다.
 10. 설정의 Codex 계정 행에서 휴지통을 누르면, 필요 시 다른 로그인 계정으로 모든 장비를 안전하게 전환하고 로그아웃한 뒤 해당 인증·전용 Chromium 세션·SyncBar 계정 항목을 제거합니다. OpenAI·ChatGPT 웹 계정과 구독 자체는 삭제하지 않으며, 안전한 폴백을 위해 마지막 한 계정은 남겨 둡니다.
 
 SyncBar 실행 환경에 절대 경로 `CODEX_HOME`이 있으면 해당 `config.toml`을 사용하고, 그렇지 않으면 `~/.codex/config.toml`을 사용합니다. 실제 대상 경로는 설정 화면에 표시합니다.
 
-브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증합니다. 텍스트 요청은 Cursor CLI headless agent로, 이미지나 Computer Use 스크린샷이 포함된 요청은 공식 ACP 이미지 블록으로 전달합니다. Cursor에는 실제 프로젝트 대신 전용 빈 작업공간, ask mode, sandbox와 deny 정책을 전달하고 `--force`/`--yolo`는 사용하지 않습니다. ACP 세션에서도 모델·context·Reasoning/Effort·Thinking·Fast를 선택한 exact variant와 대조하며, native tool이나 권한 요청이 시작되면 응답을 중단합니다. 그래도 Cursor의 사용자 전역 rules·hooks·MCP 설정과 현행 권한 표면을 완전히 격리한다고 보장할 수 없으므로 이 기능은 실험 기능입니다.
+브리지는 로컬과 원격 모두 `127.0.0.1`에만 바인딩하며 요청마다 비공개 고엔트로피 bearer/header를 검증합니다. macOS와 SSH의 Cursor 요청은 Cursor SDK의 기본 코딩 프롬프트와 agent mode를 유지합니다. Codex의 시스템·개발자 지침은 전용 빈 작업공간의 격리된 project rule로, Codex 도구는 SDK callback tool로 매핑합니다. 실제 프로젝트나 사용자의 Cursor 전역 rules·hooks·MCP 설정은 SDK setting source에 포함하지 않습니다. 모델·context·Reasoning/Effort·Thinking·Fast는 선택한 exact SDK variant와 대조하며, outer Codex가 제공하지 않은 도구나 권한 요청은 실패로 종료합니다. 이 SDK 연동은 아직 실험 기능입니다.
 
-Cursor CLI는 raw inference API가 아니라 agent workflow입니다. Cursor 항목의 요청 횟수와 비용은 로그인된 Cursor 계정의 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 병합 선택기의 기존 Codex 항목은 로컬 브리지가 고정된 공식 OpenAI/ChatGPT endpoint로만 전달하며, Cursor 항목은 Cursor CLI로 보냅니다. 텍스트 도구 루프는 Codex의 `previous_response_id` 또는 작업별 `prompt_cache_key`가 이어질 때 최대 30분·128개 범위에서 Cursor 채팅을 재개하고, 이미 전달된 정확한 대화 prefix를 제거해 중복 컨텍스트를 줄입니다. 모델·workspace가 다르거나 만료·동시 사용된 명시적 응답 ID는 재사용하지 않습니다. `SYNCBAR_CURSOR_METRICS=1`을 설정하면 요청 내용이나 인증값 없이 준비 시간, 첫 텍스트 시간, Cursor 총시간, 입출력 바이트만 bridge stderr의 JSON line으로 기록합니다. Cursor stream이 검증 가능한 토큰 수를 제공하지 않으므로 Responses의 `usage`는 추정하지 않고 `null`로 유지합니다. 브리지는 Responses의 `function`·`custom`·`namespace` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. `input_file.file_data`는 엄격한 Base64 검증 뒤 텍스트·코드·Markdown·HTML·CSV·JSON·XML, DOCX·PPTX·XLSX·ODT, 이미지, PDF를 처리합니다. Office 문서는 제한된 별도 프로세스에서 텍스트만 추출하고, PDF는 macOS의 PDFKit helper 또는 Windows의 self-contained WinRT/PdfPig helper로 텍스트와 최대 16장의 페이지 이미지를 함께 전달합니다. 원본 Base64와 임시 경로는 Cursor 프롬프트에 남기지 않습니다. 브리지 제한은 파일 8개, 파일당 12 MiB, 합계 24 MiB, 추출 텍스트 파일당 2 MiB·합계 4 MiB이며 PDF 페이지 이미지는 일반 이미지와 동일한 16장·24 MiB 한도를 공유합니다. 원격 Linux에는 PDF helper가 없으므로 PDF는 명시적으로 거절하지만 텍스트와 Office 문서는 처리할 수 있습니다.
+Cursor SDK는 raw inference API가 아니라 agent workflow입니다. Cursor 항목의 요청 횟수와 비용은 로그인한 Cursor 구독 pool을 따르며, SyncBar의 OpenAI 계정 사용량 화면에는 합산되지 않습니다. 병합 선택기의 기존 Codex 항목은 로컬 브리지가 고정된 공식 OpenAI/ChatGPT endpoint로만 전달하며, Cursor 항목은 Cursor SDK로 보냅니다. 도구 루프는 Codex의 `previous_response_id` 또는 작업별 `prompt_cache_key`가 이어질 때 SDK agent를 재개하고, 브리지 재시작 뒤에도 private checkpoint에서 session identity와 동적 도구 상태를 복원합니다. SDK가 반환한 input·output·cache read·reasoning 사용량은 Responses usage로 전달합니다. `SYNCBAR_CURSOR_METRICS=1`을 설정하면 요청 내용이나 인증값 없이 준비 시간, 첫 텍스트 시간, Cursor 총시간, 입출력 바이트만 bridge stderr의 JSON line으로 기록합니다. 브리지는 Responses의 `function`·`custom`·`namespace`·동적 `tool_search` 도구 루프와 Codex가 만든 inline 이미지 입력을 지원합니다. `input_file.file_data`는 엄격한 Base64 검증 뒤 텍스트·코드·Markdown·HTML·CSV·JSON·XML, DOCX·PPTX·XLSX·ODT, 이미지, PDF를 처리합니다. Office 문서는 제한된 별도 프로세스에서 텍스트만 추출하고, PDF는 macOS의 PDFKit helper 또는 Windows의 self-contained WinRT/PdfPig helper로 텍스트와 최대 16장의 페이지 이미지를 함께 전달합니다. 원본 Base64와 임시 경로는 Cursor 프롬프트에 남기지 않습니다. 브리지 제한은 파일 8개, 파일당 12 MiB, 합계 24 MiB, 추출 텍스트 파일당 2 MiB·합계 4 MiB이며 PDF 페이지 이미지는 일반 이미지와 동일한 16장·24 MiB 한도를 공유합니다. 원격 Linux에는 PDF helper가 없으므로 PDF는 명시적으로 거절하지만 텍스트와 Office 문서는 처리할 수 있습니다.
 
 Cursor 개인 플랜은 월간 사용량·남은 구독 pool을 반환하는 공개 API나 CLI 명령을 제공하지 않습니다. SyncBar는 사용자가 앱 안의 Cursor 페이지에 직접 로그인한 전용 WebKit 프로필로 공식 `cursor.com/dashboard/spending` 화면을 연 뒤, 그 페이지가 사용하는 `/api/usage-summary` 응답만 읽어 Cursor Models·Other Models 잔여량을 표시합니다. 비밀번호나 브라우저 쿠키를 외부로 내보내지 않으며, dashboard 계약이 바뀌면 사용량 조회가 안전하게 실패하고 다시 로그인을 요청합니다. Team/Enterprise의 Admin API는 별도 조직 관리자 키가 필요한 다른 인증 경계이므로 저장된 개인 User API Key로 호출하지 않습니다.
 
-현재 Codex Desktop의 일반 파일 선택기는 파일 바이트를 Responses `input_file`로 보내지 않고 `## 이름: 절대경로` 텍스트와 UI용 attachment metadata를 전송합니다. 이 경우 Cursor가 파일을 직접 읽는 대신 제공된 Codex outer `exec`/파일 도구를 요청하고, 실제 읽기는 원래 프로젝트의 Codex sandbox·승인 경계 안에서 수행됩니다. 따라서 Cursor CLI 자체에는 프로젝트 workspace 읽기 권한을 열지 않습니다. 위 `file_data` 지원은 해당 wire를 보내는 Responses 클라이언트와 materialized attachment에 직접 적용됩니다. 보안 경계를 우회하는 `file://`·임의 로컬 경로 읽기, OpenAI Files 자격 증명이 필요한 `file_id`, 원격 `file_url`은 명시적으로 거절합니다.
+현재 Codex Desktop의 일반 파일 선택기는 파일 바이트를 Responses `input_file`로 보내지 않고 `## 이름: 절대경로` 텍스트와 UI용 attachment metadata를 전송합니다. 이 경우 Cursor가 파일을 직접 읽는 대신 제공된 Codex outer `exec`/파일 도구를 요청하고, 실제 읽기는 원래 프로젝트의 Codex sandbox·승인 경계 안에서 수행됩니다. 따라서 Cursor SDK에는 실제 프로젝트 workspace 읽기 권한을 열지 않습니다. 위 `file_data` 지원은 해당 wire를 보내는 Responses 클라이언트와 materialized attachment에 직접 적용됩니다. 보안 경계를 우회하는 `file://`·임의 로컬 경로 읽기, OpenAI Files 자격 증명이 필요한 `file_id`, 원격 `file_url`은 명시적으로 거절합니다.
 
 HTML 그래프는 Codex의 outer tool이 visualization 파일을 만든 뒤 반환하는 inline directive를 byte-for-byte 보존합니다. Computer Use·브라우저·이미지 생성은 Codex의 outer custom/plugin tool이 실행하고, 그 결과 이미지나 스크린샷을 다음 Cursor turn에 전달하는 방식으로 동작합니다. Cursor ACP가 제공하지 않는 direct `computer_call`·provider-side `image_generation_call`과 오디오 입력은 지원하지 않으며 조용히 버리지 않고 오류로 종료합니다. `web_search`·`image_generation`·`tool_search`는 요청 전체를 실패시키지 않되 Cursor backend에는 사용할 수 없는 도구로 표시합니다. 변환된 프롬프트는 프로세스 인자가 아닌 stdin으로 전달합니다. `max`는 Codex의 모델 기능 설정에 따라 별도 활성화가 필요할 수 있습니다.
 
@@ -193,9 +193,9 @@ HTML 그래프는 Codex의 outer tool이 visualization 파일을 만든 뒤 반�
 - 전체 refresh token은 이 Mac의 권한 `0600` 인증 파일에만 보관합니다.
 - SSH 장치에는 `refresh_token`을 비운 access-only 인증만 전달합니다.
 - SSH 비밀번호와 개인 키 암호는 macOS Keychain의 기기 전용 항목에만 저장합니다.
-- Cursor User API Key는 이 Mac의 기기 전용 Keychain에 저장합니다. SSH 동기화 후에는 원격 `~/.local/share/gpt-switch/cursor-remote-runtime.json`과 전용 Cursor XDG 저장소에도 소유자 전용 `0600` 파일로 보관되며, 원격 저장본은 macOS Keychain처럼 암호화된 파일이 아닙니다.
-- 원격 Cursor Agent는 SyncBar 전용 `HOME`·`XDG_CONFIG_HOME`과 현행 CLI의 비공개 file credential-store 선택자를 사용합니다. 이 선택자는 Cursor의 문서화된 호환 계약이 아니므로 CLI 업데이트 뒤 status·model·bridge health 검증이 실패하면 SyncBar도 안전하게 중단합니다.
-- Cursor API key와 bridge token은 SSH 명령, 프로세스 인자, Codex 설정, 정상 stdout/stderr에 넣지 않습니다. 원격 manager는 저장된 API key를 Cursor 자식 프로세스의 `CURSOR_API_KEY` 환경으로만 주입합니다.
+- Cursor SDK 브라우저 로그인이 발급한 만료형 자격증명은 이 Mac의 기기 전용 Keychain에 저장합니다. SSH 동기화 후에는 원격 `~/.local/share/gpt-switch/cursor-remote-runtime.json`에도 소유자 전용 `0600` 파일로 보관되며, 원격 저장본은 macOS Keychain처럼 암호화된 파일이 아닙니다.
+- 원격 Cursor SDK는 SyncBar 전용 `HOME`·XDG 상태 경로와 고정된 SDK runtime을 사용합니다. SDK account·model 확인과 `cursor_backend=sdk` health 검증 중 하나라도 실패하면 SyncBar도 안전하게 중단합니다.
+- SDK 자격증명과 bridge token은 SSH 명령, 프로세스 인자, Codex 설정, 정상 stdout/stderr에 넣지 않습니다. 원격 manager는 저장된 자격증명을 Cursor SDK 자식 프로세스의 전용 환경으로만 주입합니다.
 - 이 Mac의 Keychain 키만 삭제해도 이미 동기화된 원격 키는 남습니다. **이전 Codex 모델로 복구**로 원격을 함께 정리하거나, 실패한 장치가 다시 연결된 뒤 복구를 재시도해야 합니다.
 - 개인 키와 인증서는 절대 경로의 일반 파일이어야 하며 심볼릭 링크를 허용하지 않습니다.
 - 개인 키 소유자는 현재 사용자여야 하고 권한은 `0400` 또는 `0600`이어야 합니다.
@@ -288,7 +288,7 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - 설정과 계정 인증: `~/.local/share/gpt-switch`
 - 앱 전용 Chrome 세션: `~/Library/Application Support/Codex SyncBar`
 - SSH 비밀번호·키 암호: macOS Keychain 서비스 `com.sunggu.codexsyncbar.ssh`
-- Cursor User API Key: macOS Keychain 서비스 `com.sunggu.codexsyncbar.cursor`
+- Cursor SDK 구독 자격증명: macOS Keychain 서비스 `com.sunggu.codexsyncbar.cursor`, account `sdk-subscription-credential-v1`
 - SSH 원격 Cursor runtime·인증: 원격 `~/.local/share/gpt-switch/cursor-remote-runtime.json` 및 `cursor-remote-xdg/`
 
 Windows에서는 설정과 계정 인증이 `%LOCALAPPDATA%\CodexSyncBar`, 활성 Codex 인증이 `%USERPROFILE%\.codex\auth.json`에 있습니다. 로그인 쿠키와 세션은 Windows 기본 브라우저가 관리하며, 이전 버전의 격리 Chrome 세션은 `%LOCALAPPDATA%\CodexSyncBar\ChromeProfiles`에 남을 수 있습니다. Windows DPAPI 비밀은 앱 상태 루트의 `secrets` 아래에 저장되며, 중단된 원격 부트스트랩 archive는 `remote-bootstrap-transactions` 아래에 보관됩니다. 원격 Cursor 인증은 SSH 장치의 `~/.local/share/gpt-switch` 아래에 별도로 보관됩니다.

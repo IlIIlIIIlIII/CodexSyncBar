@@ -68,8 +68,51 @@ final class CursorAPIKeyStoreTests: XCTestCase {
         }
     }
 
-    func testKeychainIdentityIsDedicatedToTheCursorUserAPIKey() {
-        XCTAssertEqual(SystemCursorAPIKeyStore.service, "com.sunggu.codexsyncbar.cursor")
-        XCTAssertEqual(SystemCursorAPIKeyStore.account, "user-api-key")
+    func testSDKLoginResultParsesStructuredCredentialAndRejectsExpiredValues() throws {
+        let key = "cursor_" + String(repeating: "a", count: 32)
+        let now = Date(timeIntervalSince1970: 1)
+        let data = Data("""
+        {"schema_version":1,"api_key":"\(key)","email":"subscriber@example.com","api_key_expires_at_ms":2000}
+        """.utf8)
+
+        let credential = try CursorSDKCredential(loginResultData: data, now: now)
+
+        XCTAssertEqual(credential.apiKey, key)
+        XCTAssertEqual(credential.email, "subscriber@example.com")
+        XCTAssertEqual(credential.expiresAt, Date(timeIntervalSince1970: 2))
+        XCTAssertFalse(credential.isExpired(at: now))
+        XCTAssertEqual(try credential.usableAPIKey(at: now), key)
+        XCTAssertThrowsError(try credential.usableAPIKey(at: credential.expiresAt)) { error in
+            XCTAssertEqual(error as? CursorSDKCredentialValidationError, .expired)
+        }
+        XCTAssertThrowsError(try CursorSDKCredential(
+            loginResultData: data,
+            now: credential.expiresAt)) { error in
+                XCTAssertEqual(error as? CursorSDKCredentialValidationError, .expired)
+        }
+    }
+
+    func testSDKLoginResultRejectsMalformedSchemaAndEmail() {
+        let key = "cursor_" + String(repeating: "b", count: 32)
+        XCTAssertThrowsError(try CursorSDKCredential(
+            loginResultData: Data("""
+            {"schema_version":2,"api_key":"\(key)","email":"subscriber@example.com","api_key_expires_at_ms":2000}
+            """.utf8),
+            now: Date(timeIntervalSince1970: 1))) { error in
+                XCTAssertEqual(error as? CursorSDKCredentialValidationError, .invalidLoginResult)
+        }
+        XCTAssertThrowsError(try CursorSDKCredential(
+            apiKey: key,
+            email: "bad email@example.com",
+            apiKeyExpiresAtMilliseconds: 2_000,
+            now: Date(timeIntervalSince1970: 1))) { error in
+                XCTAssertEqual(error as? CursorSDKCredentialValidationError, .invalidEmail)
+        }
+    }
+
+    func testKeychainIdentityIsDedicatedToCursorSDKSubscriptionCredentials() {
+        XCTAssertEqual(SystemCursorSDKCredentialStore.service, "com.sunggu.codexsyncbar.cursor")
+        XCTAssertEqual(SystemCursorSDKCredentialStore.account, "sdk-subscription-credential-v1")
+        XCTAssertEqual(SystemCursorSDKCredentialStore.legacyAccount, "user-api-key")
     }
 }

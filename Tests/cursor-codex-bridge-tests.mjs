@@ -11,16 +11,26 @@ import { zstdCompressSync } from "node:zlib";
 
 import {
   BridgeError,
+  CursorSDKBackend,
+  CursorSDKToolRendezvous,
   CursorSessionRegistry,
   MixedDeltaTracker,
   StreamingResponseSSE,
+  buildCursorSDKRule,
   buildCursorPrompt,
   buildResponseResult,
+  compileCursorSDKMessage,
   consumeCursorEvent,
   continuationRequest,
   createBridgeRequestTestHooks,
   createOpenAIProxyTestHooks,
   cursorChildEnvironment,
+  cursorSDKAccount,
+  cursorSDKInstructionHash,
+  cursorSDKModelCatalogText,
+  cursorSDKModels,
+  cursorSDKSessionKey,
+  effectiveCursorSDKInstructionHash,
   parseCursorModelAllowlist,
   parseCursorModelParameters,
   parseCursorModelRoutes,
@@ -30,6 +40,9 @@ import {
   prepareCursorBackendRequestWithFiles,
   responseSSEEvents,
   resolveCursorModelRoute,
+  responsesUsageFromCursorSDK,
+  loginCursorSDK,
+  normalizedCursorSDKLoginResult,
   runCursorAgent,
   runCursorACP,
   spawnCursorChild,
@@ -181,6 +194,127 @@ function baseRequest(overrides = {}) {
     ],
     stream: true,
     ...overrides,
+  };
+}
+
+function fakeCursorSDK() {
+  const observed = {
+    configurations: [],
+    creates: [],
+    resumes: [],
+    sends: [],
+    toolResults: [],
+  };
+
+  class JsonlLocalAgentStore {
+    constructor(root) {
+      this.root = root;
+    }
+  }
+
+  const makeRun = (agentID, message, options) => {
+    let cancelled = false;
+    let settle;
+    let reject;
+    const result = new Promise((resolve, rejectResult) => {
+      settle = resolve;
+      reject = rejectResult;
+    });
+    const text = typeof message === "string" ? message : message?.text ?? "";
+    queueMicrotask(async () => {
+      try {
+        if (text.includes("sdk-tool-roundtrip")) {
+          await options.onDelta?.({ update: { type: "text-delta", text: "도구를 확인하겠습니다." } });
+          const entry = Object.entries(options.local?.customTools ?? {})
+            .find(([, tool]) => tool.description?.includes("Outer tool: read_record."));
+          assert.ok(entry, "function callback tool was not exposed through SDK MCP");
+          const value = await entry[1].execute({ id: "record-42" }, { toolCallId: "sdk-call-42" });
+          observed.toolResults.push(value);
+          await options.onDelta?.({ update: { type: "text-delta", text: "도구 결과를 반영했습니다." } });
+        } else if (text.includes("sdk-dynamic-tool-roundtrip")) {
+          const tools = Object.entries(options.local?.customTools ?? {});
+          const search = tools.find(([, tool]) =>
+            tool.description?.includes("Outer tool: tool_search."));
+          const dispatch = tools.find(([, tool]) =>
+            tool.description?.startsWith("Dispatch one tool returned"));
+          assert.ok(search, "tool_search callback was not exposed through SDK MCP");
+          assert.ok(dispatch, "dynamic callback dispatcher was not exposed through SDK MCP");
+          const searchValue = await search[1].execute(
+            { goal: "open a browser page" },
+            { toolCallId: "sdk-search-1" },
+          );
+          observed.toolResults.push(searchValue);
+          const browserValue = await dispatch[1].execute({
+            namespace: "browser",
+            name: "open",
+            arguments: { url: "https://example.test/" },
+          }, { toolCallId: "sdk-browser-1" });
+          observed.toolResults.push(browserValue);
+          await options.onDelta?.({ update: { type: "text-delta", text: "브라우저 결과를 반영했습니다." } });
+        } else {
+          await options.onDelta?.({ update: { type: "text-delta", text: "sdk-final" } });
+        }
+        if (!cancelled) {
+          settle({
+            id: "run-fixture",
+            status: "finished",
+            result: text.includes("roundtrip") ? "completed" : "sdk-final",
+            durationMs: 17,
+            usage: {
+              inputTokens: 120,
+              outputTokens: 12,
+              cacheReadTokens: 80,
+              cacheWriteTokens: 4,
+              totalTokens: 132,
+              reasoningTokens: 3,
+            },
+          });
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+    return {
+      id: "run-fixture",
+      agentId: agentID,
+      wait: () => result,
+      cancel: async () => {
+        cancelled = true;
+        settle({ id: "run-fixture", status: "cancelled" });
+      },
+    };
+  };
+
+  const makeAgent = (agentID, agentOptions) => ({
+    agentId: agentID,
+    send: async (message, options = {}) => {
+      observed.sends.push({ agentID, agentOptions, message, options });
+      return makeRun(agentID, message, options);
+    },
+    close() {},
+  });
+
+  return {
+    observed,
+    module: {
+      CURSOR_SDK_VERSION: "1.0.28",
+      JsonlLocalAgentStore,
+      Cursor: {
+        configure(options) {
+          observed.configurations.push(options);
+        },
+      },
+      Agent: {
+        async create(options) {
+          observed.creates.push(options);
+          return makeAgent(`sdk-agent-${observed.creates.length}`, options);
+        },
+        async resume(agentID, options) {
+          observed.resumes.push({ agentID, options });
+          return makeAgent(agentID, options);
+        },
+      },
+    },
   };
 }
 
@@ -765,6 +899,568 @@ test("prompt payload preserves Codex client and prompt-cache metadata", () => {
 
   assert.deepEqual(payload.client_metadata, clientMetadata);
   assert.equal(payload.prompt_cache_key, "cache-general");
+});
+
+test("Cursor SDK subscription login stays in memory and validates expiry", async () => {
+  const observed = [];
+  const result = await loginCursorSDK({
+    sdkVersion: "1.0.28",
+    now: () => 1_000,
+    sdkModule: {
+      Cursor: {
+        auth: {
+          async login(options) {
+            observed.push(options);
+            return {
+              apiKey: `cursor_${"a".repeat(32)}`,
+              email: "subscriber@example.com",
+              apiKeyExpiresAtMs: 2_000,
+            };
+          },
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(result, {
+    schema_version: 1,
+    api_key: `cursor_${"a".repeat(32)}`,
+    email: "subscriber@example.com",
+    api_key_expires_at_ms: 2_000,
+  });
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].store, null);
+  assert.equal(observed[0].apiKeyName, "Codex SyncBar");
+  assert.equal(observed[0].openBrowser, true);
+
+  assert.throws(
+    () => normalizedCursorSDKLoginResult({
+      apiKey: `cursor_${"a".repeat(32)}`,
+      email: "subscriber@example.com",
+      apiKeyExpiresAtMs: 1_000,
+    }, 1_000),
+    (error) => error instanceof BridgeError && error.code === "sdk_expired_login",
+  );
+  assert.throws(
+    () => normalizedCursorSDKLoginResult({
+      apiKey: "short",
+      email: "subscriber@example.com",
+      apiKeyExpiresAtMs: 2_000,
+    }, 1_000),
+    (error) => error instanceof BridgeError && error.code === "sdk_unauthenticated",
+  );
+});
+
+test("Cursor SDK account and model utilities use the issued credential", async () => {
+  const apiKey = `cursor_${"b".repeat(32)}`;
+  const observed = [];
+  const sdkModule = {
+    Cursor: {
+      async me(options) {
+        observed.push(["me", options]);
+        return { userEmail: "subscriber@example.com" };
+      },
+      models: {
+        async list(options) {
+          observed.push(["models", options]);
+          return [{
+            id: "gpt-5.6-sol",
+            displayName: "GPT-5.6 Sol",
+            variants: [
+              {
+                displayName: "High Fast",
+                params: [
+                  { id: "context", value: "1m" },
+                  { id: "reasoning", value: "high" },
+                  { id: "fast", value: "true" },
+                ],
+              },
+            ],
+          }];
+        },
+      },
+    },
+  };
+
+  assert.deepEqual(await cursorSDKAccount(apiKey, { sdkModule, sdkVersion: "1.0.28" }), {
+    schema_version: 1,
+    email: "subscriber@example.com",
+  });
+  assert.equal(
+    await cursorSDKModels(apiKey, { sdkModule, sdkVersion: "1.0.28" }),
+    "gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast 1M\n",
+  );
+  assert.deepEqual(observed, [
+    ["me", { apiKey }],
+    ["models", { apiKey }],
+  ]);
+});
+
+test("Cursor SDK model catalog rejects ambiguous or unsupported variants", () => {
+  assert.throws(
+    () => cursorSDKModelCatalogText([{
+      id: "composer-2.5",
+      displayName: "Composer 2.5",
+      variants: [
+        { displayName: "Default", params: [] },
+        { displayName: "Also default", params: [] },
+      ],
+    }]),
+    (error) => error instanceof BridgeError && error.code === "sdk_invalid_models",
+  );
+  assert.throws(
+    () => cursorSDKModelCatalogText([{
+      id: "future-model",
+      displayName: "Future Model",
+      variants: [{
+        displayName: "Special",
+        params: [{ id: "unmapped", value: "special" }],
+      }],
+    }]),
+    (error) => error instanceof BridgeError && error.code === "sdk_invalid_models",
+  );
+});
+
+test("Cursor SDK keeps its coding base prompt while isolating outer host instructions", () => {
+  const request = baseRequest({
+    instructions: "Apply the outer host policy.",
+    input: [
+      { role: "system", content: [{ type: "input_text", text: "System boundary" }] },
+      { role: "developer", content: [{ type: "input_text", text: "Developer boundary" }] },
+      { role: "user", content: [{ type: "input_text", text: "Implement the task" }] },
+    ],
+  });
+  const prepared = prepareCursorBackendRequest(request);
+  const rule = buildCursorSDKRule(request);
+  const message = compileCursorSDKMessage(request, prepared);
+
+  assert.match(rule, /^---\nalwaysApply: true\n---/);
+  assert.match(rule, /coding-agent runtime for an outer host agent/);
+  assert.match(rule, /Apply the outer host policy/);
+  assert.match(rule, /System boundary/);
+  assert.match(rule, /Developer boundary/);
+  assert.equal(typeof message, "string");
+  assert.match(message, /Implement the task/);
+  assert.doesNotMatch(message, /System boundary|Developer boundary|Apply the outer host policy/);
+
+  const firstHash = cursorSDKInstructionHash(request);
+  assert.equal(firstHash, cursorSDKInstructionHash(structuredClone(request)));
+  assert.notEqual(firstHash, cursorSDKInstructionHash({
+    ...request,
+    instructions: "A changed outer host policy.",
+  }));
+});
+
+test("Cursor SDK instruction identity inherits only when a continuation omits guidance", () => {
+  const initial = baseRequest({
+    instructions: "Stable host instructions",
+    input: [{ role: "user", content: "first" }],
+  });
+  const instructionHash = cursorSDKInstructionHash(initial);
+  const previous = { instructionHash };
+
+  assert.equal(
+    effectiveCursorSDKInstructionHash({ input: [{ role: "user", content: "next" }] }, previous),
+    instructionHash,
+  );
+  assert.equal(
+    effectiveCursorSDKInstructionHash({ instructions: null, input: [] }, previous),
+    instructionHash,
+  );
+  assert.notEqual(
+    effectiveCursorSDKInstructionHash({ instructions: "replacement", input: [] }, previous),
+    instructionHash,
+  );
+  assert.notEqual(
+    effectiveCursorSDKInstructionHash({
+      input: [{ role: "developer", content: "replacement" }],
+    }, previous),
+    instructionHash,
+  );
+  assert.equal(
+    cursorSDKSessionKey(initial, { model: "composer-2.5", instructionHash }),
+    cursorSDKSessionKey(
+      { input: [] },
+      { model: "composer-2.5", instructionHash },
+    ),
+  );
+});
+
+test("Cursor SDK function callbacks preserve call ids and resume with cached usage", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-function-test-"));
+  const workspace = path.join(root, "bridge-workspace");
+  const fixture = fakeCursorSDK();
+  let backend;
+  try {
+    backend = await CursorSDKBackend.create({
+      backend: "sdk",
+      apiKey: "cursor_fixture_api_key_1234567890",
+      sdkModule: fixture.module,
+      sdkVersion: "1.0.28",
+      sdkStateRoot: path.join(root, "sdk-state"),
+      sandboxMode: "enabled",
+      workspace,
+    });
+    const request = baseRequest({
+      instructions: "Keep the outer permission boundary.",
+      input: [
+        { role: "system", content: "System policy" },
+        { role: "developer", content: "Developer policy" },
+        { role: "user", content: "sdk-tool-roundtrip" },
+      ],
+      stream: false,
+    });
+    const first = await backend.execute({
+      request,
+      hostRequest: request,
+      prepared: prepareCursorBackendRequest(request),
+      model: "composer-2.5",
+      previousSession: null,
+      previousResponseID: null,
+      responseID: "resp_sdk_first",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+
+    assert.equal(first.pending, true);
+    assert.deepEqual(first.toolCall, {
+      callID: "sdk-call-42",
+      kind: "function",
+      name: "read_record",
+      arguments: '{"id":"record-42"}',
+    });
+    assert.equal(first.text, "도구를 확인하겠습니다.");
+    assert.match(first.instructionHash, /^[a-f0-9]{64}$/);
+    assert.equal(fixture.observed.creates.length, 1);
+    const createOptions = fixture.observed.creates[0];
+    assert.deepEqual(createOptions.tools, ["mcp"]);
+    assert.deepEqual(createOptions.mcpServers, {});
+    assert.equal(createOptions.mode, "agent");
+    assert.deepEqual(createOptions.local.settingSources, ["project"]);
+    assert.deepEqual(createOptions.local.sandboxOptions, { enabled: true });
+    assert.equal(createOptions.local.enableAgentRetries, true);
+    const sent = fixture.observed.sends[0];
+    assert.match(sent.message, /sdk-tool-roundtrip/);
+    assert.doesNotMatch(sent.message, /System policy|Developer policy/);
+
+    const rule = await readFile(path.join(
+      root,
+      "cursor-sdk-workspaces-v1",
+      first.instructionHash,
+      ".cursor",
+      "rules",
+      "codex-host-policy.mdc",
+    ), "utf8");
+    assert.match(rule, /System policy/);
+    assert.match(rule, /Developer policy/);
+    assert.match(rule, /Keep the outer permission boundary/);
+
+    const continuation = baseRequest({
+      instructions: undefined,
+      input: [{
+        type: "function_call_output",
+        call_id: "sdk-call-42",
+        output: "record-value",
+      }],
+      tools: [],
+      stream: false,
+    });
+    delete continuation.instructions;
+    const second = await backend.execute({
+      request: continuation,
+      hostRequest: continuation,
+      prepared: prepareCursorBackendRequest(continuation),
+      model: "composer-2.5",
+      previousSession: {
+        sessionID: first.metadata.sessionID,
+        sessionKey: first.sessionKey,
+        instructionHash: first.instructionHash,
+        pendingSDKRun: true,
+      },
+      previousResponseID: "resp_sdk_first",
+      responseID: "resp_sdk_second",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+
+    assert.equal(second.pending, false);
+    assert.equal(second.text, "도구 결과를 반영했습니다.");
+    assert.equal(second.instructionHash, first.instructionHash);
+    assert.equal(fixture.observed.toolResults[0], "record-value");
+    assert.deepEqual(second.usage, {
+      input_tokens: 120,
+      input_tokens_details: { cached_tokens: 80 },
+      output_tokens: 12,
+      output_tokens_details: { reasoning_tokens: 3 },
+      total_tokens: 132,
+    });
+  } finally {
+    await backend?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Cursor SDK custom free-form callbacks preserve outer tool semantics", async () => {
+  const request = baseRequest({
+    tools: [{ type: "custom", name: "exec", description: "Run an outer action" }],
+  });
+  const rendezvous = new CursorSDKToolRendezvous(request);
+  const entry = Object.values(rendezvous.customTools())[0];
+  const execution = entry.execute({ input: "inspect safely" }, { toolCallId: "sdk-custom-1" });
+  const call = await rendezvous.nextCall(new AbortController().signal);
+
+  assert.deepEqual(call, {
+    callID: "sdk-custom-1",
+    kind: "custom",
+    name: "exec",
+    input: "inspect safely",
+  });
+  rendezvous.resolveActive([{
+    type: "custom_tool_call_output",
+    call_id: "sdk-custom-1",
+    output: "custom-result",
+  }]);
+  assert.equal(await execution, "custom-result");
+});
+
+test("Cursor SDK tool_search dynamically dispatches a namespaced browser tool", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-dynamic-test-"));
+  const fixture = fakeCursorSDK();
+  let backend;
+  try {
+    backend = await CursorSDKBackend.create({
+      backend: "sdk",
+      apiKey: "cursor_fixture_api_key_1234567890",
+      sdkModule: fixture.module,
+      sdkVersion: "1.0.28",
+      sdkStateRoot: path.join(root, "sdk-state"),
+      sandboxMode: "disabled",
+      workspace: path.join(root, "bridge-workspace"),
+    });
+    const initial = baseRequest({
+      instructions: "Use only outer callbacks.",
+      input: [{ role: "user", content: "sdk-dynamic-tool-roundtrip" }],
+      tools: [{
+        type: "tool_search",
+        execution: "client",
+        parameters: {
+          type: "object",
+          properties: { goal: { type: "string" } },
+          required: ["goal"],
+          additionalProperties: false,
+        },
+      }],
+      stream: false,
+    });
+    const first = await backend.execute({
+      request: initial,
+      hostRequest: initial,
+      prepared: prepareCursorBackendRequest(initial),
+      model: "composer-2.5",
+      previousSession: null,
+      previousResponseID: null,
+      responseID: "resp_search",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.deepEqual(first.toolCall, {
+      callID: "sdk-search-1",
+      kind: "tool_search",
+      arguments: { goal: "open a browser page" },
+    });
+
+    const browserTools = [{
+      type: "namespace",
+      name: "browser",
+      description: "Browser callbacks",
+      tools: [{
+        type: "function",
+        name: "open",
+        description: "Open one page",
+        parameters: {
+          type: "object",
+          properties: { url: { type: "string" } },
+          required: ["url"],
+          additionalProperties: false,
+        },
+      }],
+    }];
+    const searchOutput = baseRequest({
+      input: [{
+        type: "tool_search_output",
+        call_id: "sdk-search-1",
+        tools: browserTools,
+      }],
+      instructions: undefined,
+      tools: [],
+      stream: false,
+    });
+    delete searchOutput.instructions;
+    const second = await backend.execute({
+      request: searchOutput,
+      hostRequest: searchOutput,
+      prepared: prepareCursorBackendRequest(searchOutput),
+      model: "composer-2.5",
+      previousSession: {
+        sessionID: first.metadata.sessionID,
+        sessionKey: first.sessionKey,
+        instructionHash: first.instructionHash,
+        pendingSDKRun: true,
+      },
+      previousResponseID: "resp_search",
+      responseID: "resp_browser",
+      replay: false,
+      dynamicTools: browserTools,
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.deepEqual(second.toolCall, {
+      callID: "sdk-browser-1",
+      kind: "function",
+      namespace: "browser",
+      name: "open",
+      arguments: '{"url":"https://example.test/"}',
+    });
+
+    const browserOutput = baseRequest({
+      input: [{
+        type: "function_call_output",
+        call_id: "sdk-browser-1",
+        output: "Example Domain",
+      }],
+      instructions: undefined,
+      tools: [],
+      stream: false,
+    });
+    delete browserOutput.instructions;
+    const third = await backend.execute({
+      request: browserOutput,
+      hostRequest: browserOutput,
+      prepared: prepareCursorBackendRequest(browserOutput),
+      model: "composer-2.5",
+      previousSession: {
+        sessionID: second.metadata.sessionID,
+        sessionKey: second.sessionKey,
+        instructionHash: second.instructionHash,
+        pendingSDKRun: true,
+      },
+      previousResponseID: "resp_browser",
+      responseID: "resp_browser_final",
+      replay: false,
+      dynamicTools: browserTools,
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.equal(third.pending, false);
+    assert.equal(third.text, "브라우저 결과를 반영했습니다.");
+    assert.equal(fixture.observed.toolResults[1], "Example Domain");
+  } finally {
+    await backend?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Cursor SDK completed sessions resume after restart without resending instructions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-resume-test-"));
+  const fixture = fakeCursorSDK();
+  const configuration = {
+    backend: "sdk",
+    apiKey: "cursor_fixture_api_key_1234567890",
+    sdkModule: fixture.module,
+    sdkVersion: "1.0.28",
+    sdkStateRoot: path.join(root, "sdk-state"),
+    sandboxMode: "enabled",
+    workspace: path.join(root, "bridge-workspace"),
+  };
+  let firstBackend;
+  let secondBackend;
+  try {
+    firstBackend = await CursorSDKBackend.create(configuration);
+    const initial = baseRequest({
+      instructions: "Persistent host instructions",
+      input: [{ role: "user", content: "initial sdk answer" }],
+      tools: [],
+      stream: false,
+    });
+    const first = await firstBackend.execute({
+      request: initial,
+      hostRequest: initial,
+      prepared: prepareCursorBackendRequest(initial),
+      model: "composer-2.5",
+      previousSession: null,
+      previousResponseID: null,
+      responseID: "resp_before_restart",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.equal(first.pending, false);
+    await firstBackend.close();
+    firstBackend = null;
+
+    secondBackend = await CursorSDKBackend.create(configuration);
+    const continuation = baseRequest({
+      instructions: undefined,
+      input: [{ role: "user", content: "after restart" }],
+      tools: [],
+      stream: false,
+    });
+    delete continuation.instructions;
+    const second = await secondBackend.execute({
+      request: continuation,
+      hostRequest: continuation,
+      prepared: prepareCursorBackendRequest(continuation),
+      model: "composer-2.5",
+      previousSession: {
+        sessionID: first.metadata.sessionID,
+        sessionKey: first.sessionKey,
+        instructionHash: first.instructionHash,
+        pendingSDKRun: false,
+      },
+      previousResponseID: "resp_before_restart",
+      responseID: "resp_after_restart",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.equal(second.text, "sdk-final");
+    assert.equal(second.instructionHash, first.instructionHash);
+    assert.deepEqual(fixture.observed.resumes.map((entry) => entry.agentID), [
+      first.metadata.sessionID,
+    ]);
+  } finally {
+    await firstBackend?.close();
+    await secondBackend?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Cursor SDK usage mapping rejects malformed counters", () => {
+  assert.equal(responsesUsageFromCursorSDK({
+    inputTokens: 1,
+    outputTokens: 2,
+    cacheReadTokens: -1,
+  }), null);
+  assert.deepEqual(responsesUsageFromCursorSDK({
+    inputTokens: 10,
+    outputTokens: 2,
+    cacheReadTokens: 8,
+    cacheWriteTokens: 1,
+  }), {
+    input_tokens: 10,
+    input_tokens_details: { cached_tokens: 8 },
+    output_tokens: 2,
+    output_tokens_details: { reasoning_tokens: 0 },
+    total_tokens: 12,
+  });
 });
 
 test("prompt builder bounds oversized backend requests", () => {
@@ -1988,6 +2684,51 @@ test("Cursor sessions and dynamic browser tools survive a private restart checkp
       { type: "custom_tool_call_output", call_id: "call_exec", output: "browser opened" },
     ]);
     assert.match(buildCursorPrompt(continued), /"name":"exec"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Cursor SDK session identity survives the private restart checkpoint", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-session-store-test-"));
+  const storePath = path.join(root, "cursor-bridge-sessions-v1.json");
+  const workspace = path.join(root, "workspace");
+  const responseID = `resp_${"b".repeat(32)}`;
+  const sessionKey = "c".repeat(64);
+  const instructionHash = "d".repeat(64);
+  try {
+    const first = new CursorSessionRegistry({ now: () => 20_000_000, storePath });
+    first.add(responseID, {
+      sessionID: "sdk-persistent-session",
+      transport: "sdk",
+      sessionKey,
+      instructionHash,
+      pendingSDKRun: false,
+      model: "composer-2.5",
+      workspace,
+      input: [{ role: "user", content: "private SDK request" }],
+      output: [{ role: "assistant", content: "private SDK answer" }],
+      dynamicTools: [],
+      clientKey: "sdk-cache-key",
+    });
+    await first.flush();
+
+    const stored = JSON.parse(await readFile(storePath, "utf8"));
+    assert.equal(stored.schemaVersion, 3);
+    assert.equal(stored.entries[0].sessionKey, sessionKey);
+    assert.equal(stored.entries[0].instructionHash, instructionHash);
+    assert.doesNotMatch(JSON.stringify(stored), /private SDK request|private SDK answer/);
+
+    const restored = new CursorSessionRegistry({ now: () => 20_000_100, storePath });
+    await restored.load();
+    const session = restored.acquire(responseID, {
+      model: "composer-2.5",
+      workspace,
+    });
+    assert.equal(session.transport, "sdk");
+    assert.equal(session.sessionKey, sessionKey);
+    assert.equal(session.instructionHash, instructionHash);
+    assert.equal(session.pendingSDKRun, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

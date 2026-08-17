@@ -193,6 +193,93 @@ esac
 SH
 chmod 700 "$FAKE_NODE"
 
+# Build the smallest Cursor SDK 1.0.28 runtime accepted by the production
+# remote installer. Account/model validation uses the same SDK entry points as
+# production; response behavior is covered by the Node E2E fixture in
+# cursor-remote-manager-tests.mjs.
+CURSOR_SDK_FIXTURE_ROOT="$TMP/cursor-sdk-fixture"
+CURSOR_SDK_FIXTURE_MODULES="$CURSOR_SDK_FIXTURE_ROOT/node_modules/@cursor"
+mkdir -p "$CURSOR_SDK_FIXTURE_MODULES/sdk/dist/esm"
+chmod 700 "$CURSOR_SDK_FIXTURE_ROOT" \
+  "$CURSOR_SDK_FIXTURE_ROOT/node_modules" \
+  "$CURSOR_SDK_FIXTURE_ROOT/node_modules/@cursor" \
+  "$CURSOR_SDK_FIXTURE_MODULES/sdk" \
+  "$CURSOR_SDK_FIXTURE_MODULES/sdk/dist" \
+  "$CURSOR_SDK_FIXTURE_MODULES/sdk/dist/esm"
+for package in sdk sdk-darwin-arm64 sdk-darwin-x64 sdk-linux-arm64 sdk-linux-x64; do
+  package_root="$CURSOR_SDK_FIXTURE_MODULES/$package"
+  mkdir -p "$package_root"
+  chmod 700 "$package_root"
+  if [ "$package" = sdk ]; then
+    printf '{\n  "name": "@cursor/sdk",\n  "version": "1.0.28",\n  "type": "module"\n}\n' \
+      >"$package_root/package.json"
+  else
+    printf '{\n  "name": "@cursor/%s",\n  "version": "1.0.28"\n}\n' "$package" \
+      >"$package_root/package.json"
+  fi
+  chmod 600 "$package_root/package.json"
+done
+cat >"$CURSOR_SDK_FIXTURE_MODULES/sdk/dist/esm/index.js" <<'JS'
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+export const CURSOR_SDK_VERSION = "1.0.28";
+export class JsonlLocalAgentStore {
+  constructor(root) { this.root = root; }
+}
+export class Cursor {
+  static configure(options) { Cursor.options = options; }
+  static async me(options = {}) {
+    if (typeof options.apiKey !== "string" || options.apiKey.length < 16) {
+      throw new Error("unauthenticated");
+    }
+    mkdirSync(process.env.XDG_CONFIG_HOME, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(process.env.XDG_CONFIG_HOME, "auth-state"),
+      "api-key-authenticated\n",
+      { mode: 0o600 },
+    );
+    return { userEmail: "sdk-fixture@example.com" };
+  }
+}
+Cursor.models = {
+  async list(options = {}) {
+    if (typeof options.apiKey !== "string" || options.apiKey.length < 16) {
+      throw new Error("unauthenticated");
+    }
+    return [
+      { id: "composer-2.5", displayName: "Composer 2.5" },
+      {
+        id: "gpt-5.6-sol",
+        displayName: "GPT 5.6 Sol",
+        variants: [{
+          displayName: "High Fast",
+          params: [
+            { id: "reasoning", value: "high" },
+            { id: "fast", value: "true" },
+          ],
+        }],
+      },
+    ];
+  },
+};
+export class Agent {
+  static async create() { throw new Error("fixture agent is not used by health checks"); }
+  static async resume() { throw new Error("fixture agent is not used by health checks"); }
+}
+JS
+chmod 600 "$CURSOR_SDK_FIXTURE_MODULES/sdk/dist/esm/index.js"
+
+CURSOR_SDK_FIXTURE_ARCHIVE="$TMP/cursor-sdk-runtime.fixture.tar.gz"
+CURSOR_SDK_FIXTURE_MANIFEST="$TMP/cursor-sdk-runtime.fixture.manifest"
+COPYFILE_DISABLE=1 tar -czf "$CURSOR_SDK_FIXTURE_ARCHIVE" \
+  -C "$CURSOR_SDK_FIXTURE_ROOT" node_modules
+cursor_sdk_archive_hash=$(shasum -a 256 "$CURSOR_SDK_FIXTURE_ARCHIVE" | awk '{print $1}')
+cursor_sdk_lock_hash=$(printf 'cursor-sdk-helper-contract-fixture-v1' | shasum -a 256 | awk '{print $1}')
+printf 'schema_version=1\nsdk_version=1.0.28\nlock_sha256=%s\narchive_sha256=%s\n' \
+  "$cursor_sdk_lock_hash" "$cursor_sdk_archive_hash" >"$CURSOR_SDK_FIXTURE_MANIFEST"
+chmod 600 "$CURSOR_SDK_FIXTURE_ARCHIVE" "$CURSOR_SDK_FIXTURE_MANIFEST"
+
 common_env=(
   HOME="$HOME_DIR"
   GPT_SWITCH_STATE_ROOT="$STATE"
@@ -203,6 +290,8 @@ common_env=(
   GPT_SWITCH_REFRESH_HELPER="$FAKE_REFRESH"
   GPT_SWITCH_USAGE_HELPER="$USAGE_SOURCE"
   GPT_SWITCH_NODE_BIN="$FAKE_NODE"
+  GPT_SWITCH_CURSOR_SDK_RUNTIME="$CURSOR_SDK_FIXTURE_ARCHIVE"
+  GPT_SWITCH_CURSOR_SDK_MANIFEST="$CURSOR_SDK_FIXTURE_MANIFEST"
   GPT_SWITCH_TEST_SSH_ARGS="$SSH_ARGS"
   GPT_SWITCH_TEST_SSH_CALLS="$SSH_CALLS"
   GPT_SWITCH_TEST_SSH_STDIN="$SSH_STDIN"
@@ -875,8 +964,15 @@ cat >"$CURSOR_REMOTE_PROCESS_BIN/sleep" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
+cat >"$CURSOR_REMOTE_PROCESS_BIN/mv" <<'SH'
+#!/usr/bin/env bash
+if [ "${GPT_SWITCH_TEST_CURSOR_SDK_MOVE_FAILURE:-0}" = 1 ] && [ "$#" -eq 2 ]; then
+  case "$1" in */sdk-runtime/node_modules) exit 73 ;; esac
+fi
+exec /bin/mv "$@"
+SH
 chmod 700 "$CURSOR_REMOTE_PROCESS_BIN/pgrep" "$CURSOR_REMOTE_PROCESS_BIN/ps" \
-  "$CURSOR_REMOTE_PROCESS_BIN/sleep"
+  "$CURSOR_REMOTE_PROCESS_BIN/sleep" "$CURSOR_REMOTE_PROCESS_BIN/mv"
 
 cat >"$CURSOR_SSH" <<'SH'
 #!/usr/bin/env bash
@@ -886,11 +982,18 @@ if [ "${GPT_SWITCH_TEST_SWAP_CURSOR_SOURCES:-0}" = 1 ] && \
    [ ! -e "$GPT_SWITCH_TEST_SWAP_CURSOR_MARKER" ]; then
   bridge_replacement="$GPT_SWITCH_CURSOR_BRIDGE_HELPER.replacement.$$"
   manager_replacement="$GPT_SWITCH_CURSOR_REMOTE_MANAGER.replacement.$$"
+  sdk_runtime_replacement="$GPT_SWITCH_CURSOR_SDK_RUNTIME.replacement.$$"
+  sdk_manifest_replacement="$GPT_SWITCH_CURSOR_SDK_MANIFEST.replacement.$$"
   printf '#!/usr/bin/env node\n// replaced bridge source\n' >"$bridge_replacement"
   printf '#!/usr/bin/env node\n// replaced manager source\n' >"$manager_replacement"
+  printf 'replaced sdk runtime source\n' >"$sdk_runtime_replacement"
+  printf 'replaced sdk manifest source\n' >"$sdk_manifest_replacement"
   chmod 700 "$bridge_replacement" "$manager_replacement"
+  chmod 600 "$sdk_runtime_replacement" "$sdk_manifest_replacement"
   mv "$bridge_replacement" "$GPT_SWITCH_CURSOR_BRIDGE_HELPER"
   mv "$manager_replacement" "$GPT_SWITCH_CURSOR_REMOTE_MANAGER"
+  mv "$sdk_runtime_replacement" "$GPT_SWITCH_CURSOR_SDK_RUNTIME"
+  mv "$sdk_manifest_replacement" "$GPT_SWITCH_CURSOR_SDK_MANIFEST"
   : >"$GPT_SWITCH_TEST_SWAP_CURSOR_MARKER"
 fi
 printf '%s\n' "$@" >>"$GPT_SWITCH_TEST_CURSOR_SSH_ARGS"
@@ -955,15 +1058,26 @@ chmod 700 "$CURSOR_SSH"
 # pathnames during provisioning without touching repository-owned sources.
 CURSOR_PINNED_BRIDGE_SOURCE="$TMP/pinned-cursor-codex-bridge.mjs"
 CURSOR_PINNED_MANAGER_SOURCE="$TMP/pinned-cursor-remote-manager.mjs"
+CURSOR_PINNED_SDK_RUNTIME_SOURCE="$TMP/pinned-cursor-sdk-runtime.tar.gz"
+CURSOR_PINNED_SDK_MANIFEST_SOURCE="$TMP/pinned-cursor-sdk-runtime.manifest"
 CURSOR_PINNED_BRIDGE_ORIGINAL="$TMP/pinned-cursor-codex-bridge.original.mjs"
 CURSOR_PINNED_MANAGER_ORIGINAL="$TMP/pinned-cursor-remote-manager.original.mjs"
+CURSOR_PINNED_SDK_RUNTIME_ORIGINAL="$TMP/pinned-cursor-sdk-runtime.original.tar.gz"
+CURSOR_PINNED_SDK_MANIFEST_ORIGINAL="$TMP/pinned-cursor-sdk-runtime.original.manifest"
 cp "$CURSOR_BRIDGE_SOURCE" "$CURSOR_PINNED_BRIDGE_SOURCE"
 cp "$CURSOR_MANAGER_SOURCE" "$CURSOR_PINNED_MANAGER_SOURCE"
+cp "$CURSOR_SDK_FIXTURE_ARCHIVE" "$CURSOR_PINNED_SDK_RUNTIME_SOURCE"
+cp "$CURSOR_SDK_FIXTURE_MANIFEST" "$CURSOR_PINNED_SDK_MANIFEST_SOURCE"
 cp "$CURSOR_BRIDGE_SOURCE" "$CURSOR_PINNED_BRIDGE_ORIGINAL"
 cp "$CURSOR_MANAGER_SOURCE" "$CURSOR_PINNED_MANAGER_ORIGINAL"
+cp "$CURSOR_SDK_FIXTURE_ARCHIVE" "$CURSOR_PINNED_SDK_RUNTIME_ORIGINAL"
+cp "$CURSOR_SDK_FIXTURE_MANIFEST" "$CURSOR_PINNED_SDK_MANIFEST_ORIGINAL"
 chmod 500 "$CURSOR_PINNED_BRIDGE_SOURCE" "$CURSOR_PINNED_MANAGER_SOURCE"
+chmod 600 "$CURSOR_PINNED_SDK_RUNTIME_SOURCE" "$CURSOR_PINNED_SDK_MANIFEST_SOURCE"
 chmod 700 \
   "$CURSOR_PINNED_BRIDGE_ORIGINAL" "$CURSOR_PINNED_MANAGER_ORIGINAL"
+chmod 600 \
+  "$CURSOR_PINNED_SDK_RUNTIME_ORIGINAL" "$CURSOR_PINNED_SDK_MANIFEST_ORIGINAL"
 CURSOR_SWAP_MARKER="$TMP/cursor-helper-sources-swapped"
 
 CURSOR_API_CANARY="cursor_api_canary_0123456789abcdef"
@@ -993,6 +1107,8 @@ cursor_env=(
   GPT_SWITCH_SSH_BIN="$CURSOR_SSH"
   GPT_SWITCH_CURSOR_BRIDGE_HELPER="$CURSOR_PINNED_BRIDGE_SOURCE"
   GPT_SWITCH_CURSOR_REMOTE_MANAGER="$CURSOR_PINNED_MANAGER_SOURCE"
+  GPT_SWITCH_CURSOR_SDK_RUNTIME="$CURSOR_PINNED_SDK_RUNTIME_SOURCE"
+  GPT_SWITCH_CURSOR_SDK_MANIFEST="$CURSOR_PINNED_SDK_MANIFEST_SOURCE"
   GPT_SWITCH_TEST_CURSOR_REMOTE_HOME="$CURSOR_REMOTE_HOME"
   GPT_SWITCH_TEST_CURSOR_PROCESS_BIN="$CURSOR_REMOTE_PROCESS_BIN"
   GPT_SWITCH_TEST_CURSOR_STOP_CALLS="$CURSOR_REMOTE_STOP_CALLS"
@@ -1001,6 +1117,38 @@ cursor_env=(
   GPT_SWITCH_TEST_CURSOR_AGENT="$CURSOR_REMOTE_AGENT"
   GPT_SWITCH_TEST_CURSOR_SSH_ARGS="$CURSOR_SSH_ARGS"
 )
+
+# If installing the extracted runtime fails after the previous node_modules
+# tree was moved aside, the remote transaction must restore that exact tree.
+CURSOR_OLD_SDK="$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/node_modules"
+mkdir -p "$CURSOR_OLD_SDK"
+chmod 700 "$CURSOR_REMOTE_HOME/.local/lib" \
+  "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch" "$CURSOR_OLD_SDK"
+printf 'keep-existing-sdk-runtime\n' >"$CURSOR_OLD_SDK/preexisting-marker"
+chmod 600 "$CURSOR_OLD_SDK/preexisting-marker"
+CURSOR_SDK_MOVE_FAIL_STDOUT="$TMP/cursor-sdk-move-fail.stdout"
+CURSOR_SDK_MOVE_FAIL_STDERR="$TMP/cursor-sdk-move-fail.stderr"
+if printf '%s' "$CURSOR_PAYLOAD" | env "${cursor_env[@]}" \
+    GPT_SWITCH_TEST_CURSOR_SDK_MOVE_FAILURE=1 \
+    "$HELPER" provision-cursor staging-node \
+    >"$CURSOR_SDK_MOVE_FAIL_STDOUT" 2>"$CURSOR_SDK_MOVE_FAIL_STDERR"; then
+  printf 'Cursor SDK install unexpectedly succeeded after the injected move failure\n' >&2
+  exit 1
+fi
+grep -F 'Cursor helper installation failed for staging-node' \
+  "$CURSOR_SDK_MOVE_FAIL_STDERR" >/dev/null
+grep -Fx 'keep-existing-sdk-runtime' "$CURSOR_OLD_SDK/preexisting-marker" >/dev/null
+[ ! -e "$CURSOR_OLD_SDK/@cursor/sdk" ]
+if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
+    "$CURSOR_SDK_MOVE_FAIL_STDOUT" "$CURSOR_SDK_MOVE_FAIL_STDERR" >/dev/null; then
+  printf 'Cursor SDK rollback failure exposed a credential in user-visible output\n' >&2
+  exit 1
+fi
+[ ! -e "$STATE/.controller-lock" ]
+if find "$STATE" -maxdepth 1 -name '.cursor-*' -print -quit | grep -q .; then
+  printf 'Cursor SDK rollback left a controller staging file\n' >&2
+  exit 1
+fi
 
 CURSOR_PROVISION_STDOUT="$TMP/cursor-provision.stdout"
 CURSOR_PROVISION_STDERR="$TMP/cursor-provision.stderr"
@@ -1026,10 +1174,20 @@ cmp -s "$CURSOR_PINNED_BRIDGE_ORIGINAL" \
   "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/cursor-codex-bridge.mjs"
 cmp -s "$CURSOR_PINNED_MANAGER_ORIGINAL" \
   "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/cursor-remote-manager.mjs"
+cmp -s "$CURSOR_SDK_FIXTURE_MODULES/sdk/package.json" \
+  "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/node_modules/@cursor/sdk/package.json"
+cmp -s "$CURSOR_SDK_FIXTURE_MODULES/sdk/dist/esm/index.js" \
+  "$CURSOR_REMOTE_HOME/.local/lib/gpt-switch/node_modules/@cursor/sdk/dist/esm/index.js"
+[ ! -s "$CURSOR_PINNED_SDK_RUNTIME_SOURCE" ] || \
+  ! cmp -s "$CURSOR_PINNED_SDK_RUNTIME_ORIGINAL" "$CURSOR_PINNED_SDK_RUNTIME_SOURCE"
+! cmp -s "$CURSOR_PINNED_SDK_MANIFEST_ORIGINAL" "$CURSOR_PINNED_SDK_MANIFEST_SOURCE"
 # Restore the private sources for later independent deprovision invocations.
 cp "$CURSOR_PINNED_BRIDGE_ORIGINAL" "$CURSOR_PINNED_BRIDGE_SOURCE"
 cp "$CURSOR_PINNED_MANAGER_ORIGINAL" "$CURSOR_PINNED_MANAGER_SOURCE"
+cp "$CURSOR_PINNED_SDK_RUNTIME_ORIGINAL" "$CURSOR_PINNED_SDK_RUNTIME_SOURCE"
+cp "$CURSOR_PINNED_SDK_MANIFEST_ORIGINAL" "$CURSOR_PINNED_SDK_MANIFEST_SOURCE"
 chmod 700 "$CURSOR_PINNED_BRIDGE_SOURCE" "$CURSOR_PINNED_MANAGER_SOURCE"
+chmod 600 "$CURSOR_PINNED_SDK_RUNTIME_SOURCE" "$CURSOR_PINNED_SDK_MANIFEST_SOURCE"
 if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
     "$CURSOR_SSH_ARGS" "$CURSOR_PROVISION_STDOUT" "$CURSOR_PROVISION_STDERR" >/dev/null; then
   printf 'Cursor provisioning leaked a credential through argv or user-visible output\n' >&2
@@ -1067,7 +1225,8 @@ const result = await new Promise((resolve, reject) => {
 });
 const body = JSON.parse(result.body.toString("utf8"));
 if (result.response.statusCode !== 200 || body.status !== "ok" ||
-    body.protocol !== "responses" || body.model !== runtime.model ||
+    body.protocol !== "responses" || body.cursor_backend !== "sdk" ||
+    body.model !== runtime.model ||
     !Number.isInteger(body.pid)) {
   throw new Error("authenticated loopback bridge is unhealthy");
 }

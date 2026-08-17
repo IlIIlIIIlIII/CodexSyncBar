@@ -1,22 +1,18 @@
 import Darwin
 import Foundation
 
-struct CursorCLIAccount: Equatable, Sendable {
+struct CursorAccount: Equatable, Sendable {
     let email: String
 
-    init?(statusOutput: String) {
-        let marker = "Logged in as "
-        guard let range = statusOutput.range(of: marker) else { return nil }
-        let suffix = statusOutput[range.upperBound...]
-        guard let line = suffix.split(whereSeparator: { $0.isNewline }).first else { return nil }
-        let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+    init?(email: String) {
+        let value = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty,
               value.utf8.count <= 320,
               value.contains("@"),
               !value.contains(where: { $0.isWhitespace }),
               value.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
         else { return nil }
-        email = value
+        self.email = value
     }
 }
 
@@ -24,7 +20,7 @@ enum CursorAccountState: Equatable, Sendable {
     case unknown
     case loading
     case signedOut
-    case signedIn(CursorCLIAccount)
+    case signedIn(CursorAccount)
     case failed(String)
 
     var email: String? {

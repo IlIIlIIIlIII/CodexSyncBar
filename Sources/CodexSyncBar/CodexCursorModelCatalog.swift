@@ -89,7 +89,7 @@ enum CodexCursorModelCatalogBuilder {
                         group: section.group,
                         familyName: family.displayName,
                         thinking: thinking)
-                    model["description"] = "Cursor 구독을 로컬 Cursor CLI 브리지로 사용하는 모델입니다."
+                    model["description"] = "Cursor 구독을 로컬 Cursor SDK 브리지로 사용하는 모델입니다."
                     model["visibility"] = "list"
                     model["supported_in_api"] = true
                     model["priority"] = priority
@@ -99,7 +99,7 @@ enum CodexCursorModelCatalogBuilder {
                     model["service_tiers"] = route.supportsFast ? [[
                         "id": "priority",
                         "name": "Fast",
-                        "description": "Cursor CLI Fast 변형을 사용합니다.",
+                        "description": "Cursor SDK Fast 변형을 사용합니다.",
                     ]] : []
                     model["input_modalities"] = ["text", "image"]
                     model["supports_image_detail_original"] = true

@@ -47,12 +47,17 @@ actor SwitchService {
     }
 
     private static let maximumProvisioningHelperBytes = 4 * 1024 * 1024
+    private static let maximumProvisioningArchiveBytes = 128 * 1024 * 1024
     private let executable: URL
     private let trustedProvisioningExecutable: URL?
     private let installedCursorRemoteManager: URL
     private let installedCursorBridgeHelper: URL
+    private let installedCursorSDKRuntime: URL
+    private let installedCursorSDKManifest: URL
     private let trustedCursorRemoteManager: URL?
     private let trustedCursorBridgeHelper: URL?
+    private let trustedCursorSDKRuntime: URL?
+    private let trustedCursorSDKManifest: URL?
     private var maintenanceBusy = false
     private var maintenanceWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -63,8 +68,12 @@ actor SwitchService {
             .appendingPathComponent("gpt-switch"),
         installedCursorRemoteManager: URL? = nil,
         installedCursorBridgeHelper: URL? = nil,
+        installedCursorSDKRuntime: URL? = nil,
+        installedCursorSDKManifest: URL? = nil,
         trustedCursorRemoteManager: URL? = nil,
-        trustedCursorBridgeHelper: URL? = nil)
+        trustedCursorBridgeHelper: URL? = nil,
+        trustedCursorSDKRuntime: URL? = nil,
+        trustedCursorSDKManifest: URL? = nil)
     {
         self.executable = executable
         self.trustedProvisioningExecutable = trustedProvisioningExecutable
@@ -75,11 +84,19 @@ actor SwitchService {
             ?? installedLibrary.appendingPathComponent("cursor-remote-manager.mjs")
         self.installedCursorBridgeHelper = installedCursorBridgeHelper
             ?? installedLibrary.appendingPathComponent("cursor-codex-bridge.mjs")
+        self.installedCursorSDKRuntime = installedCursorSDKRuntime
+            ?? installedLibrary.appendingPathComponent("cursor-sdk-runtime.tar.gz")
+        self.installedCursorSDKManifest = installedCursorSDKManifest
+            ?? installedLibrary.appendingPathComponent("cursor-sdk-runtime.manifest")
         let trustedResources = trustedProvisioningExecutable?.deletingLastPathComponent()
         self.trustedCursorRemoteManager = trustedCursorRemoteManager
             ?? trustedResources?.appendingPathComponent("cursor-remote-manager.mjs")
         self.trustedCursorBridgeHelper = trustedCursorBridgeHelper
             ?? trustedResources?.appendingPathComponent("cursor-codex-bridge.mjs")
+        self.trustedCursorSDKRuntime = trustedCursorSDKRuntime
+            ?? trustedResources?.appendingPathComponent("cursor-sdk-runtime.tar.gz")
+        self.trustedCursorSDKManifest = trustedCursorSDKManifest
+            ?? trustedResources?.appendingPathComponent("cursor-sdk-runtime.manifest")
     }
 
     func fetchStatus() async throws -> [DeviceStatus] {
@@ -491,7 +508,9 @@ actor SwitchService {
     {
         guard let trustedProvisioningExecutable,
               let trustedCursorRemoteManager,
-              let trustedCursorBridgeHelper
+              let trustedCursorBridgeHelper,
+              let trustedCursorSDKRuntime,
+              let trustedCursorSDKManifest
         else {
             throw AppError.processFailed(
                 "앱 번들의 Cursor helper를 찾지 못해 Cursor 자격증명을 전달하지 않았습니다.")
@@ -500,6 +519,8 @@ actor SwitchService {
             trustedProvisioningExecutable,
             trustedCursorRemoteManager,
             trustedCursorBridgeHelper,
+            trustedCursorSDKRuntime,
+            trustedCursorSDKManifest,
         ])
         let executableBytes = try Self.validatedProvisioningHelperBytes(
             installed: executable,
@@ -513,6 +534,17 @@ actor SwitchService {
             installed: installedCursorBridgeHelper,
             trusted: trustedCursorBridgeHelper,
             name: "cursor-codex-bridge.mjs")
+        let sdkRuntimeBytes = try Self.validatedProvisioningHelperBytes(
+            installed: installedCursorSDKRuntime,
+            trusted: trustedCursorSDKRuntime,
+            name: "cursor-sdk-runtime.tar.gz",
+            maximumBytes: Self.maximumProvisioningArchiveBytes,
+            allowedModes: [0o600])
+        let sdkManifestBytes = try Self.validatedProvisioningHelperBytes(
+            installed: installedCursorSDKManifest,
+            trusted: trustedCursorSDKManifest,
+            name: "cursor-sdk-runtime.manifest",
+            allowedModes: [0o600])
         // Re-check the signed bundle after opening and reading every resource.
         // A bundle that changed during validation fails closed before the
         // secret-bearing child process is created.
@@ -520,6 +552,8 @@ actor SwitchService {
             trustedProvisioningExecutable,
             trustedCursorRemoteManager,
             trustedCursorBridgeHelper,
+            trustedCursorSDKRuntime,
+            trustedCursorSDKManifest,
         ])
 
         let snapshotDirectory = try Self.makeProvisioningSnapshotDirectory()
@@ -527,13 +561,19 @@ actor SwitchService {
             let snapshotExecutable = snapshotDirectory.appendingPathComponent("gpt-switch")
             let snapshotManager = snapshotDirectory.appendingPathComponent("cursor-remote-manager.mjs")
             let snapshotBridge = snapshotDirectory.appendingPathComponent("cursor-codex-bridge.mjs")
+            let snapshotSDKRuntime = snapshotDirectory.appendingPathComponent("cursor-sdk-runtime.tar.gz")
+            let snapshotSDKManifest = snapshotDirectory.appendingPathComponent("cursor-sdk-runtime.manifest")
             try Self.writeProvisioningSnapshot(executableBytes.data, to: snapshotExecutable)
             try Self.writeProvisioningSnapshot(managerBytes.data, to: snapshotManager)
             try Self.writeProvisioningSnapshot(bridgeBytes.data, to: snapshotBridge)
+            try Self.writeProvisioningSnapshot(sdkRuntimeBytes.data, to: snapshotSDKRuntime)
+            try Self.writeProvisioningSnapshot(sdkManifestBytes.data, to: snapshotSDKManifest)
 
             var environment = Self.provisioningEnvironmentAllowlist()
             environment["GPT_SWITCH_CURSOR_REMOTE_MANAGER"] = snapshotManager.path
             environment["GPT_SWITCH_CURSOR_BRIDGE_HELPER"] = snapshotBridge.path
+            environment["GPT_SWITCH_CURSOR_SDK_RUNTIME"] = snapshotSDKRuntime.path
+            environment["GPT_SWITCH_CURSOR_SDK_MANIFEST"] = snapshotSDKManifest.path
             return TrustedProvisioningLaunch(
                 directory: snapshotDirectory,
                 executable: snapshotExecutable,
@@ -558,15 +598,21 @@ actor SwitchService {
     private nonisolated static func validatedProvisioningHelperBytes(
         installed: URL,
         trusted: URL,
-        name: String) throws -> ProvisioningHelperBytes
+        name: String,
+        maximumBytes: Int = maximumProvisioningHelperBytes,
+        allowedModes: Set<mode_t> = [0o700, 0o755]) throws -> ProvisioningHelperBytes
     {
         let installedData = try securelyReadProvisioningHelper(
             installed,
             allowedOwners: [getuid()],
+            maximumBytes: maximumBytes,
+            allowedModes: allowedModes,
             unsafeMessage: "설치된 \(name)이 안전한 사용자 소유 파일이 아니어서 Cursor 자격증명을 전달하지 않았습니다.")
         let trustedData = try securelyReadProvisioningHelper(
             trusted,
             allowedOwners: [getuid(), 0],
+            maximumBytes: maximumBytes,
+            allowedModes: allowedModes,
             unsafeMessage: "앱 번들의 \(name)이 안전하지 않아 Cursor 자격증명을 전달하지 않았습니다.")
         guard installedData == trustedData else {
             throw AppError.processFailed(
@@ -578,6 +624,8 @@ actor SwitchService {
     private nonisolated static func securelyReadProvisioningHelper(
         _ url: URL,
         allowedOwners: Set<uid_t>,
+        maximumBytes: Int,
+        allowedModes: Set<mode_t>,
         unsafeMessage: String) throws -> Data
     {
         let descriptor = url.path.withCString {
@@ -590,10 +638,10 @@ actor SwitchService {
         guard fstat(descriptor, &before) == 0,
               (before.st_mode & S_IFMT) == S_IFREG,
               allowedOwners.contains(before.st_uid),
-              [mode_t(0o700), mode_t(0o755)].contains(before.st_mode & 0o777),
+              allowedModes.contains(before.st_mode & 0o777),
               before.st_nlink == 1,
               before.st_size > 0,
-              before.st_size <= off_t(maximumProvisioningHelperBytes)
+              before.st_size <= off_t(maximumBytes)
         else {
             throw AppError.processFailed(unsafeMessage)
         }
@@ -610,7 +658,7 @@ actor SwitchService {
                 if errno == EINTR { continue }
                 throw AppError.processFailed(unsafeMessage)
             }
-            guard data.count + count <= maximumProvisioningHelperBytes else {
+            guard data.count + count <= maximumBytes else {
                 throw AppError.processFailed(unsafeMessage)
             }
             data.append(buffer, count: count)
@@ -647,6 +695,8 @@ actor SwitchService {
             resources.appendingPathComponent("gpt-switch").standardizedFileURL.path,
             resources.appendingPathComponent("cursor-remote-manager.mjs").standardizedFileURL.path,
             resources.appendingPathComponent("cursor-codex-bridge.mjs").standardizedFileURL.path,
+            resources.appendingPathComponent("cursor-sdk-runtime.tar.gz").standardizedFileURL.path,
+            resources.appendingPathComponent("cursor-sdk-runtime.manifest").standardizedFileURL.path,
         ])
         guard Set(trustedHelpers.map { $0.standardizedFileURL.path }) == expected else {
             throw AppError.processFailed(

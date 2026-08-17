@@ -32,13 +32,13 @@ private struct SSHDeviceActivationIntent: Codable {
 enum CursorRemoteReconciliationPolicy {
     static func shouldRun(
         providerActive: Bool,
-        hasAPIKey: Bool,
+        hasCredential: Bool,
         hasEnabledDevices: Bool,
         configurationReady: Bool,
         isReadmeDemo: Bool) -> Bool
     {
         providerActive
-            && hasAPIKey
+            && hasCredential
             && hasEnabledDevices
             && configurationReady
             && !isReadmeDemo
@@ -86,7 +86,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var cursorModelCatalog = CursorModelCatalog(cliOutput: "")
     @Published private(set) var isLoadingCursorModels = false
     @Published private(set) var cursorModelCatalogError: String?
-    @Published private(set) var hasCursorAPIKey = false
+    @Published private(set) var cursorSDKCredential: CursorSDKCredential?
     @Published private(set) var cursorAccountState: CursorAccountState = .unknown
     @Published private(set) var cursorMonthlyUsageState: CursorMonthlyUsageState = .unknown
 
@@ -101,7 +101,7 @@ final class AppModel: ObservableObject {
     private let codexConfigService: CodexConfigService
     private let codexCursorModelCatalogService: CodexCursorModelCatalogService
     private let cursorBridgeService: CursorBridgeService
-    private let cursorAPIKeyStore: CursorAPIKeyStoring
+    private let cursorSDKCredentialStore: CursorSDKCredentialStoring
     private let cursorDashboardUsageService: CursorDashboardUsageService
     private let secretStore: SSHSecretStoring
     private let controllerMutationLock = ControllerMutationLock()
@@ -141,13 +141,14 @@ final class AppModel: ObservableObject {
         let cursorBridgePreferencesStore = CursorBridgePreferencesStore()
         let codexConfigService = CodexConfigService()
         let codexCursorModelCatalogService = CodexCursorModelCatalogService()
-        let cursorBridgeService = CursorBridgeService()
-        let cursorAPIKeyStore = SystemCursorAPIKeyStore()
+        let cursorSDKCredentialStore = SystemCursorSDKCredentialStore()
+        let cursorBridgeService = CursorBridgeService(
+            cursorSDKCredentialStore: cursorSDKCredentialStore)
         let cursorDashboardUsageService = CursorDashboardUsageService()
-        let initialCursorAPIKeyState: (isStored: Bool, error: String?) = {
-            guard readmeDemoFixture == nil else { return (false, nil) }
-            do { return (try cursorAPIKeyStore.read() != nil, nil) }
-            catch { return (false, error.localizedDescription) }
+        let initialCursorCredentialState: (credential: CursorSDKCredential?, error: String?) = {
+            guard readmeDemoFixture == nil else { return (nil, nil) }
+            do { return (try cursorSDKCredentialStore.read(), nil) }
+            catch { return (nil, error.localizedDescription) }
         }()
         let initialCursorState: (
             preferences: CursorBridgePreferences,
@@ -167,8 +168,8 @@ final class AppModel: ObservableObject {
                         let loadedPreferences = preferences
                         // New Codex picker entries use a synthetic id so the
                         // bridge can resolve the app's native reasoning/Fast
-                        // controls to an exact Cursor CLI variant. Keep the
-                        // separately stored flat CLI slug as the runtime
+                        // controls to an exact Cursor SDK variant. Keep the
+                        // separately stored flat SDK slug as the runtime
                         // fallback; only migrate legacy activations that still
                         // stored a flat slug in config.toml.
                         if !active.model.hasPrefix("syncbar-cursor/") {
@@ -233,12 +234,12 @@ final class AppModel: ObservableObject {
         self.codexConfigService = codexConfigService
         self.codexCursorModelCatalogService = codexCursorModelCatalogService
         self.cursorBridgeService = cursorBridgeService
-        self.cursorAPIKeyStore = cursorAPIKeyStore
+        self.cursorSDKCredentialStore = cursorSDKCredentialStore
         self.cursorDashboardUsageService = cursorDashboardUsageService
         cursorBridgePreferences = initialCursorState.preferences
         isCursorProviderActive = initialCursorState.providerActive
-        hasCursorAPIKey = initialCursorAPIKeyState.isStored
-        let initialCursorErrors = [initialCursorState.error, initialCursorAPIKeyState.error]
+        cursorSDKCredential = initialCursorCredentialState.credential
+        let initialCursorErrors = [initialCursorState.error, initialCursorCredentialState.error]
             .compactMap { $0 }
         cursorBridgeError = initialCursorErrors.isEmpty
             ? nil
@@ -1443,9 +1444,7 @@ final class AppModel: ObservableObject {
             activationIntentURL = nil
             if isCursorProviderActive {
                 do {
-                    guard let apiKey = try cursorAPIKeyStore.read() else {
-                        throw AppError.processFailed("모델 설정에서 Cursor User API Key를 먼저 저장해 주세요.")
-                    }
+                    let apiKey = try currentCursorSDKCredential().usableAPIKey()
                     let cursorResult = try await provisionCursor(on: id, apiKey: apiKey)
                     banner = AppBanner(
                         style: .success,
@@ -1871,36 +1870,36 @@ final class AppModel: ObservableObject {
         cursorBridgeService.resolvedNodePath
     }
 
-    var cursorResolvedAgentPath: String? {
-        cursorBridgeService.resolvedAgentPath
+    var hasCursorSDKCredential: Bool {
+        cursorSDKCredential?.isExpired() == false
     }
 
-    func refreshCursorModels(agentPath: String? = nil) async {
+    var cursorSDKCredentialIsExpired: Bool {
+        cursorSDKCredential?.isExpired() == true
+    }
+
+    func refreshCursorModels(agentPath _: String? = nil) async {
         guard !isLoadingCursorModels, !isReadmeDemo else { return }
         isLoadingCursorModels = true
         defer { isLoadingCursorModels = false }
         do {
-            let normalizedPath = agentPath?.trimmingCharacters(in: .whitespacesAndNewlines)
             cursorModelCatalog = try await cursorBridgeService.loadModelCatalog(
-                preferredAgentPath: normalizedPath?.isEmpty == false
-                    ? normalizedPath
-                    : cursorBridgePreferences.agentPath)
+                preferredAgentPath: nil)
             cursorModelCatalogError = nil
         } catch {
             cursorModelCatalogError = error.localizedDescription
         }
     }
 
-    func refreshCursorAccount(agentPath: String? = nil) async {
+    func refreshCursorAccount(agentPath _: String? = nil) async {
         guard !isReadmeDemo else { return }
         cursorAccountState = .loading
         do {
-            let normalizedPath = agentPath?.trimmingCharacters(in: .whitespacesAndNewlines)
             let account = try await cursorBridgeService.loadAccount(
-                preferredAgentPath: normalizedPath?.isEmpty == false
-                    ? normalizedPath
-                    : cursorBridgePreferences.agentPath)
+                preferredAgentPath: nil)
             cursorAccountState = account.map(CursorAccountState.signedIn) ?? .signedOut
+        } catch let error as CursorSDKCredentialValidationError where error == .expired {
+            cursorAccountState = .signedOut
         } catch {
             cursorAccountState = .failed(error.localizedDescription)
         }
@@ -2072,7 +2071,9 @@ final class AppModel: ObservableObject {
             var remoteSyncNotice: String?
             var remoteSyncHasFailures = false
             do {
-                if let apiKey = try cursorAPIKeyStore.read() {
+                if let credential = try cursorSDKCredentialStore.read() {
+                    cursorSDKCredential = credential
+                    let apiKey = try credential.usableAPIKey()
                     let syncResult = await provisionCursorOnEnabledDevices(apiKey: apiKey)
                     if !syncResult.failures.isEmpty {
                         remoteSyncHasFailures = true
@@ -2082,7 +2083,7 @@ final class AppModel: ObservableObject {
                     }
                 } else if configuredDevices.contains(where: \.enabled) {
                     remoteSyncHasFailures = true
-                    remoteSyncNotice = " SSH 장치 자동 설치에는 Cursor User API Key 저장이 필요합니다."
+                    remoteSyncNotice = " SSH 장치 자동 설치에는 Cursor 구독 로그인이 필요합니다."
                 }
             } catch {
                 remoteSyncHasFailures = true
@@ -2136,7 +2137,7 @@ final class AppModel: ObservableObject {
                 catalogCleanupWarning = error.localizedDescription
             }
 
-            // The remote provider owns a copy of the Cursor API key in its
+            // The remote provider owns a copy of the SDK-issued credential in its
             // private runtime. Removing only the local provider would leave
             // SSH Codex sessions able to keep consuming the Cursor account,
             // so deprovision every configured device as part of the same user
@@ -2178,7 +2179,7 @@ final class AppModel: ObservableObject {
         cursorBridgeStatus = await cursorBridgeService.start(preferences: cursorBridgePreferences)
         cursorBridgeError = cursorBridgeStatus.detail
         if cursorBridgeStatus.isHealthy {
-            banner = AppBanner(style: .success, message: "Cursor CLI 브리지 연결이 정상입니다.")
+            banner = AppBanner(style: .success, message: "Cursor SDK 브리지 연결이 정상입니다.")
         } else {
             banner = AppBanner(
                 style: .warning,
@@ -2187,50 +2188,88 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func saveCursorAPIKeyAndSync(_ apiKey: String) async -> Bool {
+    func loginCursorSubscription() async -> Bool {
         guard cursorManagementCanBegin else { return false }
         isManagingCursorProvider = true
         defer { isManagingCursorProvider = false }
         do {
-            try cursorAPIKeyStore.save(apiKey)
-            hasCursorAPIKey = true
+            let credential = try await cursorBridgeService.loginToCursorSubscription()
+            try cursorSDKCredentialStore.save(credential)
+            cursorSDKCredential = credential
+            var warnings: [String] = []
+
+            do {
+                let account = try await cursorBridgeService.loadAccount(preferredAgentPath: nil)
+                cursorAccountState = account.map(CursorAccountState.signedIn) ?? .signedOut
+            } catch {
+                cursorAccountState = credential.email
+                    .flatMap(CursorAccount.init(email:))
+                    .map(CursorAccountState.signedIn) ?? .failed(error.localizedDescription)
+                warnings.append("계정 확인 실패: \(error.localizedDescription)")
+            }
+            do {
+                cursorModelCatalog = try await cursorBridgeService.loadModelCatalog(
+                    preferredAgentPath: nil)
+                cursorModelCatalogError = nil
+            } catch {
+                cursorModelCatalogError = error.localizedDescription
+                warnings.append("모델 목록 확인 실패: \(error.localizedDescription)")
+            }
+
             if isCursorProviderActive {
-                let syncResult = await provisionCursorOnEnabledDevices(apiKey: apiKey)
+                cursorBridgeStatus = await cursorBridgeService.start(
+                    preferences: cursorBridgePreferences,
+                    forceRestart: true)
+                cursorBridgeError = cursorBridgeStatus.detail
+                if !cursorBridgeStatus.isHealthy {
+                    warnings.append(cursorBridgeStatusMessage(cursorBridgeStatus))
+                }
+                let syncResult = await provisionCursorOnEnabledDevices(apiKey: credential.apiKey)
                 if !syncResult.failures.isEmpty {
-                    banner = AppBanner(
-                        style: .warning,
-                        message: "API key는 Keychain에 저장했지만 일부 SSH 장치 동기화에 실패했습니다: \(syncResult.failures.joined(separator: ", "))")
-                    return true
+                    warnings.append(
+                        "일부 SSH 장치 동기화 실패: \(syncResult.failures.joined(separator: ", "))")
                 }
                 if !syncResult.reloadPendingDeviceNames.isEmpty {
-                    banner = AppBanner(
-                        style: .success,
-                        message: "Cursor API key와 provider를 SSH 장치에 동기화했습니다. 원격 Codex 앱은 다음 재연결부터 반영됩니다: \(syncResult.reloadPendingDeviceNames.joined(separator: ", ")).")
-                    return true
+                    warnings.append(
+                        "원격 Codex 앱 재연결 필요: \(syncResult.reloadPendingDeviceNames.joined(separator: ", "))")
                 }
             }
             banner = AppBanner(
-                style: .success,
-                message: isCursorProviderActive
-                    ? "Cursor API key를 Keychain에 저장하고 활성 SSH 장치에 동기화했습니다."
-                    : "Cursor API key를 Keychain에 저장했습니다. provider를 켜면 SSH 장치에도 동기화됩니다.")
+                style: warnings.isEmpty ? .success : .warning,
+                message: warnings.isEmpty
+                    ? (isCursorProviderActive
+                        ? "Cursor 구독 로그인과 활성 SSH 장치 동기화를 완료했습니다."
+                        : "Cursor 구독 로그인을 완료했습니다. provider를 켜면 SSH 장치에도 동기화됩니다.")
+                    : "Cursor 구독 로그인은 저장했지만 확인할 항목이 있습니다: \(warnings.joined(separator: " "))")
             return true
         } catch {
-            banner = AppBanner(style: .error, message: "Cursor API key 저장 실패: \(error.localizedDescription)")
+            banner = AppBanner(
+                style: .error,
+                message: "Cursor 구독 로그인 실패: \(error.localizedDescription)")
             return false
         }
     }
 
-    func deleteCursorAPIKey() {
+    func deleteCursorSubscriptionCredential() async {
         guard cursorManagementCanBegin else { return }
+        isManagingCursorProvider = true
+        defer { isManagingCursorProvider = false }
         do {
-            try cursorAPIKeyStore.delete()
-            hasCursorAPIKey = false
+            if isCursorProviderActive {
+                await cursorBridgeService.stop()
+                cursorBridgeStatus = .unauthenticated
+            }
+            try cursorSDKCredentialStore.delete()
+            cursorSDKCredential = nil
+            cursorAccountState = .signedOut
+            cursorModelCatalog = CursorModelCatalog(cliOutput: "")
             banner = AppBanner(
                 style: .success,
-                message: "이 Mac의 Cursor API key를 삭제했습니다. 원격 장치의 0600 저장본은 남아 있으므로 ‘이전 Codex 모델로 복구’로 별도 제거해 주세요.")
+                message: "이 Mac의 Cursor 구독 자격증명을 삭제했습니다. 원격 장치의 0600 저장본은 남아 있으므로 ‘이전 Codex 모델로 복구’로 별도 제거해 주세요.")
         } catch {
-            banner = AppBanner(style: .error, message: "Cursor API key 삭제 실패: \(error.localizedDescription)")
+            banner = AppBanner(
+                style: .error,
+                message: "Cursor 구독 자격증명 삭제 실패: \(error.localizedDescription)")
         }
     }
 
@@ -2254,17 +2293,10 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            try await cursorBridgeService.logout(
-                preferredAgentPath: cursorBridgePreferences.agentPath)
+            try cursorSDKCredentialStore.delete()
+            cursorSDKCredential = nil
         } catch {
-            warnings.append(error.localizedDescription)
-        }
-
-        do {
-            try cursorAPIKeyStore.delete()
-            hasCursorAPIKey = false
-        } catch {
-            warnings.append("Keychain API key 삭제 실패: \(error.localizedDescription)")
+            warnings.append("Keychain SDK 자격증명 삭제 실패: \(error.localizedDescription)")
         }
 
         await cursorDashboardUsageService.clearSession()
@@ -2274,26 +2306,15 @@ final class AppModel: ObservableObject {
 
         cursorModelCatalog = CursorModelCatalog(cliOutput: "")
         cursorModelCatalogError = nil
-        do {
-            let account = try await cursorBridgeService.loadAccount(
-                preferredAgentPath: cursorBridgePreferences.agentPath)
-            cursorAccountState = account.map(CursorAccountState.signedIn) ?? .signedOut
-        } catch {
-            cursorAccountState = .failed(error.localizedDescription)
-            warnings.append("로그아웃 상태 재확인 실패: \(error.localizedDescription)")
-        }
-        if cursorAccountState.email == nil {
-            cursorBridgeStatus = .unauthenticated
-            cursorBridgeError = nil
-        } else {
-            warnings.append("Cursor CLI 계정이 아직 로그인 상태입니다.")
-        }
+        cursorAccountState = .signedOut
+        cursorBridgeStatus = .unauthenticated
+        cursorBridgeError = nil
 
         banner = AppBanner(
             style: warnings.isEmpty ? .success : .warning,
             message: warnings.isEmpty
-                ? "이 Mac과 등록된 SSH 장치에서 Cursor 계정 연결과 사용량 로그인 세션을 삭제했습니다. Cursor.com 웹 계정은 유지됩니다."
-                : "Cursor 계정 연결을 일부 정리했지만 확인이 필요합니다: \(warnings.joined(separator: " "))")
+                ? "이 Mac과 등록된 SSH 장치에서 Cursor SDK 구독 연결과 사용량 로그인 세션을 삭제했습니다. Cursor.com 웹 계정은 유지됩니다."
+                : "Cursor SDK 구독 연결을 일부 정리했지만 확인이 필요합니다: \(warnings.joined(separator: " "))")
     }
 
     func syncCursorProviderToSSHDevices() async {
@@ -2305,9 +2326,7 @@ final class AppModel: ObservableObject {
         isManagingCursorProvider = true
         defer { isManagingCursorProvider = false }
         do {
-            guard let apiKey = try cursorAPIKeyStore.read() else {
-                throw AppError.processFailed("Cursor User API Key를 먼저 저장해 주세요.")
-            }
+            let apiKey = try currentCursorSDKCredential().usableAPIKey()
             let enabledDevices = configuredDevices.filter(\.enabled)
             guard !enabledDevices.isEmpty else {
                 banner = AppBanner(style: .warning, message: "활성화된 SSH 장치가 없습니다.")
@@ -2401,7 +2420,7 @@ final class AppModel: ObservableObject {
     private func scheduleCursorRemoteReconciliationIfNeeded() {
         guard CursorRemoteReconciliationPolicy.shouldRun(
             providerActive: isCursorProviderActive,
-            hasAPIKey: hasCursorAPIKey,
+            hasCredential: hasCursorSDKCredential,
             hasEnabledDevices: configuredDevices.contains(where: \.enabled),
             configurationReady: configurationError == nil
                 && !profileManagementRecoveryNeeded
@@ -2424,10 +2443,12 @@ final class AppModel: ObservableObject {
         defer { isManagingCursorProvider = false }
 
         do {
-            guard let apiKey = try cursorAPIKeyStore.read() else {
-                hasCursorAPIKey = false
+            guard let credential = try cursorSDKCredentialStore.read() else {
+                cursorSDKCredential = nil
                 return
             }
+            cursorSDKCredential = credential
+            let apiKey = try credential.usableAPIKey()
             cursorModelCatalog = try await cursorBridgeService.loadModelCatalog(
                 preferredAgentPath: cursorBridgePreferences.agentPath)
             cursorModelCatalogError = nil
@@ -2452,6 +2473,16 @@ final class AppModel: ObservableObject {
         return failures
     }
 
+    private func currentCursorSDKCredential() throws -> CursorSDKCredential {
+        guard let credential = try cursorSDKCredentialStore.read() else {
+            cursorSDKCredential = nil
+            throw AppError.processFailed("Cursor 구독으로 먼저 로그인해 주세요.")
+        }
+        _ = try credential.usableAPIKey()
+        cursorSDKCredential = credential
+        return credential
+    }
+
     private var cursorManagementCanBegin: Bool {
         !isManagingCursorProvider
             && !isReadmeDemo
@@ -2463,17 +2494,6 @@ final class AppModel: ObservableObject {
             && !profileManagementRecoveryNeeded
     }
 
-    func copyCursorLoginCommand() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("cursor-agent login", forType: .string)
-        showTransientBanner(style: .success, message: "cursor-agent login 명령을 복사했습니다.")
-    }
-
-    func openCursorCLIInstallationGuide() {
-        guard let url = URL(string: "https://cursor.com/docs/cli/installation") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     func openCursorUsageDashboard() {
         guard let url = URL(string: "https://cursor.com/dashboard/spending") else { return }
         NSWorkspace.shared.open(url)
@@ -2482,11 +2502,11 @@ final class AppModel: ObservableObject {
     private func cursorBridgeStatusMessage(_ status: CursorBridgeStatus) -> String {
         switch status {
         case .missingNode:
-            "Node.js를 찾지 못했습니다. Node.js를 설치한 뒤 다시 확인해 주세요."
+            "Cursor SDK를 실행할 Node.js 22.13 이상을 찾지 못했습니다."
         case .missingAgent:
-            "Cursor CLI를 찾지 못했습니다. 설치 후 cursor-agent login을 실행해 주세요."
+            "이 버전에서는 사용하지 않는 Cursor CLI 상태입니다. 앱 helper를 다시 설치해 주세요."
         case .unauthenticated:
-            "Cursor CLI 로그인이 필요합니다. 터미널에서 cursor-agent login을 실행해 주세요."
+            "Cursor 구독 로그인이 필요하거나 SDK 자격증명이 만료되었습니다."
         case .portConflict:
             "선택한 localhost 포트를 다른 프로세스가 사용 중입니다."
         case let .failed(message):
@@ -2496,7 +2516,7 @@ final class AppModel: ObservableObject {
         case .starting:
             "Cursor 브리지를 시작하고 있습니다."
         case .healthy:
-            "Cursor CLI 브리지 연결이 정상입니다."
+            "Cursor SDK 브리지 연결이 정상입니다."
         }
     }
 

@@ -929,23 +929,40 @@ function discoveredModelSlugs(output) {
   return result;
 }
 
-async function validateCursorAgent(runtime, environment) {
+async function validateCursorSDK(runtime, environment) {
   const childEnvironment = cursorRuntimeEnvironment(runtime, environment);
-  const statusResult = await boundedChild(runtime.agentPath, ["status"], {
+  const statusResult = await boundedChild(runtime.nodePath, [
+    runtime.bridgePath,
+    "--sdk-status",
+  ], {
     env: childEnvironment,
     cwd: runtime.home,
     timeoutMs: 15_000,
   });
-  if (statusResult.code !== 0) fail("Cursor CLI authentication validation failed", "cursor_unauthenticated");
-  const modelsResult = await boundedChild(runtime.agentPath, ["--list-models"], {
+  if (statusResult.code !== 0) {
+    fail("Cursor SDK credential validation failed", "cursor_unauthenticated");
+  }
+  let account;
+  try { account = JSON.parse(statusResult.stdout.toString("utf8")); }
+  catch { fail("Cursor SDK account response is invalid", "cursor_unauthenticated"); }
+  if (account?.schema_version !== 1 ||
+      !(account.email === null || account.email === undefined || typeof account.email === "string")) {
+    fail("Cursor SDK account response is invalid", "cursor_unauthenticated");
+  }
+  const modelsResult = await boundedChild(runtime.nodePath, [
+    runtime.bridgePath,
+    "--sdk-list-models",
+  ], {
     env: childEnvironment,
     cwd: runtime.home,
     timeoutMs: 20_000,
   });
-  if (modelsResult.code !== 0) fail("Cursor CLI model validation failed", "cursor_models_failed");
+  if (modelsResult.code !== 0) {
+    fail("Cursor SDK model validation failed", "cursor_models_failed");
+  }
   const available = discoveredModelSlugs(modelsResult.stdout.toString("utf8"));
   if (runtime.models.some((model) => !available.has(model))) {
-    fail("Cursor CLI did not report every configured model", "cursor_model_mismatch");
+    fail("Cursor SDK did not report every configured model", "cursor_model_mismatch");
   }
 }
 
@@ -1023,6 +1040,34 @@ async function installCursorAgent(paths, environment) {
   if (result.code !== 0) fail("The official Cursor installer failed", "installer_failed");
 }
 
+async function resolvedCursorSDKNode(agentPath, paths, environment) {
+  const explicit = environment.CURSOR_REMOTE_NODE_PATH;
+  const candidates = explicit
+    ? [explicit]
+    : [path.join(path.dirname(agentPath), "node"), process.execPath];
+  for (const candidate of candidates) {
+    let executable;
+    try { executable = await executablePath(candidate, "Node"); }
+    catch (error) {
+      if (explicit || !(error instanceof RemoteManagerError) || error.code !== "missing_executable") {
+        throw error;
+      }
+      continue;
+    }
+    const result = await boundedChild(executable, [
+      "-e",
+      "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)",
+    ], {
+      env: baseChildEnvironment(environment),
+      cwd: paths.home,
+      timeoutMs: 5_000,
+    });
+    if (result.code === 0) return executable;
+    if (explicit) fail("Cursor SDK requires Node.js 22.13 or newer", "node_too_old");
+  }
+  fail("Cursor SDK requires Node.js 22.13 or newer", "node_too_old");
+}
+
 async function resolvedRuntime(input, paths, environment, options = {}) {
   const requestedAgent = environment.CURSOR_REMOTE_AGENT_PATH ?? paths.defaultAgent;
   let agentPath;
@@ -1037,7 +1082,7 @@ async function resolvedRuntime(input, paths, environment, options = {}) {
     environment.CURSOR_REMOTE_BRIDGE_PATH ?? paths.defaultBridge,
     "Cursor bridge",
   );
-  const nodePath = await executablePath(environment.CURSOR_REMOTE_NODE_PATH ?? process.execPath, "Node");
+  const nodePath = await resolvedCursorSDKNode(agentPath, paths, environment);
   const managerPath = await regularFilePath(options.managerPath ?? thisFile, "Cursor remote manager");
   const { catalogData: _catalogData, ...runtimeInput } = input;
   return {
@@ -1590,7 +1635,7 @@ export async function provision(inputValue, options = {}) {
 
       await ensureCursorXDGDirectories(paths);
       const runtime = await resolvedRuntime(input, paths, environment, options);
-      await validateCursorAgent(runtime, environment);
+      await validateCursorSDK(runtime, environment);
       if (!Object.hasOwn(runtime.modelRoutes, selectedConfigModel) &&
           !runtime.nativeModels.includes(selectedConfigModel)) {
         selectedConfigModel = runtime.codexModel;
@@ -1726,7 +1771,8 @@ function healthRequest(runtime, timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS) {
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
           const healthy = response.statusCode === 200 && body.status === "ok" &&
-            body.protocol === "responses" && body.model === runtime.model && Number.isInteger(body.pid);
+            body.protocol === "responses" && body.cursor_backend === "sdk" &&
+            body.model === runtime.model && Number.isInteger(body.pid);
           resolve({ healthy, pid: healthy ? body.pid : null });
         } catch {
           resolve({ healthy: false, pid: null });
@@ -1755,6 +1801,7 @@ function detachedBridgeEnvironment(runtime, base = process.env) {
     // isolated empty workspace, ask mode, deny-all permissions, no MCP, and
     // fail-closed native-tool event handling.
     SYNCBAR_CURSOR_SANDBOX_MODE: "disabled",
+    SYNCBAR_CURSOR_BACKEND: "sdk",
   };
   if (runtime.modelRoutes && Object.keys(runtime.modelRoutes).length > 0) {
     environment.SYNCBAR_CURSOR_MODEL_ROUTES_JSON = JSON.stringify(runtime.modelRoutes);

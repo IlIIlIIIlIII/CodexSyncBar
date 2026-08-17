@@ -6,15 +6,15 @@ import Foundation
 final class CursorBridgeService {
     private(set) var status: CursorBridgeStatus = .stopped
     private(set) var resolvedNodePath: String?
-    private(set) var resolvedAgentPath: String?
 
     private let home: URL
     private let fileManager: FileManager
     private let helperURL: URL
+    private let cursorSDKCredentialStore: CursorSDKCredentialStoring
     private var process: Process?
     private var activePreferences: CursorBridgePreferences?
     private var cachedModelCatalog: CursorModelCatalog?
-    private var cachedModelCatalogAgentPath: String?
+    private var cachedModelCatalogCredentialExpiry: Int64?
     private var stderrBuffer = Data()
     private var terminationObserver: NSObjectProtocol?
     var onUnexpectedStatusChange: ((CursorBridgeStatus) -> Void)?
@@ -22,10 +22,12 @@ final class CursorBridgeService {
     init(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         fileManager: FileManager = .default,
-        helperURL: URL? = nil)
+        helperURL: URL? = nil,
+        cursorSDKCredentialStore: CursorSDKCredentialStoring = SystemCursorSDKCredentialStore())
     {
         self.home = home
         self.fileManager = fileManager
+        self.cursorSDKCredentialStore = cursorSDKCredentialStore
         self.helperURL = helperURL ?? home.appendingPathComponent(
             ".local/lib/gpt-switch/cursor-codex-bridge.mjs")
         terminationObserver = NotificationCenter.default.addObserver(
@@ -60,109 +62,90 @@ final class CursorBridgeService {
             }
             await stop()
         }
-        guard resolveNode() != nil else {
+        guard resolveNode(requiringCursorSDK: true) != nil else {
             status = .missingNode
             return status
         }
-        guard resolveAgent(preferredPath: preferences.agentPath) != nil else {
-            status = .missingAgent
+        do {
+            guard let credential = try cursorSDKCredentialStore.read() else {
+                status = .unauthenticated
+                return status
+            }
+            _ = try credential.usableAPIKey()
+            try requireSafeHelper()
+        } catch let error as CursorSDKCredentialValidationError where error == .expired {
+            status = .unauthenticated
+            return status
+        } catch {
+            status = .failed(error.localizedDescription)
             return status
         }
         status = .stopped
         return status
     }
 
-    func loadModelCatalog(preferredAgentPath: String?) async throws -> CursorModelCatalog {
-        guard let agent = resolveAgent(preferredPath: preferredAgentPath) else {
-            throw AppError.processFailed("Cursor CLI를 찾지 못했습니다.")
-        }
-
-        let child = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        child.executableURL = agent
-        child.arguments = ["--list-models"]
-        var environment = ProcessInfo.processInfo.environment
-        environment["NO_COLOR"] = "1"
-        child.environment = environment
-        child.standardInput = FileHandle.nullDevice
-        child.standardOutput = stdout
-        child.standardError = stderr
-        do {
-            try child.run()
-        } catch {
-            throw AppError.processFailed(
-                "Cursor 모델 목록을 실행하지 못했습니다: \(error.localizedDescription)")
-        }
-        let stdoutRead = Task.detached(priority: .userInitiated) {
-            stdout.fileHandleForReading.readDataToEndOfFile()
-        }
-        let stderrRead = Task.detached(priority: .userInitiated) {
-            stderr.fileHandleForReading.readDataToEndOfFile()
-        }
-
-        for _ in 0 ..< 150 where child.isRunning {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-        if child.isRunning {
-            child.terminate()
-            for _ in 0 ..< 10 where child.isRunning {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            if child.isRunning { kill(child.processIdentifier, SIGKILL) }
-            _ = await stdoutRead.value
-            _ = await stderrRead.value
-            throw AppError.processFailed("Cursor 모델 목록 확인 시간이 초과되었습니다.")
-        }
-
-        let output = await stdoutRead.value
-        let errorOutput = await stderrRead.value
-        guard child.terminationStatus == 0 else {
-            let metadata = String(decoding: errorOutput.prefix(1_024), as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let suffix = metadata.isEmpty ? "" : ": \(metadata)"
-            throw AppError.processFailed("Cursor 모델 목록을 가져오지 못했습니다\(suffix)")
-        }
-
-        guard output.count <= 256 * 1_024 else {
-            throw AppError.processFailed("Cursor 모델 목록이 허용 크기를 초과했습니다.")
-        }
-        let catalog = CursorModelCatalog(cliOutput: String(decoding: output, as: UTF8.self))
+    func loadModelCatalog(preferredAgentPath _: String?) async throws -> CursorModelCatalog {
+        let credential = try requiredSDKCredential()
+        let result = try await runSDKCommand(
+            argument: "--sdk-list-models",
+            apiKey: credential.apiKey,
+            timeoutIterations: 300,
+            maximumOutputBytes: 256 * 1_024)
+        let catalog = CursorModelCatalog(cliOutput: String(decoding: result.stdout, as: UTF8.self))
         guard !catalog.variants.isEmpty else {
-            throw AppError.processFailed("Cursor CLI가 사용 가능한 모델을 반환하지 않았습니다.")
+            throw AppError.processFailed("Cursor SDK가 사용 가능한 모델을 반환하지 않았습니다.")
         }
         guard catalog.variants.count <= 512 else {
             throw AppError.processFailed("Cursor 모델 수가 안전 한도(512개)를 초과했습니다.")
         }
         cachedModelCatalog = catalog
-        cachedModelCatalogAgentPath = agent.path
+        cachedModelCatalogCredentialExpiry = credential.apiKeyExpiresAtMilliseconds
         return catalog
     }
 
-    func loadAccount(preferredAgentPath: String?) async throws -> CursorCLIAccount? {
-        guard let agent = resolveAgent(preferredPath: preferredAgentPath) else {
-            throw AppError.processFailed("Cursor CLI를 찾지 못했습니다.")
+    func loadAccount(preferredAgentPath _: String?) async throws -> CursorAccount? {
+        struct AccountResult: Decodable {
+            let schemaVersion: Int
+            let email: String?
+
+            enum CodingKeys: String, CodingKey {
+                case schemaVersion = "schema_version"
+                case email
+            }
         }
-        let result = try await runAgentCommand(agent: agent, arguments: ["status"])
-        guard result.exitStatus == 0 else { return nil }
-        guard let account = CursorCLIAccount(statusOutput: result.output) else {
-            throw AppError.processFailed("Cursor CLI 로그인 상태에서 계정 이메일을 확인하지 못했습니다.")
+
+        guard let stored = try cursorSDKCredentialStore.read() else { return nil }
+        let apiKey = try stored.usableAPIKey()
+        let result = try await runSDKCommand(
+            argument: "--sdk-status",
+            apiKey: apiKey,
+            timeoutIterations: 150,
+            maximumOutputBytes: 8 * 1_024)
+        guard let payload = try? JSONDecoder().decode(AccountResult.self, from: result.stdout),
+              payload.schemaVersion == 1,
+              let email = payload.email ?? stored.email,
+              let account = CursorAccount(email: email)
+        else {
+            throw AppError.processFailed("Cursor SDK 로그인 계정 이메일을 확인하지 못했습니다.")
         }
         return account
     }
 
-    func logout(preferredAgentPath: String?) async throws {
-        guard let agent = resolveAgent(preferredPath: preferredAgentPath) else {
-            throw AppError.processFailed("Cursor CLI를 찾지 못했습니다.")
+    func loginToCursorSubscription() async throws -> CursorSDKCredential {
+        guard let node = resolveNode(requiringCursorSDK: true) else {
+            throw AppError.processFailed("Cursor SDK를 실행할 Node.js 22.13 이상을 찾지 못했습니다.")
         }
-        let result = try await runAgentCommand(agent: agent, arguments: ["logout"])
-        guard result.exitStatus == 0 else {
-            let metadata = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            let suffix = metadata.isEmpty ? "" : ": \(String(metadata.prefix(512)))"
-            throw AppError.processFailed("Cursor CLI 로그아웃에 실패했습니다\(suffix)")
-        }
+        try requireSafeHelper()
+        let result = try await runSDKCommand(
+            node: node,
+            argument: "--sdk-login",
+            apiKey: nil,
+            timeoutIterations: 6_000,
+            maximumOutputBytes: CursorSDKCredential.maximumEncodedBytes)
+        let credential = try CursorSDKCredential(loginResultData: result.stdout)
         cachedModelCatalog = nil
-        cachedModelCatalogAgentPath = nil
+        cachedModelCatalogCredentialExpiry = nil
+        return credential
     }
 
     @discardableResult
@@ -190,25 +173,34 @@ final class CursorBridgeService {
         if process != nil { await stop() }
 
         status = .starting
-        guard let node = resolveNode() else {
-            status = .missingNode
-            return status
-        }
-        guard let agent = resolveAgent(preferredPath: preferences.agentPath) else {
-            status = .missingAgent
-            return status
-        }
-        guard await checkAuthentication(agent: agent) else {
+        let credential: CursorSDKCredential
+        do {
+            guard let stored = try cursorSDKCredentialStore.read() else {
+                status = .unauthenticated
+                return status
+            }
+            _ = try stored.usableAPIKey()
+            credential = stored
+        } catch let error as CursorSDKCredentialValidationError where error == .expired {
             status = .unauthenticated
+            return status
+        } catch {
+            status = .failed("Cursor SDK 자격증명을 Keychain에서 읽지 못했습니다: \(error.localizedDescription)")
+            return status
+        }
+        guard let node = resolveNode(requiringCursorSDK: true) else {
+            status = .missingNode
             return status
         }
         let modelCatalog: CursorModelCatalog
         do {
             let accountCatalog: CursorModelCatalog
-            if cachedModelCatalogAgentPath == agent.path, let cachedModelCatalog {
+            if cachedModelCatalogCredentialExpiry == credential.apiKeyExpiresAtMilliseconds,
+               let cachedModelCatalog
+            {
                 accountCatalog = cachedModelCatalog
             } else {
-                accountCatalog = try await loadModelCatalog(preferredAgentPath: agent.path)
+                accountCatalog = try await loadModelCatalog(preferredAgentPath: nil)
             }
             modelCatalog = try accountCatalog.exposingCodexModelIDs(
                 preferences.exposedModelIDs)
@@ -236,7 +228,6 @@ final class CursorBridgeService {
             helperURL.path,
             "--host", "127.0.0.1",
             "--port", String(preferences.port),
-            "--agent", agent.path,
             "--model", preferences.model,
             "--workspace", bridgeWorkspaceURL.path,
             "--parent-pid", String(getpid()),
@@ -248,7 +239,8 @@ final class CursorBridgeService {
                 inheriting: ProcessInfo.processInfo.environment,
                 bridgeToken: preferences.bridgeToken,
                 modelCatalog: modelCatalog,
-                nativeModelSlugs: nativeModelSlugs)
+                nativeModelSlugs: nativeModelSlugs,
+                cursorAPIKey: credential.apiKey)
         } catch {
             status = .failed("Cursor 모델 설정을 만들지 못했습니다: \(error.localizedDescription)")
             return status
@@ -344,7 +336,8 @@ final class CursorBridgeService {
         inheriting base: [String: String],
         bridgeToken: String,
         modelCatalog: CursorModelCatalog,
-        nativeModelSlugs: [String] = []) throws -> [String: String]
+        nativeModelSlugs: [String] = [],
+        cursorAPIKey: String? = nil) throws -> [String: String]
     {
         var environment = base
         environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"] = bridgeToken
@@ -355,6 +348,11 @@ final class CursorBridgeService {
             try modelCatalog.acpModelParametersJSON()
         environment["SYNCBAR_CURSOR_MODEL_ROUTES_JSON"] =
             try modelCatalog.cursorRouteJSON()
+        environment["SYNCBAR_CURSOR_BACKEND"] = "sdk"
+        environment.removeValue(forKey: "CURSOR_API_KEY")
+        if let cursorAPIKey {
+            environment["CURSOR_API_KEY"] = try CursorAPIKeyValidator.validated(cursorAPIKey)
+        }
         if nativeModelSlugs.isEmpty {
             environment.removeValue(forKey: "SYNCBAR_NATIVE_MODELS_JSON")
         } else {
@@ -418,61 +416,78 @@ final class CursorBridgeService {
             isDirectory: true)
     }
 
-    private func resolveNode() -> URL? {
-        if let resolvedNodePath { return URL(fileURLWithPath: resolvedNodePath) }
-        let candidates = [
+    private func resolveNode(requiringCursorSDK: Bool = false) -> URL?
+    {
+        if let resolvedNodePath {
+            let cached = URL(fileURLWithPath: resolvedNodePath)
+            if !requiringCursorSDK || nodeSupportsCursorSDK(cached) { return cached }
+            self.resolvedNodePath = nil
+        }
+        var candidates: [String] = []
+        candidates.append(contentsOf: [
+            "/Applications/Cursor.app/Contents/Resources/app/resources/helpers/node",
             "/opt/homebrew/bin/node",
             "/usr/local/bin/node",
             home.appendingPathComponent(".local/bin/node").path,
             "/usr/bin/node",
-        ]
-        guard let result = firstExecutable(candidates) else { return nil }
+        ])
+        let versions = home.appendingPathComponent(
+            ".local/share/cursor-agent/versions", isDirectory: true)
+        if let entries = try? fileManager.contentsOfDirectory(
+            at: versions,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles])
+        {
+            candidates.insert(
+                contentsOf: entries.sorted { $0.lastPathComponent > $1.lastPathComponent }
+                    .map { $0.appendingPathComponent("node").path },
+                at: min(1, candidates.count))
+        }
+        guard let result = firstExecutable(candidates, requiringCursorSDK: requiringCursorSDK) else {
+            return nil
+        }
         resolvedNodePath = result.path
         return result
     }
 
-    private func resolveAgent(preferredPath: String?) -> URL? {
-        if let preferredPath, resolvedAgentPath == preferredPath,
-           let result = firstExecutable([preferredPath])
-        {
-            return result
-        }
-        let candidates = [
-            preferredPath,
-            home.appendingPathComponent(".local/bin/cursor-agent").path,
-            home.appendingPathComponent(".cursor/bin/cursor-agent").path,
-            "/opt/homebrew/bin/cursor-agent",
-            "/usr/local/bin/cursor-agent",
-            "/Applications/Cursor.app/Contents/Resources/app/bin/cursor-agent",
-            home.appendingPathComponent(".local/bin/agent").path,
-            home.appendingPathComponent(".cursor/bin/agent").path,
-            "/opt/homebrew/bin/agent",
-            "/usr/local/bin/agent",
-            "/Applications/Cursor.app/Contents/Resources/app/bin/agent",
-        ].compactMap { $0 }
-        guard let result = firstExecutable(candidates) else {
-            resolvedAgentPath = nil
-            return nil
-        }
-        resolvedAgentPath = result.path
-        return result
+    private func nodeSupportsCursorSDK(_ node: URL) -> Bool {
+        let process = Process()
+        process.executableURL = node
+        process.arguments = [
+            "-e",
+            "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)",
+        ]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
-    private func firstExecutable(_ candidates: [String]) -> URL? {
+    private func firstExecutable(
+        _ candidates: [String],
+        requiringCursorSDK: Bool = false) -> URL?
+    {
         for candidate in candidates {
             let url = URL(fileURLWithPath: candidate).resolvingSymlinksInPath()
             guard fileManager.isExecutableFile(atPath: url.path),
                   let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
                   values.isRegularFile == true
             else { continue }
+            if requiringCursorSDK, !nodeSupportsCursorSDK(url) { continue }
             return url
         }
         return nil
     }
 
     private func requireSafeHelper() throws {
-        let values = try helperURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
-        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+        var info = stat()
+        guard helperURL.path.withCString({ lstat($0, &info) }) == 0,
+              (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_uid == getuid(),
+              (info.st_mode & 0o022) == 0
+        else {
             throw AppError.processFailed("Cursor 브리지 helper가 안전한 일반 파일이 아닙니다.")
         }
     }
@@ -493,6 +508,7 @@ final class CursorBridgeService {
             else { return false }
             return object["status"] as? String == "ok" &&
                 object["protocol"] as? String == "responses" &&
+                object["cursor_backend"] as? String == "sdk" &&
                 object["model"] as? String == preferences.model &&
                 (object["pid"] as? NSNumber)?.int32Value == expectedPID
         } catch {
@@ -500,69 +516,91 @@ final class CursorBridgeService {
         }
     }
 
-    private func checkAuthentication(agent: URL) async -> Bool {
-        let child = Process()
-        let output = Pipe()
-        child.executableURL = agent
-        child.arguments = ["status"]
-        child.standardInput = FileHandle.nullDevice
-        child.standardOutput = output
-        child.standardError = output
-        do {
-            try child.run()
-        } catch {
-            return false
+    private func requiredSDKCredential() throws -> CursorSDKCredential {
+        guard let credential = try cursorSDKCredentialStore.read() else {
+            throw AppError.processFailed("Cursor 구독으로 먼저 로그인해 주세요.")
         }
-        for _ in 0 ..< 80 where child.isRunning {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-        if child.isRunning {
-            child.terminate()
-            return false
-        }
-        return child.terminationStatus == 0
+        _ = try credential.usableAPIKey()
+        return credential
     }
 
-    private func runAgentCommand(
-        agent: URL,
-        arguments: [String]) async throws -> (exitStatus: Int32, output: String)
+    private func runSDKCommand(
+        node proposedNode: URL? = nil,
+        argument: String,
+        apiKey: String?,
+        timeoutIterations: Int,
+        maximumOutputBytes: Int) async throws -> (stdout: Data, stderr: Data)
     {
+        guard ["--sdk-login", "--sdk-status", "--sdk-list-models"].contains(argument),
+              timeoutIterations > 0,
+              maximumOutputBytes > 0,
+              let node = proposedNode ?? resolveNode(requiringCursorSDK: true)
+        else {
+            throw AppError.processFailed("Cursor SDK 명령 설정이 올바르지 않습니다.")
+        }
+        try requireSafeHelper()
         let child = Process()
-        let output = Pipe()
-        child.executableURL = agent
-        child.arguments = arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        child.executableURL = node
+        child.arguments = [helperURL.path, argument]
         var environment = ProcessInfo.processInfo.environment
         environment["NO_COLOR"] = "1"
+        environment.removeValue(forKey: "CURSOR_API_KEY")
+        if let apiKey {
+            environment["CURSOR_API_KEY"] = try CursorAPIKeyValidator.validated(apiKey)
+        }
         child.environment = environment
         child.standardInput = FileHandle.nullDevice
-        child.standardOutput = output
-        child.standardError = output
+        child.standardOutput = stdout
+        child.standardError = stderr
         do {
             try child.run()
         } catch {
             throw AppError.processFailed(
-                "Cursor CLI 명령을 실행하지 못했습니다: \(error.localizedDescription)")
+                "Cursor SDK 명령을 실행하지 못했습니다: \(error.localizedDescription)")
         }
-        let outputRead = Task.detached(priority: .userInitiated) {
-            output.fileHandleForReading.readDataToEndOfFile()
+        let stdoutRead = Task.detached(priority: .userInitiated) {
+            stdout.fileHandleForReading.readDataToEndOfFile()
         }
-        for _ in 0 ..< 100 where child.isRunning {
+        let stderrRead = Task.detached(priority: .userInitiated) {
+            stderr.fileHandleForReading.readDataToEndOfFile()
+        }
+        var cancelled = false
+        for _ in 0 ..< timeoutIterations where child.isRunning {
+            if Task.isCancelled {
+                cancelled = true
+                break
+            }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
+        let timedOut = child.isRunning && !cancelled
         if child.isRunning {
             child.terminate()
             for _ in 0 ..< 10 where child.isRunning {
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             if child.isRunning { kill(child.processIdentifier, SIGKILL) }
-            _ = await outputRead.value
-            throw AppError.processFailed("Cursor CLI 명령 확인 시간이 초과되었습니다.")
         }
-        let data = await outputRead.value
-        guard data.count <= 64 * 1_024 else {
-            throw AppError.processFailed("Cursor CLI 명령 출력이 허용 크기를 초과했습니다.")
+        let outputData = await stdoutRead.value
+        let errorData = await stderrRead.value
+        if cancelled { throw CancellationError() }
+        if timedOut { throw AppError.processFailed("Cursor SDK 명령 확인 시간이 초과되었습니다.") }
+        guard !child.isRunning else {
+            throw AppError.processFailed("Cursor SDK 명령을 종료하지 못했습니다.")
         }
-        return (child.terminationStatus, String(decoding: data, as: UTF8.self))
+        if child.terminationStatus != 0 {
+            let metadata = String(decoding: errorData.prefix(1_024), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let suffix = metadata.isEmpty ? "" : ": \(metadata)"
+            throw AppError.processFailed("Cursor SDK 명령이 완료되지 않았습니다\(suffix)")
+        }
+        guard outputData.count <= maximumOutputBytes,
+              errorData.count <= 64 * 1_024
+        else {
+            throw AppError.processFailed("Cursor SDK 명령 출력이 허용 크기를 초과했습니다.")
+        }
+        return (outputData, errorData)
     }
 
     private func recordStderrMetadata(_ data: Data) {
