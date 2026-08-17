@@ -349,6 +349,10 @@ final class CursorBridgeService {
         environment["SYNCBAR_CURSOR_MODEL_ROUTES_JSON"] =
             try modelCatalog.cursorRouteJSON()
         environment["SYNCBAR_CURSOR_BACKEND"] = "sdk"
+        // Cursor SDK 1.0.28 does not provide its local sandbox on macOS. The
+        // bridge exposes no SDK-native tools: it allows only host callback MCP
+        // tools, whose permissions and side effects remain owned by Codex.
+        environment["SYNCBAR_CURSOR_SANDBOX_MODE"] = "disabled"
         environment.removeValue(forKey: "CURSOR_API_KEY")
         if let cursorAPIKey {
             environment["CURSOR_API_KEY"] = try CursorAPIKeyValidator.validated(cursorAPIKey)

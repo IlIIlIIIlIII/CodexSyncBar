@@ -970,6 +970,7 @@ test("Cursor SDK account and model utilities use the issued credential", async (
               {
                 displayName: "High Fast",
                 params: [
+                  { id: "cyber", value: "false" },
                   { id: "context", value: "1m" },
                   { id: "reasoning", value: "high" },
                   { id: "fast", value: "true" },
@@ -1016,6 +1017,64 @@ test("Cursor SDK model catalog rejects ambiguous or unsupported variants", () =>
         displayName: "Special",
         params: [{ id: "unmapped", value: "special" }],
       }],
+    }]),
+    (error) => error instanceof BridgeError && error.code === "sdk_invalid_models",
+  );
+  assert.throws(
+    () => cursorSDKModelCatalogText([{
+      id: "future-model",
+      displayName: "Future Model",
+      variants: [{
+        displayName: "Active future option",
+        params: [{ id: "unmapped", value: "true" }],
+      }],
+    }]),
+    (error) => error instanceof BridgeError && error.code === "sdk_invalid_models",
+  );
+});
+
+test("Cursor SDK model catalog keeps the unique default context when the SDK lists alternatives", () => {
+  assert.equal(
+    cursorSDKModelCatalogText([{
+      id: "gpt-5.6-sol",
+      displayName: "GPT-5.6 Sol",
+      variants: [
+        {
+          displayName: "Medium",
+          params: [
+            { id: "context", value: "272k" },
+            { id: "reasoning", value: "medium" },
+          ],
+        },
+        {
+          displayName: "Medium",
+          isDefault: true,
+          params: [
+            { id: "context", value: "1m" },
+            { id: "reasoning", value: "medium" },
+          ],
+        },
+        {
+          displayName: "High",
+          params: [
+            { id: "context", value: "1m" },
+            { id: "reasoning", value: "high" },
+          ],
+        },
+      ],
+    }]),
+    "gpt-5.6-sol-medium - GPT-5.6 Sol Medium 1M\n" +
+      "gpt-5.6-sol-high - GPT-5.6 Sol High 1M\n",
+  );
+
+  assert.throws(
+    () => cursorSDKModelCatalogText([{
+      id: "future-model",
+      displayName: "Future Model",
+      variants: [
+        { displayName: "Small", params: [{ id: "context", value: "200k" }] },
+        { displayName: "Large", params: [{ id: "context", value: "1m" }] },
+      ],
     }]),
     (error) => error instanceof BridgeError && error.code === "sdk_invalid_models",
   );

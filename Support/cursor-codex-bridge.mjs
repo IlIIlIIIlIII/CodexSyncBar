@@ -3045,8 +3045,9 @@ function normalizedCursorSDKModelVariant(variant) {
   const known = new Set([
     "context", "context_window", "effort", "fast", "reasoning", "reasoning_effort", "thinking",
   ]);
+  const inactiveUnknownValues = new Set(["default", "false"]);
   for (const [id, value] of values) {
-    if (!known.has(id) && value !== "default") {
+    if (!known.has(id) && !inactiveUnknownValues.has(value)) {
       throw new BridgeError(`Cursor SDK model parameter ${id} is unsupported`, 502, "sdk_invalid_models");
     }
   }
@@ -3081,14 +3082,30 @@ export function cursorSDKModelCatalogText(models) {
       throw new BridgeError("Cursor SDK model catalog contains an invalid model", 502, "sdk_invalid_models");
     }
     const baseSlug = cursorSDKCatalogBaseSlug(model.id);
-    const variants = Array.isArray(model.variants) && model.variants.length > 0
+    const rawVariants = Array.isArray(model.variants) && model.variants.length > 0
       ? model.variants
-      : [{ params: [], displayName: model.displayName }];
-    for (const variant of variants) {
+      : [{ params: [], displayName: model.displayName, isDefault: true }];
+    let variants = rawVariants.map((variant) => {
       if (!variant || typeof variant !== "object" || Array.isArray(variant)) {
         throw new BridgeError("Cursor SDK model variant is invalid", 502, "sdk_invalid_models");
       }
-      const normalized = normalizedCursorSDKModelVariant(variant);
+      return { variant, normalized: normalizedCursorSDKModelVariant(variant) };
+    });
+    const contexts = new Set(variants.map(({ normalized }) => normalized.context).filter(Boolean));
+    if (contexts.size > 1) {
+      const defaults = variants.filter(({ variant }) => variant.isDefault === true);
+      if (defaults.length !== 1 || defaults[0].normalized.context === null ||
+          variants.some(({ normalized }) => normalized.context === null)) {
+        throw new BridgeError(
+          "Cursor SDK model context variants have no unique default",
+          502,
+          "sdk_invalid_models",
+        );
+      }
+      const defaultContext = defaults[0].normalized.context;
+      variants = variants.filter(({ normalized }) => normalized.context === defaultContext);
+    }
+    for (const { variant, normalized } of variants) {
       const suffixes = [];
       if (normalized.effort !== "default") suffixes.push(normalized.effort);
       if (normalized.thinking) suffixes.push("thinking");

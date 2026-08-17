@@ -73,6 +73,7 @@ final class CursorBridgeTests: XCTestCase {
 
         XCTAssertEqual(environment["PRESERVED"], "yes")
         XCTAssertEqual(environment["SYNCBAR_CURSOR_BACKEND"], "sdk")
+        XCTAssertEqual(environment["SYNCBAR_CURSOR_SANDBOX_MODE"], "disabled")
         XCTAssertNil(environment["CURSOR_API_KEY"])
         XCTAssertEqual(environment["SYNCBAR_CURSOR_BRIDGE_TOKEN"], testCursorBridgeToken)
         let slugsData = try XCTUnwrap(
@@ -112,6 +113,7 @@ final class CursorBridgeTests: XCTestCase {
 
         XCTAssertEqual(environment["CURSOR_API_KEY"], apiKey)
         XCTAssertEqual(environment["SYNCBAR_CURSOR_BACKEND"], "sdk")
+        XCTAssertEqual(environment["SYNCBAR_CURSOR_SANDBOX_MODE"], "disabled")
         XCTAssertEqual(environment["OPENAI_API_KEY"], "preserved-provider-key")
         XCTAssertThrowsError(try CursorBridgeService.sidecarEnvironment(
             inheriting: [:],
