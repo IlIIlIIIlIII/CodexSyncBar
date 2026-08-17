@@ -205,6 +205,8 @@ function fakeCursorSDK() {
     resumes: [],
     sends: [],
     toolResults: [],
+    closes: [],
+    failedSendAttempts: new Map(),
     bufferedBoundaryReady: new Promise((resolve) => {
       markBufferedBoundaryReady = resolve;
     }),
@@ -225,6 +227,13 @@ function fakeCursorSDK() {
       reject = rejectResult;
     });
     const text = typeof message === "string" ? message : message?.text ?? "";
+    const finalTurnUsage = {
+      inputTokens: 44,
+      outputTokens: 8,
+      cacheReadTokens: 36,
+      cacheWriteTokens: 5,
+      reasoningTokens: 2,
+    };
     queueMicrotask(async () => {
       try {
         if (text.includes("sdk-buffered-boundary-roundtrip")) {
@@ -232,6 +241,10 @@ function fakeCursorSDK() {
             .find(([, tool]) => tool.description?.includes("Outer tool: read_record."));
           assert.ok(entry, "function callback tool was not exposed through SDK MCP");
           await options.onDelta?.({ update: { type: "text-delta", text: "첫 도구를 확인합니다." } });
+          await options.onDelta?.({ update: {
+            type: "turn-ended",
+            usage: { ...finalTurnUsage, inputTokens: 60, outputTokens: 4 },
+          } });
           const firstResult = entry[1].execute(
             { id: "record-first" },
             { toolCallId: "sdk-call-first" },
@@ -248,6 +261,10 @@ function fakeCursorSDK() {
           await options.onDelta?.({ update: { type: "text-delta", text: "두 결과를 반영했습니다." } });
         } else if (text.includes("sdk-tool-roundtrip")) {
           await options.onDelta?.({ update: { type: "text-delta", text: "도구를 확인하겠습니다." } });
+          await options.onDelta?.({ update: {
+            type: "turn-ended",
+            usage: { ...finalTurnUsage, inputTokens: 58, outputTokens: 4 },
+          } });
           const entry = Object.entries(options.local?.customTools ?? {})
             .find(([, tool]) => tool.description?.includes("Outer tool: read_record."));
           assert.ok(entry, "function callback tool was not exposed through SDK MCP");
@@ -274,9 +291,18 @@ function fakeCursorSDK() {
           }, { toolCallId: "sdk-browser-1" });
           observed.toolResults.push(browserValue);
           await options.onDelta?.({ update: { type: "text-delta", text: "브라우저 결과를 반영했습니다." } });
+        } else if (text.includes("sdk-summary-boundary")) {
+          await options.onDelta?.({ update: { type: "summary-started" } });
+          await options.onDelta?.({ update: {
+            type: "summary",
+            summary: "Durable Cursor summary for the completed compaction boundary.",
+          } });
+          await options.onDelta?.({ update: { type: "summary-completed" } });
+          await options.onDelta?.({ update: { type: "text-delta", text: "sdk-summary-complete" } });
         } else {
           await options.onDelta?.({ update: { type: "text-delta", text: "sdk-final" } });
         }
+        await options.onDelta?.({ update: { type: "turn-ended", usage: finalTurnUsage } });
         if (!cancelled) {
           settle({
             id: "run-fixture",
@@ -312,9 +338,29 @@ function fakeCursorSDK() {
     agentId: agentID,
     send: async (message, options = {}) => {
       observed.sends.push({ agentID, agentOptions, message, options });
+      const text = typeof message === "string" ? message : message?.text ?? "";
+      if (text.includes("sdk-fail-send-once")) {
+        const attempts = observed.failedSendAttempts.get(text) ?? 0;
+        observed.failedSendAttempts.set(text, attempts + 1);
+        if (attempts === 0) throw new Error("intentional one-shot send failure");
+      }
       return makeRun(agentID, message, options);
     },
-    close() {},
+    async getUsage() {
+      return {
+        usage: {
+          inputTokens: 120,
+          outputTokens: 12,
+          cacheReadTokens: 80,
+          cacheWriteTokens: 4,
+          totalTokens: 132,
+          reasoningTokens: 3,
+        },
+        cost: { rawCostCents: 1.25, chargedCents: 0.5 },
+        runs: [],
+      };
+    },
+    close() { observed.closes.push(agentID); },
   });
 
   return {
@@ -1133,6 +1179,31 @@ test("Cursor SDK keeps its coding base prompt while isolating outer host instruc
   }));
 });
 
+test("Cursor SDK fixes the orchestration contract while bounding oversized tool descriptions", () => {
+  const request = baseRequest({
+    tools: [{
+      type: "namespace",
+      name: "functions",
+      description: "Outer orchestration callbacks",
+      tools: [{
+        type: "custom",
+        name: "exec",
+        description: "unstable generated catalog ".repeat(40_000),
+      }],
+    }],
+  });
+  const rendezvous = new CursorSDKToolRendezvous(request);
+  const customTool = Object.values(rendezvous.customTools())[0];
+  const rule = buildCursorSDKRule(request);
+
+  assert.ok(Buffer.byteLength(customTool.description, "utf8") < 6 * 1024);
+  assert.match(customTool.description, /Promise\.all/);
+  assert.match(customTool.description, /bounded excerpts/);
+  assert.doesNotMatch(customTool.description, /unstable generated catalog/);
+  assert.match(rule, /independent related read-only operations/);
+  assert.match(rule, /Do not echo full catalogs, files, logs, or terminal transcripts/);
+});
+
 test("Cursor SDK instruction identity inherits only when a continuation omits guidance", () => {
   const initial = baseRequest({
     instructions: "Stable host instructions",
@@ -1264,6 +1335,7 @@ test("Cursor SDK function callbacks preserve call ids and resume with cached usa
       previousResponseID: "resp_sdk_first",
       responseID: "resp_sdk_second",
       replay: false,
+      collectBilling: true,
       dynamicTools: [],
       timeoutMs: 2_000,
       signal: new AbortController().signal,
@@ -1274,11 +1346,38 @@ test("Cursor SDK function callbacks preserve call ids and resume with cached usa
     assert.equal(second.instructionHash, first.instructionHash);
     assert.equal(fixture.observed.toolResults[0], "record-value");
     assert.deepEqual(second.usage, {
-      input_tokens: 120,
-      input_tokens_details: { cached_tokens: 80 },
-      output_tokens: 12,
-      output_tokens_details: { reasoning_tokens: 3 },
-      total_tokens: 132,
+      input_tokens: 44,
+      input_tokens_details: { cached_tokens: 36 },
+      output_tokens: 8,
+      output_tokens_details: { reasoning_tokens: 2 },
+      total_tokens: 52,
+    });
+    assert.deepEqual(second.currentUsage, {
+      inputTokens: 44,
+      outputTokens: 8,
+      cacheReadTokens: 36,
+      cacheWriteTokens: 5,
+      reasoningTokens: 2,
+      totalTokens: 52,
+    });
+    assert.deepEqual(second.billing, {
+      runUsage: {
+        inputTokens: 120,
+        outputTokens: 12,
+        cacheReadTokens: 80,
+        cacheWriteTokens: 4,
+        reasoningTokens: 3,
+        totalTokens: 132,
+      },
+      agentUsage: {
+        inputTokens: 120,
+        outputTokens: 12,
+        cacheReadTokens: 80,
+        cacheWriteTokens: 4,
+        reasoningTokens: 3,
+        totalTokens: 132,
+      },
+      cost: { rawCostCents: 1.25, chargedCents: 0.5 },
     });
   } finally {
     await backend?.close();
@@ -1435,6 +1534,32 @@ test("Cursor SDK custom free-form callbacks preserve outer tool semantics", asyn
     output: "custom-result",
   }]);
   assert.equal(await execution, "custom-result");
+});
+
+test("Cursor SDK bounds text-heavy outer tool results with a verifiable truncation marker", async () => {
+  const request = baseRequest({
+    tools: [{ type: "custom", name: "exec", description: "Run an outer action" }],
+  });
+  const rendezvous = new CursorSDKToolRendezvous(request);
+  const entry = Object.values(rendezvous.customTools())[0];
+  const execution = entry.execute({ input: "inspect safely" }, { toolCallId: "sdk-custom-large" });
+  await rendezvous.nextCall(new AbortController().signal);
+  const output = `HEAD-${"x".repeat(400_000)}-TAIL`;
+  rendezvous.resolveActive([{
+    type: "custom_tool_call_output",
+    call_id: "sdk-custom-large",
+    output,
+  }]);
+  const result = await execution;
+
+  assert.equal(typeof result, "string");
+  assert.ok(Buffer.byteLength(result, "utf8") <= 256 * 1024);
+  assert.match(result, /^HEAD-/);
+  assert.match(result, /original_bytes=400010/);
+  assert.match(result, /sha256=[a-f0-9]{64}/);
+  assert.match(result, /-TAIL$/);
+  assert.equal(rendezvous.resultBytes, Buffer.byteLength(output, "utf8"));
+  assert.equal(rendezvous.truncatedResultCount, 1);
 });
 
 test("Cursor SDK tool_search dynamically dispatches a namespaced browser tool", async () => {
@@ -1658,6 +1783,12 @@ test("Cursor SDK usage mapping rejects malformed counters", () => {
     inputTokens: 1,
     outputTokens: 2,
     cacheReadTokens: -1,
+  }), null);
+  assert.equal(responsesUsageFromCursorSDK({
+    inputTokens: 1,
+    outputTokens: 2,
+    cacheReadTokens: 0,
+    cacheWriteTokens: -1,
   }), null);
   assert.deepEqual(responsesUsageFromCursorSDK({
     inputTokens: 10,
@@ -2924,7 +3055,8 @@ test("Cursor SDK session identity survives the private restart checkpoint", asyn
     await first.flush();
 
     const stored = JSON.parse(await readFile(storePath, "utf8"));
-    assert.equal(stored.schemaVersion, 3);
+    assert.equal(stored.schemaVersion, 4);
+    assert.deepEqual(stored.toolCatalogs, {});
     assert.equal(stored.entries[0].sessionKey, sessionKey);
     assert.equal(stored.entries[0].instructionHash, instructionHash);
     assert.doesNotMatch(JSON.stringify(stored), /private SDK request|private SDK answer/);
@@ -2940,6 +3072,261 @@ test("Cursor SDK session identity survives the private restart checkpoint", asyn
     assert.equal(session.instructionHash, instructionHash);
     assert.equal(session.pendingSDKRun, false);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("private session snapshots preserve active rollback checkpoints, deduplicate tools, and prune by byte budget", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-session-budget-test-"));
+  const dedupStore = path.join(root, "dedup.json");
+  const pruneStore = path.join(root, "prune.json");
+  const workspace = path.join(root, "workspace");
+  const sessionKey = "e".repeat(64);
+  const instructionHash = "f".repeat(64);
+  const dynamicTools = [{
+    type: "namespace",
+    name: "functions",
+    tools: [{
+      type: "custom",
+      name: "exec",
+      description: "large generated description ".repeat(8_000),
+    }],
+  }];
+  try {
+    let now = 30_000_000;
+    const dedup = new CursorSessionRegistry({ now: () => now++, storePath: dedupStore });
+    for (let index = 0; index < 10; index += 1) {
+      dedup.add(`resp_${index.toString(16).padStart(32, "0")}`, {
+        sessionID: `sdk-dedup-${index}`,
+        transport: "sdk",
+        sessionKey,
+        instructionHash,
+        pendingSDKRun: false,
+        model: "composer-2.5",
+        workspace,
+        input: [{ role: "user", content: `private-${index}` }],
+        output: [{ role: "assistant", content: `answer-${index}` }],
+        dynamicTools,
+        replaySeed: [{ role: "user", content: `bounded-seed-${index}` }],
+        sdkSummary: null,
+        rotateSDKAgent: false,
+        clientKey: null,
+      });
+    }
+    const activeResponseID = `resp_${(9).toString(16).padStart(32, "0")}`;
+    dedup.acquire(activeResponseID, { model: "composer-2.5", workspace });
+    await dedup.flush();
+    const stored = JSON.parse(await readFile(dedupStore, "utf8"));
+    const digests = Object.keys(stored.toolCatalogs);
+    assert.equal(stored.schemaVersion, 4);
+    assert.equal(stored.entries.length, 10);
+    assert.equal(digests.length, 1);
+    assert.ok(stored.entries.every((entry) => entry.dynamicToolsDigest === digests[0]));
+    assert.ok(stored.entries.every((entry) => !Object.hasOwn(entry, "dynamicTools")));
+    assert.ok((await stat(dedupStore)).size < 80 * 1024);
+    const restored = new CursorSessionRegistry({ now: () => 30_000_100, storePath: dedupStore });
+    await restored.load();
+    const restoredSession = restored.acquire(activeResponseID, {
+      model: "composer-2.5",
+      workspace,
+    });
+    assert.equal(restoredSession.dynamicTools[0].tools[0].name, "exec");
+    assert.ok(Buffer.byteLength(
+      restoredSession.dynamicTools[0].tools[0].description,
+      "utf8",
+    ) <= 8 * 1024);
+    assert.equal(restoredSession.replaySeed[0].content, "bounded-seed-9");
+    restored.release(restoredSession.responseID);
+    dedup.release(activeResponseID);
+
+    now = 40_000_000;
+    const pruned = new CursorSessionRegistry({
+      now: () => now++,
+      storePath: pruneStore,
+      maxStoreBytes: 6_000,
+    });
+    for (let index = 0; index < 6; index += 1) {
+      pruned.add(`resp_${(100 + index).toString(16).padStart(32, "0")}`, {
+        sessionID: `sdk-prune-${index}`,
+        transport: "sdk",
+        sessionKey,
+        instructionHash,
+        pendingSDKRun: false,
+        model: "composer-2.5",
+        workspace,
+        input: [],
+        output: [],
+        dynamicTools: [],
+        replaySeed: [{ role: "user", content: `${index}-${"z".repeat(3_000)}` }],
+        sdkSummary: null,
+        rotateSDKAgent: false,
+        clientKey: null,
+      });
+    }
+    await pruned.flush();
+    const budgeted = JSON.parse(await readFile(pruneStore, "utf8"));
+    assert.ok((await stat(pruneStore)).size <= 6_000);
+    assert.equal(budgeted.entries.length, 1);
+    assert.equal(budgeted.entries[0].responseID, `resp_${(105).toString(16).padStart(32, "0")}`);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("HTTP SDK compaction rotates agents and rollback retries survive a private restart", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-compaction-http-test-"));
+  const workspace = path.join(root, "workspace");
+  const fixture = fakeCursorSDK();
+  const bridgeToken = "7".repeat(64);
+  const metrics = [];
+  const config = {
+    host: "127.0.0.1",
+    port: 0,
+    agentPath: "/unused/cursor-agent",
+    model: "composer-2.5",
+    allowedModels: ["composer-2.5"],
+    workspace,
+    timeoutMs: 5_000,
+    bridgeToken,
+    backend: "sdk",
+    cursorAPIKey: "cursor_fixture_api_key_1234567890",
+    sdkModule: fixture.module,
+    sdkVersion: "1.0.28",
+    sdkStateRoot: path.join(root, "sdk-state"),
+    sessionStorePath: path.join(root, "cursor-bridge-sessions-v1.json"),
+    sandboxMode: "enabled",
+    metricsSink: (metric) => metrics.push(metric),
+  };
+  let server;
+  try {
+    server = await startBridge(config);
+    let address = server.address();
+    assert.equal(typeof address, "object");
+    let url = `http://127.0.0.1:${address.port}/v1/responses`;
+    const headers = {
+      "content-type": "application/json",
+      "x-syncbar-bridge-token": bridgeToken,
+    };
+    const firstResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        input: [{ role: "user", content: "sdk-summary-boundary" }],
+        tools: [],
+        stream: false,
+      })),
+    });
+    const first = await firstResponse.json();
+    assert.equal(firstResponse.status, 200, JSON.stringify(first));
+    assert.equal(first.output[0].content[0].text, "sdk-summary-complete");
+    assert.equal(first.usage.input_tokens, 44);
+
+    await stopBridge(server);
+    server = null;
+    const checkpoint = JSON.parse(await readFile(config.sessionStorePath, "utf8"));
+    assert.equal(checkpoint.entries.length, 1);
+    assert.match(checkpoint.entries[0].sdkSummary, /Durable Cursor summary/);
+    assert.equal(checkpoint.entries[0].rotateSDKAgent, true);
+    assert.ok(Array.isArray(checkpoint.entries[0].replaySeed));
+
+    server = await startBridge(config);
+    address = server.address();
+    assert.equal(typeof address, "object");
+    url = `http://127.0.0.1:${address.port}/v1/responses`;
+    const afterCompaction = baseRequest({
+      previous_response_id: first.id,
+      instructions: undefined,
+      input: [{ role: "user", content: "continue after compaction" }],
+      tools: [],
+      stream: false,
+    });
+    delete afterCompaction.instructions;
+    const secondResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(afterCompaction),
+    });
+    const second = await secondResponse.json();
+    assert.equal(secondResponse.status, 200, JSON.stringify(second));
+    assert.equal(second.output[0].content[0].text, "sdk-final");
+    assert.equal(fixture.observed.resumes.length, 0);
+    assert.equal(fixture.observed.creates.length, 2);
+    assert.match(String(fixture.observed.sends[1].message), /Durable Cursor summary/);
+    assert.match(String(fixture.observed.sends[1].message), /continue after compaction/);
+
+    const rollbackRequest = baseRequest({
+      previous_response_id: first.id,
+      instructions: undefined,
+      input: [{ role: "user", content: "sdk-fail-send-once rollback branch" }],
+      tools: [],
+      stream: false,
+    });
+    delete rollbackRequest.instructions;
+    const failedRollbackResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(rollbackRequest),
+    });
+    const failedRollback = await failedRollbackResponse.json();
+    assert.equal(failedRollbackResponse.status, 503, JSON.stringify(failedRollback));
+    assert.equal(failedRollback.error.code, "sdk_agent_failed");
+
+    const retriedRollbackResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(rollbackRequest),
+    });
+    const retriedRollback = await retriedRollbackResponse.json();
+    assert.equal(retriedRollbackResponse.status, 200, JSON.stringify(retriedRollback));
+    assert.equal(retriedRollback.output[0].content[0].text, "sdk-final");
+
+    const compactedInput = [{
+      type: "compaction",
+      id: "cmp_fixture",
+      encrypted_content: "opaque-compaction-state",
+    }, {
+      role: "user",
+      type: "message",
+      content: "continue from opaque host compaction",
+    }];
+    const compactedRequest = baseRequest({
+      previous_response_id: second.id,
+      instructions: undefined,
+      input: compactedInput,
+      tools: [],
+      stream: false,
+    });
+    delete compactedRequest.instructions;
+    const compactedResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(compactedRequest),
+    });
+    const compacted = await compactedResponse.json();
+    assert.equal(compactedResponse.status, 200, JSON.stringify(compacted));
+    assert.equal(compacted.output[0].content[0].text, "sdk-final");
+    assert.equal(fixture.observed.resumes.length, 0);
+    assert.equal(fixture.observed.creates.length, 5);
+    assert.match(String(fixture.observed.sends.at(-1).message), /opaque-compaction-state/);
+    assert.doesNotMatch(String(fixture.observed.sends.at(-1).message), /sdk-summary-boundary/);
+
+    assert.equal(metrics.length, 4);
+    assert.equal(metrics[0].current_input_tokens, 44);
+    assert.equal(metrics[0].current_cache_write_tokens, 5);
+    assert.equal(metrics[0].sdk_run_cumulative_input_tokens, 120);
+    assert.equal(metrics[0].sdk_run_cumulative_cache_write_tokens, 4);
+    assert.equal(metrics[0].sdk_agent_cumulative_input_tokens, 120);
+    assert.equal(metrics[0].sdk_agent_cumulative_cache_write_tokens, 4);
+    assert.equal(metrics[0].charged_cents, 0.5);
+    assert.equal(metrics[0].cost_scope, "sdk_agent_cumulative_eventually_consistent");
+    assert.equal(metrics[1].sdk_agent_rotated, true);
+    assert.match(metrics[1].continuation_source, /summary/);
+    assert.equal(metrics[2].sdk_agent_rotated, true);
+    assert.match(metrics[2].continuation_source, /replay/);
+    assert.equal(metrics[3].sdk_compaction_boundary, true);
+    assert.match(metrics[3].continuation_source, /compaction/);
+  } finally {
+    if (server) await stopBridge(server);
     await rm(root, { recursive: true, force: true });
   }
 });
