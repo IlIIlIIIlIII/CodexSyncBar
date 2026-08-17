@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -312,14 +312,18 @@ fi
   return { executable, detailPath };
 }
 
-async function createFakeACPAgent(root) {
+async function createFakeACPAgent(root, { failFirstLoad = false } = {}) {
   const imageObservationPath = path.join(root, "acp-observed-image.png");
+  const loadFailureMarkerPath = path.join(root, "acp-load-failed-once");
   const source = `#!/usr/bin/env node
 const readline = require('node:readline');
-const { writeFileSync } = require('node:fs');
+const { existsSync, writeFileSync } = require('node:fs');
 
 const expectedImage = ${JSON.stringify(PNG_BASE64)};
+const expectedJPEG = ${JSON.stringify(JPEG_BASE64)};
 const imageObservationPath = ${JSON.stringify(imageObservationPath)};
+const loadFailureMarkerPath = ${JSON.stringify(loadFailureMarkerPath)};
+const failFirstLoad = ${JSON.stringify(failFirstLoad)};
 const richTextOutput = ${JSON.stringify(RICH_TEXT_OUTPUT)};
 const args = process.argv.slice(2);
 if (!args.includes('acp')) process.exit(91);
@@ -444,6 +448,7 @@ input.on('line', (line) => {
     reply(message, {
       protocolVersion: 1,
       agentCapabilities: {
+        loadSession: true,
         promptCapabilities: { audio: false, embeddedContext: false, image: true },
       },
       authMethods: [{ id: 'cursor_login', name: 'Cursor Login' }],
@@ -457,15 +462,40 @@ input.on('line', (line) => {
     return;
   }
   if (step === 2) {
-    expectRequest(message, 'session/new', 2);
-    if (typeof message.params?.cwd !== 'string' || !Array.isArray(message.params?.mcpServers)) {
-      fail('invalid session/new params');
+    const loading = message?.method === 'session/load';
+    expectRequest(message, loading ? 'session/load' : 'session/new', 2);
+    if (typeof message.params?.cwd !== 'string' || !Array.isArray(message.params?.mcpServers) ||
+        (loading && message.params?.sessionId !== 'fixture-session')) {
+      fail('invalid session creation params');
+    }
+    if (loading && failFirstLoad && !existsSync(loadFailureMarkerPath)) {
+      writeFileSync(loadFailureMarkerPath, 'failed', { mode: 0o600 });
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        error: { code: -32001, message: 'fixture session expired' },
+      });
+      setImmediate(() => process.exit(0));
+      return;
     }
     sessionID = 'fixture-session';
+    if (loading) {
+      send({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: {
+          sessionId: sessionID,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'stale-history-must-not-stream' },
+          },
+        },
+      });
+    }
     reply(message, {
-      sessionId: sessionID,
+      ...(loading ? {} : { sessionId: sessionID }),
       modes: {
-        currentModeId: 'agent',
+        currentModeId: loading ? 'ask' : 'agent',
         availableModes: [
           { id: 'agent', name: 'Agent' },
           { id: 'ask', name: 'Ask' },
@@ -517,11 +547,22 @@ input.on('line', (line) => {
     const prompt = message.params.prompt;
     const text = prompt.filter((part) => part?.type === 'text').map((part) => part.text).join('\\n');
     const images = prompt.filter((part) => part?.type === 'image');
-    const expectedImageCount = text.includes('http-acp-image-follow-up') ? 2 : 1;
-    if (images.length !== expectedImageCount || images[0].mimeType !== 'image/png' || images[0].data !== expectedImage) {
+    const textOnlyFollowUp = text.includes('http-acp-text-follow-up');
+    const imageFollowUp = text.includes('http-acp-image-follow-up');
+    const replayedImageFollowUp = imageFollowUp && text.includes('http-acp-image-route');
+    const expectedImageCount = textOnlyFollowUp ? 0 : replayedImageFollowUp ? 2 : 1;
+    const imageMismatch = replayedImageFollowUp
+      ? images[0]?.mimeType !== 'image/png' || images[0]?.data !== expectedImage ||
+        images[1]?.mimeType !== 'image/jpeg' || images[1]?.data !== expectedJPEG
+      : !textOnlyFollowUp &&
+        (images[0]?.mimeType !== (imageFollowUp ? 'image/jpeg' : 'image/png') ||
+          images[0]?.data !== (imageFollowUp ? expectedJPEG : expectedImage));
+    if (images.length !== expectedImageCount || imageMismatch) {
       fail('image attachment was not forwarded through ACP');
     }
-    writeFileSync(imageObservationPath, Buffer.from(images[0].data, 'base64'), { mode: 0o600 });
+    if (images.length > 0) {
+      writeFileSync(imageObservationPath, Buffer.from(images[0].data, 'base64'), { mode: 0o600 });
+    }
 
     if (text.includes('trigger-acp-tool')) {
       send({
@@ -616,7 +657,9 @@ input.on('line', (line) => {
 
     const answer = text.includes('trigger-rich-text')
       ? richTextOutput
-      : text.includes('http-acp-image-route') ? 'acp-image-route-ok' : 'hello';
+      : text.includes('http-acp-image-route') || imageFollowUp || textOnlyFollowUp
+        ? 'acp-image-route-ok'
+        : 'hello';
     send({
       jsonrpc: '2.0',
       method: 'session/update',
@@ -1872,6 +1915,84 @@ test("Cursor session registry expires, bounds, serializes, and clears entries", 
   assert.equal(registry.acquireLatest("task-key", { model: "m", workspace: "/w" }), null);
 });
 
+test("Cursor sessions and dynamic browser tools survive a private restart checkpoint", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-session-store-test-"));
+  const storePath = path.join(root, "cursor-bridge-sessions-v1.json");
+  const workspace = path.join(root, "workspace");
+  const responseID = `resp_${"a".repeat(32)}`;
+  const createdAt = 10_000_000;
+  const priorInput = [{ role: "user", content: "private browser request must not be persisted" }];
+  const priorOutput = [{
+    type: "tool_search_call",
+    call_id: "call_search",
+    arguments: { goal: "load browser and computer use tools" },
+  }];
+  const dynamicTools = [{
+    type: "namespace",
+    name: "functions",
+    tools: [{
+      type: "custom",
+      name: "exec",
+      description: "Run a bounded browser or computer-use operation.",
+      format: { type: "grammar", syntax: "lark", definition: "start: /[\\s\\S]+/" },
+    }],
+  }];
+  try {
+    const first = new CursorSessionRegistry({
+      now: () => createdAt,
+      storePath,
+    });
+    first.add(responseID, {
+      sessionID: "persistent-cursor-session",
+      transport: "acp",
+      model: "composer-2.5",
+      workspace,
+      input: priorInput,
+      output: priorOutput,
+      dynamicTools,
+      clientKey: "stable-prompt-cache-key",
+    });
+    await first.flush();
+
+    const stored = await readFile(storePath, "utf8");
+    assert.doesNotMatch(stored, /private browser request/);
+    assert.doesNotMatch(stored, /tool_search_call/);
+    assert.match(stored, /persistent-cursor-session/);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(storePath)).mode & 0o077, 0);
+    }
+
+    const restored = new CursorSessionRegistry({
+      now: () => createdAt + (31 * 60 * 1000),
+      storePath,
+    });
+    await restored.load();
+    const session = restored.acquire(responseID, {
+      model: "composer-2.5",
+      workspace,
+    });
+    assert.equal(session.sessionID, "persistent-cursor-session");
+    assert.equal(session.transport, "acp");
+    assert.equal(session.input, undefined);
+    assert.equal(session.output, undefined);
+
+    const continued = continuationRequest({
+      input: [
+        ...priorInput,
+        ...priorOutput,
+        { type: "custom_tool_call_output", call_id: "call_exec", output: "browser opened" },
+      ],
+      tools: [],
+    }, session);
+    assert.deepEqual(continued.input, [
+      { type: "custom_tool_call_output", call_id: "call_exec", output: "browser opened" },
+    ]);
+    assert.match(buildCursorPrompt(continued), /"name":"exec"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("HTTP text continuations reuse Cursor sessions and emit privacy-safe timing metrics", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-http-resume-test-"));
   const workspace = path.join(root, "workspace");
@@ -2169,6 +2290,147 @@ process.stdout.write(JSON.stringify({type:'result',subtype:'success',result,sess
     assert.deepEqual(metrics.map((metric) => metric.resumed), [false, true, true]);
   } finally {
     await stopBridge(server);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("HTTP restart restores Cursor session and browser tool_search state after thirty minutes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-http-restart-tools-test-"));
+  const workspace = path.join(root, "workspace");
+  const storePath = path.join(root, "cursor-bridge-sessions-v1.json");
+  const agent = await writeAgentFixture(root, "agent", `#!/usr/bin/env node
+const args = process.argv.slice(2);
+let prompt = '';
+for await (const chunk of process.stdin) prompt += chunk;
+const match = prompt.match(/<SYNCBAR_BACKEND_REQUEST>\\n([\\s\\S]*?)\\n<\\/SYNCBAR_BACKEND_REQUEST>/);
+const payload = JSON.parse(match[1]);
+const conversation = JSON.stringify(payload.conversation);
+const available = JSON.stringify(payload.available_tools);
+const resume = args.indexOf('--resume');
+const resumed = resume >= 0 && args[resume + 1] === 'restart-tool-session';
+let result;
+if (conversation.includes('restart-browser-turn-1')) {
+  if (resume >= 0 || !available.includes('tool_search')) process.exit(91);
+  result = '<SYNCBAR_TOOL_CALL>{"name":"tool_search","arguments":{"goal":"load browser and computer use tools"}}</SYNCBAR_TOOL_CALL>';
+} else if (conversation.includes('tool_search_output')) {
+  if (!resumed || !available.includes('"name":"exec"')) process.exit(92);
+  result = '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","input":"text(1);"}</SYNCBAR_TOOL_CALL>';
+} else if (conversation.includes('custom_tool_call_output')) {
+  if (!resumed || !available.includes('"name":"exec"')) process.exit(93);
+  result = '<SYNCBAR_TOOL_CALL>{"namespace":"functions","name":"exec","input":"text(2);"}</SYNCBAR_TOOL_CALL>';
+} else process.exit(94);
+process.stdout.write(JSON.stringify({type:'result',subtype:'success',result,session_id:'restart-tool-session'})+'\\n');
+`);
+  const bridgeToken = "e".repeat(64);
+  const searchTool = {
+    type: "tool_search",
+    execution: "client",
+    parameters: {
+      type: "object",
+      properties: { goal: { type: "string" } },
+      required: ["goal"],
+      additionalProperties: false,
+    },
+  };
+  const dynamicTools = [{
+    type: "namespace",
+    name: "functions",
+    tools: [{
+      type: "custom",
+      name: "exec",
+      description: "Run browser and computer-use tools through the outer Codex client.",
+      format: { type: "grammar", syntax: "lark", definition: "start: /[\\s\\S]+/" },
+    }],
+  }];
+  let now = 10_000_000;
+  let server;
+  const start = async (metrics) => {
+    server = await startBridge({
+      host: "127.0.0.1",
+      port: 0,
+      agentPath: agent,
+      model: "composer-2.5",
+      allowedModels: ["composer-2.5"],
+      workspace,
+      timeoutMs: 5_000,
+      bridgeToken,
+      sessionStorePath: storePath,
+      wallClockNow: () => now,
+      metricsSink: (metric) => metrics.push(metric),
+    });
+    const address = server.address();
+    return `http://127.0.0.1:${address.port}/v1/responses`;
+  };
+  const request = async (url, body) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(result));
+    return result;
+  };
+  try {
+    const firstMetrics = [];
+    let url = await start(firstMetrics);
+    const firstRequest = baseRequest({
+      input: [{ role: "user", type: "message", content: "restart-browser-turn-1" }],
+      tools: [searchTool],
+      stream: false,
+    });
+    const first = await request(url, firstRequest);
+    assert.equal(first.output[0].type, "tool_search_call");
+    assert.equal(firstMetrics[0].resumed, false);
+    await stopBridge(server);
+    server = null;
+
+    now += 31 * 60 * 1000;
+    const secondMetrics = [];
+    url = await start(secondMetrics);
+    const secondInput = [
+      ...firstRequest.input,
+      ...first.output,
+      {
+        type: "tool_search_output",
+        execution: "client",
+        call_id: first.output[0].call_id,
+        status: "completed",
+        tools: dynamicTools,
+      },
+    ];
+    const second = await request(url, baseRequest({
+      previous_response_id: first.id,
+      input: secondInput,
+      tools: [searchTool],
+      stream: false,
+    }));
+    assert.equal(second.output[0].type, "custom_tool_call");
+    assert.equal(second.output[0].namespace, "functions");
+    assert.equal(second.output[0].name, "exec");
+    assert.equal(secondMetrics[0].resumed, true);
+    await stopBridge(server);
+    server = null;
+
+    now += 60 * 1000;
+    const thirdMetrics = [];
+    url = await start(thirdMetrics);
+    const third = await request(url, baseRequest({
+      previous_response_id: second.id,
+      input: [{
+        type: "custom_tool_call_output",
+        call_id: second.output[0].call_id,
+        output: "browser opened",
+      }],
+      tools: [searchTool],
+      stream: false,
+    }));
+    assert.equal(third.output[0].type, "custom_tool_call");
+    assert.equal(third.output[0].namespace, "functions");
+    assert.equal(third.output[0].name, "exec");
+    assert.equal(thirdMetrics[0].resumed, true);
+  } finally {
+    if (server) await stopBridge(server);
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -2692,6 +2954,7 @@ test("HTTP image requests use the ACP transport", async () => {
   const fakeAgent = await createFakeACPAgent(root);
   const fakePDFExtractor = await createFakePDFExtractor(root);
   const bridgeToken = "c".repeat(64);
+  const metrics = [];
   const server = await startBridge({
     host: "127.0.0.1",
     port: 0,
@@ -2711,6 +2974,7 @@ test("HTTP image requests use the ACP transport", async () => {
     fileExtractorPath: fakePDFExtractor.executable,
     timeoutMs: 5_000,
     bridgeToken,
+    metricsSink: (metric) => metrics.push(metric),
   });
   try {
     const address = server.address();
@@ -2741,6 +3005,18 @@ test("HTTP image requests use the ACP transport", async () => {
     assert.equal(httpResponse.status, 200, JSON.stringify(body));
     assert.equal(body.output[0].content[0].text, "acp-image-route-ok");
 
+    const followUpInput = [
+      ...firstImageInput,
+      ...body.output,
+      {
+        role: "user",
+        type: "message",
+        content: [
+          { type: "input_text", text: "http-acp-image-follow-up" },
+          { type: "input_image", image_url: JPEG_DATA_URI },
+        ],
+      },
+    ];
     const followUpResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: {
@@ -2750,18 +3026,7 @@ test("HTTP image requests use the ACP transport", async () => {
       body: JSON.stringify(baseRequest({
         model: "composer-2.5",
         previous_response_id: body.id,
-        input: [
-          ...firstImageInput,
-          ...body.output,
-          {
-            role: "user",
-            type: "message",
-            content: [
-              { type: "input_text", text: "http-acp-image-follow-up" },
-              { type: "input_image", image_url: JPEG_DATA_URI },
-            ],
-          },
-        ],
+        input: followUpInput,
         tools: [],
         stream: false,
       })),
@@ -2769,6 +3034,49 @@ test("HTTP image requests use the ACP transport", async () => {
     const followUpBody = await followUpResponse.json();
     assert.equal(followUpResponse.status, 200, JSON.stringify(followUpBody));
     assert.equal(followUpBody.output[0].content[0].text, "acp-image-route-ok");
+    assert.equal(metrics[0].transport, "acp");
+    assert.equal(metrics[0].resumed, false);
+    assert.equal(metrics[1].transport, "acp");
+    assert.equal(metrics[1].resumed, true);
+    assert.equal(metrics[1].continuation_source, "previous_response_id");
+    const unoptimizedFollowUpBytes = Buffer.byteLength(buildCursorPrompt(baseRequest({
+      model: "composer-2.5",
+      previous_response_id: body.id,
+      input: followUpInput,
+      tools: [],
+      stream: false,
+    })), "utf8");
+    assert.ok(metrics[1].prompt_bytes < unoptimizedFollowUpBytes);
+
+    const textFollowUpInput = [
+      ...followUpInput,
+      ...followUpBody.output,
+      {
+        role: "user",
+        type: "message",
+        content: [{ type: "input_text", text: "http-acp-text-follow-up" }],
+      },
+    ];
+    const textFollowUpResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-syncbar-bridge-token": bridgeToken,
+      },
+      body: JSON.stringify(baseRequest({
+        model: "composer-2.5",
+        previous_response_id: followUpBody.id,
+        input: textFollowUpInput,
+        tools: [],
+        stream: false,
+      })),
+    });
+    const textFollowUpBody = await textFollowUpResponse.json();
+    assert.equal(textFollowUpResponse.status, 200, JSON.stringify(textFollowUpBody));
+    assert.equal(textFollowUpBody.output[0].content[0].text, "acp-image-route-ok");
+    assert.equal(metrics[2].transport, "acp");
+    assert.equal(metrics[2].resumed, true);
+    assert.equal(metrics[2].continuation_source, "previous_response_id");
 
     const fileResponse = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
@@ -2841,6 +3149,77 @@ test("HTTP image requests use the ACP transport", async () => {
     const explicitBody = await explicitResponse.json();
     assert.equal(explicitResponse.status, 200, JSON.stringify(explicitBody));
     assert.equal(explicitBody.output[0].content[0].text, "hello");
+  } finally {
+    await stopBridge(server);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("expired ACP sessions fall back to one bounded full-history replay", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-http-acp-fallback-test-"));
+  const workspace = path.join(root, "workspace");
+  const fakeAgent = await createFakeACPAgent(root, { failFirstLoad: true });
+  const bridgeToken = "8".repeat(64);
+  const metrics = [];
+  const server = await startBridge({
+    host: "127.0.0.1",
+    port: 0,
+    agentPath: fakeAgent,
+    model: "composer-2.5",
+    allowedModels: ["composer-2.5"],
+    workspace,
+    timeoutMs: 5_000,
+    bridgeToken,
+    metricsSink: (metric) => metrics.push(metric),
+  });
+  try {
+    const address = server.address();
+    const url = `http://127.0.0.1:${address.port}/v1/responses`;
+    const headers = { "content-type": "application/json", "x-syncbar-bridge-token": bridgeToken };
+    const firstInput = [{
+      role: "user",
+      type: "message",
+      content: [
+        { type: "input_text", text: "http-acp-image-route" },
+        { type: "input_image", image_url: PNG_DATA_URI },
+      ],
+    }];
+    const firstResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({ input: firstInput, tools: [], stream: false })),
+    });
+    const first = await firstResponse.json();
+    assert.equal(firstResponse.status, 200, JSON.stringify(first));
+
+    const followUpResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: first.id,
+        input: [
+          ...firstInput,
+          ...first.output,
+          {
+            role: "user",
+            type: "message",
+            content: [
+              { type: "input_text", text: "http-acp-image-follow-up" },
+              { type: "input_image", image_url: JPEG_DATA_URI },
+            ],
+          },
+        ],
+        tools: [],
+        stream: false,
+      })),
+    });
+    const followUp = await followUpResponse.json();
+    assert.equal(followUpResponse.status, 200, JSON.stringify(followUp));
+    assert.equal(followUp.output[0].content[0].text, "acp-image-route-ok");
+    assert.equal(metrics.length, 2);
+    assert.equal(metrics[1].transport, "acp");
+    assert.equal(metrics[1].resumed, false);
+    assert.equal(metrics[1].continuation_source, "previous_response_id_replay");
   } finally {
     await stopBridge(server);
     await rm(root, { recursive: true, force: true });

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID, timingSafeEqual } from "node:crypto";
-import { lstat, mkdir, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -33,9 +33,11 @@ const MAX_OFFICE_EXTRACTOR_OUTPUT_BYTES = MAX_EXTRACTED_TEXT_PER_FILE_BYTES + 64
 const OFFICE_EXTRACTOR_TIMEOUT_MS = 15_000;
 const MAX_PDF_EXTRACTOR_OUTPUT_BYTES = 36 * 1024 * 1024;
 const PDF_EXTRACTOR_TIMEOUT_MS = 30_000;
-const MAX_CONCURRENT_REQUESTS = 4;
+const MAX_CONCURRENT_REQUESTS = 64;
 const MAX_CURSOR_SESSIONS = 128;
-const CURSOR_SESSION_TTL_MS = 30 * 60 * 1000;
+const CURSOR_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CURSOR_SESSION_STORE_SCHEMA_VERSION = 1;
+const MAX_CURSOR_SESSION_STORE_BYTES = 8 * 1024 * 1024;
 const MAX_CURSOR_MODEL_COUNT = 512;
 const MAX_CURSOR_MODELS_JSON_BYTES = 128 * 1024;
 const MAX_CURSOR_MODEL_PARAMETERS_JSON_BYTES = 512 * 1024;
@@ -177,6 +179,13 @@ export function continuationRequest(request, previous) {
   }
   const priorInput = Array.isArray(previous.input) ? previous.input : [];
   const priorOutput = Array.isArray(previous.output) ? previous.output : [];
+  if (priorInput.length === 0 && priorOutput.length === 0 && previous.checkpoint) {
+    const stripped = continuationInputFromCheckpoint(request.input, previous.checkpoint);
+    return requestWithPersistedDynamicTools(
+      stripped === null ? request : { ...request, input: stripped },
+      persistedDynamicTools,
+    );
+  }
   const combined = [...priorInput, ...priorOutput];
   if (combined.length > 0 && arrayStartsWith(request.input, combined)) {
     return requestWithPersistedDynamicTools(
@@ -199,17 +208,76 @@ export function continuationRequest(request, previous) {
   return requestWithPersistedDynamicTools(request, persistedDynamicTools);
 }
 
+function stableDigest(value) {
+  return createHash("sha256").update(stableJSONStringify(value)).digest("hex");
+}
+
+function continuationCheckpoint(input, output) {
+  return {
+    input: Array.isArray(input)
+      ? { count: input.length, digest: stableDigest(input) }
+      : { count: null, digest: stableDigest(input) },
+    output: Array.isArray(output)
+      ? { count: output.length, digest: stableDigest(output) }
+      : { count: null, digest: stableDigest(output) },
+  };
+}
+
+function validCheckpointPart(value) {
+  return Boolean(value && typeof value === "object" &&
+    (value.count === null || (Number.isInteger(value.count) && value.count >= 0)) &&
+    typeof value.digest === "string" && /^[a-f0-9]{64}$/.test(value.digest));
+}
+
+function validContinuationCheckpoint(value) {
+  return Boolean(value && typeof value === "object" &&
+    validCheckpointPart(value.input) && validCheckpointPart(value.output));
+}
+
+function arraySliceMatchesCheckpoint(values, start, part) {
+  if (!Array.isArray(values) || !Number.isInteger(part?.count)) return false;
+  if (start < 0 || start + part.count > values.length) return false;
+  return stableDigest(values.slice(start, start + part.count)) === part.digest;
+}
+
+function continuationInputFromCheckpoint(input, checkpoint) {
+  if (!Array.isArray(input) || !validContinuationCheckpoint(checkpoint)) return null;
+  const inputPart = checkpoint.input;
+  const outputPart = checkpoint.output;
+  if (!arraySliceMatchesCheckpoint(input, 0, inputPart)) return null;
+  let offset = inputPart.count;
+  if (Number.isInteger(outputPart.count) && outputPart.count > 0 &&
+      arraySliceMatchesCheckpoint(input, offset, outputPart)) {
+    offset += outputPart.count;
+  }
+  return input.slice(offset);
+}
+
+function requestMatchesCheckpointInput(input, checkpoint) {
+  if (!validContinuationCheckpoint(checkpoint)) return false;
+  if (Array.isArray(input) && Number.isInteger(checkpoint.input.count)) {
+    return input.length === checkpoint.input.count &&
+      stableDigest(input) === checkpoint.input.digest;
+  }
+  return checkpoint.input.count === null && stableDigest(input) === checkpoint.input.digest;
+}
+
 export class CursorSessionRegistry {
   constructor({
     maxEntries = MAX_CURSOR_SESSIONS,
     ttlMs = CURSOR_SESSION_TTL_MS,
     now = () => Date.now(),
+    storePath = null,
   } = {}) {
     this.maxEntries = maxEntries;
     this.ttlMs = ttlMs;
     this.now = now;
+    this.storePath = storePath;
     this.entries = new Map();
     this.latestByClientKey = new Map();
+    this.persistenceDirty = false;
+    this.persistencePromise = null;
+    this.persistenceError = null;
   }
 
   delete(responseID) {
@@ -219,6 +287,7 @@ export class CursorSessionRegistry {
     if (entry.clientKey && this.latestByClientKey.get(entry.clientKey) === responseID) {
       this.latestByClientKey.delete(entry.clientKey);
     }
+    this.schedulePersist();
   }
 
   prune() {
@@ -242,9 +311,11 @@ export class CursorSessionRegistry {
       createdAt: this.now(),
       inUse: false,
       continued: false,
+      checkpoint: continuationCheckpoint(value.input, value.output),
     });
     if (value.clientKey) this.latestByClientKey.set(value.clientKey, responseID);
     this.prune();
+    this.schedulePersist();
   }
 
   acquireLatest(clientKey, { model, workspace }) {
@@ -295,16 +366,144 @@ export class CursorSessionRegistry {
     else {
       entry.inUse = false;
       if (markContinued) entry.continued = true;
+      this.schedulePersist();
     }
   }
 
-  clear() {
+  clear({ persist = true } = {}) {
     this.entries.clear();
     this.latestByClientKey.clear();
+    if (persist) this.schedulePersist();
   }
 
   get size() {
     return this.entries.size;
+  }
+
+  persistedEntries() {
+    return [...this.entries.values()].map((entry) => ({
+      responseID: entry.responseID,
+      sessionID: entry.sessionID,
+      transport: entry.transport,
+      model: entry.model,
+      workspace: entry.workspace,
+      dynamicTools: entry.dynamicTools,
+      clientKey: entry.clientKey,
+      createdAt: entry.createdAt,
+      continued: entry.continued,
+      checkpoint: entry.checkpoint ?? continuationCheckpoint(entry.input, entry.output),
+    }));
+  }
+
+  schedulePersist() {
+    if (!this.storePath) return;
+    this.persistenceDirty = true;
+    if (this.persistencePromise) return;
+    this.persistencePromise = Promise.resolve().then(async () => {
+      while (this.persistenceDirty) {
+        this.persistenceDirty = false;
+        await this.writeSnapshot();
+      }
+    }).catch((error) => {
+      this.persistenceError = error;
+    }).finally(() => {
+      this.persistencePromise = null;
+      if (this.persistenceDirty) this.schedulePersist();
+    });
+  }
+
+  async flush() {
+    while (this.persistencePromise || this.persistenceDirty) {
+      if (this.persistenceDirty && !this.persistencePromise) this.schedulePersist();
+      await this.persistencePromise;
+    }
+    if (this.persistenceError) {
+      const error = this.persistenceError;
+      this.persistenceError = null;
+      throw error;
+    }
+  }
+
+  async writeSnapshot() {
+    const directory = path.dirname(this.storePath);
+    await ensureDirectory(directory);
+    let existing = null;
+    try {
+      existing = await lstat(this.storePath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    if (existing && (!existing.isFile() || existing.isSymbolicLink() ||
+        (typeof process.getuid === "function" && existing.uid !== process.getuid()) ||
+        (typeof process.getuid === "function" && (existing.mode & 0o077) !== 0))) {
+      throw new BridgeError("Cursor session store is unsafe", 500, "unsafe_path");
+    }
+    const contents = `${JSON.stringify({
+      schemaVersion: CURSOR_SESSION_STORE_SCHEMA_VERSION,
+      entries: this.persistedEntries(),
+    })}\n`;
+    if (Buffer.byteLength(contents, "utf8") > MAX_CURSOR_SESSION_STORE_BYTES) {
+      throw new BridgeError("Cursor session store is too large", 500, "session_store_too_large");
+    }
+    const temporary = `${this.storePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      await rename(temporary, this.storePath);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+
+  async load() {
+    if (!this.storePath) return;
+    await ensureDirectory(path.dirname(this.storePath));
+    let file;
+    try {
+      file = await lstat(this.storePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+    if (!file.isFile() || file.isSymbolicLink() || file.size > MAX_CURSOR_SESSION_STORE_BYTES ||
+        (typeof process.getuid === "function" && file.uid !== process.getuid()) ||
+        (typeof process.getuid === "function" && (file.mode & 0o077) !== 0)) {
+      throw new BridgeError("Cursor session store is unsafe", 500, "unsafe_path");
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(await readFile(this.storePath, "utf8"));
+    } catch {
+      return;
+    }
+    if (parsed?.schemaVersion !== CURSOR_SESSION_STORE_SCHEMA_VERSION ||
+        !Array.isArray(parsed.entries)) return;
+    const cutoff = this.now() - this.ttlMs;
+    for (const entry of parsed.entries.slice(-this.maxEntries)) {
+      if (!entry || typeof entry !== "object" ||
+          typeof entry.responseID !== "string" || !/^resp_[a-f0-9]{32}$/.test(entry.responseID) ||
+          !validCursorSessionID(entry.sessionID) ||
+          !["stream-json", "acp"].includes(entry.transport) ||
+          typeof entry.model !== "string" || !CURSOR_MODEL_SLUG_PATTERN.test(entry.model) ||
+          typeof entry.workspace !== "string" || entry.workspace.length === 0 ||
+          !path.isAbsolute(entry.workspace) ||
+          !Number.isFinite(entry.createdAt) || entry.createdAt <= cutoff ||
+          typeof entry.continued !== "boolean" ||
+          !validContinuationCheckpoint(entry.checkpoint) ||
+          (entry.clientKey !== null && !validClientContinuationKey(entry.clientKey)) ||
+          !Array.isArray(entry.dynamicTools)) continue;
+      try {
+        validatedTools(entry.dynamicTools);
+      } catch {
+        continue;
+      }
+      this.entries.set(entry.responseID, {
+        ...entry,
+        input: undefined,
+        output: undefined,
+        inUse: false,
+      });
+      if (entry.clientKey) this.latestByClientKey.set(entry.clientKey, entry.responseID);
+    }
   }
 }
 
@@ -3022,17 +3221,6 @@ function hasReplayableConversationHistory(input) {
   });
 }
 
-function inputMayRequireACP(value) {
-  if (Array.isArray(value)) return value.some(inputMayRequireACP);
-  if (!value || typeof value !== "object") return false;
-  if (RESOURCE_CONTENT_TYPES.has(value.type) ||
-      value.type === "additional_tools" || value.type === "tool_search_output") {
-    return false;
-  }
-  if (["computer_screenshot", "input_file", "input_image"].includes(value.type)) return true;
-  return Object.values(value).some(inputMayRequireACP);
-}
-
 function requireReplayableConversation(input, message) {
   if (!hasReplayableConversationHistory(input)) {
     throw new BridgeError(message, 409, "invalid_previous_response");
@@ -3165,6 +3353,7 @@ export function runCursorACP({
   workspace,
   model,
   modelParameters,
+  resumeSessionID = null,
   sandboxMode = "enabled",
   prompt,
   timeoutMs,
@@ -3176,7 +3365,11 @@ export function runCursorACP({
   now = () => performance.now(),
 }) {
   return new Promise((resolve, reject) => {
-    if (!Array.isArray(prompt) || prompt.length < 2 || prompt[0]?.type !== "text") {
+    if (resumeSessionID !== null && !validCursorSessionID(resumeSessionID)) {
+      reject(new BridgeError("Cursor ACP resume session ID is invalid", 500, "invalid_cursor_session"));
+      return;
+    }
+    if (!Array.isArray(prompt) || prompt.length < 1 || prompt[0]?.type !== "text") {
       reject(new BridgeError("Cursor ACP prompt is invalid", 500, "invalid_acp_prompt"));
       return;
     }
@@ -3211,6 +3404,7 @@ export function runCursorACP({
     let outputTextBytes = 0;
     let sessionID = null;
     let currentModeID = null;
+    let loadingSession = false;
     let settled = false;
     const pending = new Map();
     const modeWaiters = new Set();
@@ -3219,7 +3413,7 @@ export function runCursorACP({
       sessionID: null,
       nativeToolCalls: 0,
       nativeToolSubtype: null,
-      resumed: false,
+      resumed: resumeSessionID !== null,
       firstTextDeltaMs: null,
       totalMs: null,
     };
@@ -3385,8 +3579,8 @@ export function runCursorACP({
         if (message.error) {
           waiter.reject(new BridgeError(
             `Cursor ACP ${waiter.method} failed`,
-            502,
-            "agent_failed",
+            waiter.method === "session/load" ? 409 : 502,
+            waiter.method === "session/load" ? "acp_session_unavailable" : "agent_failed",
           ));
         } else {
           waiter.resolve(message.result);
@@ -3407,6 +3601,10 @@ export function runCursorACP({
           finishError(new BridgeError("Cursor ACP returned an invalid session update", 502, "invalid_agent_stream"));
           return;
         }
+        // Cursor replays stored assistant and tool updates while session/load is
+        // reconstructing history. They belong to the previous turn and must not
+        // be emitted again as deltas for the new Codex response.
+        if (loadingSession) return;
         if (update.sessionUpdate === "agent_message_chunk") {
           const text = acpMessageText(update.content);
           if (!text && update.content?.type !== "text") {
@@ -3552,15 +3750,43 @@ export function runCursorACP({
             "image_input_unavailable",
           );
         }
-        await sendRequest("authenticate", { methodId: "cursor_login" });
-        const session = await sendRequest("session/new", {
-          cwd: workspace,
-          mcpServers: [],
-        });
-        if (!session || typeof session.sessionId !== "string" || session.sessionId.length === 0) {
-          throw new BridgeError("Cursor ACP did not create a session", 502, "invalid_agent_stream");
+        if (resumeSessionID !== null && initialized?.agentCapabilities?.loadSession !== true) {
+          throw new BridgeError(
+            "Installed Cursor CLI cannot reload ACP sessions",
+            503,
+            "acp_session_unavailable",
+          );
         }
-        sessionID = session.sessionId;
+        await sendRequest("authenticate", { methodId: "cursor_login" });
+        let session;
+        if (resumeSessionID !== null) {
+          sessionID = resumeSessionID;
+          loadingSession = true;
+          session = await sendRequest("session/load", {
+            sessionId: resumeSessionID,
+            cwd: workspace,
+            mcpServers: [],
+          });
+          loadingSession = false;
+        } else {
+          session = await sendRequest("session/new", {
+            cwd: workspace,
+            mcpServers: [],
+          });
+          if (!session || typeof session.sessionId !== "string" || session.sessionId.length === 0) {
+            throw new BridgeError("Cursor ACP did not create a session", 502, "invalid_agent_stream");
+          }
+          sessionID = session.sessionId;
+        }
+        if (!session || typeof session !== "object") {
+          throw new BridgeError(
+            resumeSessionID === null
+              ? "Cursor ACP did not create a session"
+              : "Cursor ACP did not reload the session",
+            502,
+            resumeSessionID === null ? "invalid_agent_stream" : "acp_session_unavailable",
+          );
+        }
         metadata.sessionID = sessionID;
         const modes = session.modes;
         currentModeID = modes?.currentModeId ?? null;
@@ -4084,7 +4310,7 @@ async function proxyOpenAIResponse({
   });
 }
 
-export function createBridgeServer(config, testHooks) {
+export function createBridgeServer(config, testHooks, restoredSessionRegistry = null) {
   const allowedModels = configuredCursorModels(config);
   const modelParameters = configuredCursorModelParameters(config, allowedModels);
   const modelRoutes = configuredCursorModelRoutes(config, allowedModels);
@@ -4093,7 +4319,7 @@ export function createBridgeServer(config, testHooks) {
   const proxyTargets = openAIProxyTargets(testHooks);
   const activeControllers = new Set();
   const activeChildren = new Set();
-  const sessionRegistry = new CursorSessionRegistry({
+  const sessionRegistry = restoredSessionRegistry ?? new CursorSessionRegistry({
     maxEntries: config.cursorSessionMaxEntries ?? MAX_CURSOR_SESSIONS,
     ttlMs: config.cursorSessionTTLms ?? CURSOR_SESSION_TTL_MS,
     now: config.wallClockNow ?? (() => Date.now()),
@@ -4240,7 +4466,9 @@ export function createBridgeServer(config, testHooks) {
           workspace: config.workspace,
         });
         if (cachedSession) {
-          if (stableJSONStringify(body.input) === stableJSONStringify(cachedSession.input)) {
+          if (cachedSession.input !== undefined
+              ? stableJSONStringify(body.input) === stableJSONStringify(cachedSession.input)
+              : requestMatchesCheckpointInput(body.input, cachedSession.checkpoint)) {
             sessionRegistry.release(cachedSession.responseID);
           } else {
             previousSession = cachedSession;
@@ -4251,8 +4479,7 @@ export function createBridgeServer(config, testHooks) {
       }
       if (previousSession && (
         previousSession.continued ||
-        !validCursorSessionID(previousSession.sessionID) ||
-        inputMayRequireACP(body.input)
+        !validCursorSessionID(previousSession.sessionID)
       )) {
         requireReplayableConversation(
           body.input,
@@ -4276,8 +4503,9 @@ export function createBridgeServer(config, testHooks) {
         onSpawn: (child) => activeChildren.add(child),
         onClose: (child) => activeChildren.delete(child),
       });
-      let usesACP = prepared.imageCount > 0;
-      if (previousSession && usesACP && !statelessReplay) {
+      const previousTransport = previousSession?.transport ?? "stream-json";
+      let usesACP = (!statelessReplay && previousTransport === "acp") || prepared.imageCount > 0;
+      if (previousSession && usesACP && previousTransport !== "acp" && !statelessReplay) {
         requireReplayableConversation(
           body.input,
           "Cursor image continuation requires replayable conversation history",
@@ -4293,8 +4521,12 @@ export function createBridgeServer(config, testHooks) {
         });
         usesACP = prepared.imageCount > 0;
       }
-      const preparationMs = Math.max(0, monotonicNow() - preparationStartedAt);
-      const resumeChatID = !usesACP && !statelessReplay &&
+      let preparationMs = Math.max(0, monotonicNow() - preparationStartedAt);
+      let resumeChatID = !usesACP && !statelessReplay &&
+          validCursorSessionID(previousSession?.sessionID)
+        ? previousSession.sessionID
+        : null;
+      let resumeACPSessionID = usesACP && !statelessReplay && previousTransport === "acp" &&
           validCursorSessionID(previousSession?.sessionID)
         ? previousSession.sessionID
         : null;
@@ -4319,11 +4551,12 @@ export function createBridgeServer(config, testHooks) {
         }, 15_000);
         heartbeat.unref();
       }
-      const execution = (usesACP ? runCursorACP : runCursorAgent)({
+      const executeCursor = () => (usesACP ? runCursorACP : runCursorAgent)({
         agentPath: config.agentPath,
         workspace: config.workspace,
         model: cursorModel,
         resumeChatID,
+        resumeSessionID: resumeACPSessionID,
         modelParameters: modelParameters.get(cursorModel),
         sandboxMode: config.sandboxMode,
         prompt: usesACP ? prepared.acpPrompt : prepared.prompt,
@@ -4335,7 +4568,35 @@ export function createBridgeServer(config, testHooks) {
         onClose: (child) => activeChildren.delete(child),
         onTextDelta: (delta) => streamingResponse?.acceptTextDelta(delta),
       });
-      const result = await execution;
+      let result;
+      try {
+        result = await executeCursor();
+      } catch (error) {
+        if (!(error instanceof BridgeError) ||
+            error.code !== "acp_session_unavailable" ||
+            resumeACPSessionID === null) {
+          throw error;
+        }
+        requireReplayableConversation(
+          body.input,
+          "Cursor ACP session is unavailable and the request does not contain replayable history",
+        );
+        const fallbackPreparationStartedAt = monotonicNow();
+        statelessReplay = true;
+        continuationSource = `${continuationSource ?? "session"}_replay`;
+        cursorRequest = replayRequest;
+        prepared = await prepareCursorBackendRequestWithFiles(cursorRequest, {
+          fileExtractorPath: config.fileExtractorPath ?? defaultPDFExtractorPath(),
+          signal: controller.signal,
+          onSpawn: (child) => activeChildren.add(child),
+          onClose: (child) => activeChildren.delete(child),
+        });
+        preparationMs += Math.max(0, monotonicNow() - fallbackPreparationStartedAt);
+        usesACP = prepared.imageCount > 0;
+        resumeChatID = null;
+        resumeACPSessionID = null;
+        result = await executeCursor();
+      }
       let completed;
       if (body.stream === false) {
         completed = buildResponseResult(cursorRequest, result.text, { responseID });
@@ -4347,11 +4608,10 @@ export function createBridgeServer(config, testHooks) {
       }
       const reusableSessionID = validCursorSessionID(result.metadata.sessionID)
         ? result.metadata.sessionID
-        : resumeChatID;
+        : (resumeChatID ?? resumeACPSessionID);
       sessionRegistry.add(responseID, {
-        sessionID: !usesACP && validCursorSessionID(reusableSessionID)
-          ? reusableSessionID
-          : null,
+        sessionID: validCursorSessionID(reusableSessionID) ? reusableSessionID : null,
+        transport: usesACP ? "acp" : "stream-json",
         model: cursorModel,
         workspace: config.workspace,
         input: clone(body.input),
@@ -4365,7 +4625,7 @@ export function createBridgeServer(config, testHooks) {
       emitCursorRequestMetric(config, {
         request_id: responseID,
         transport: usesACP ? "acp" : "stream-json",
-        resumed: resumeChatID !== null,
+        resumed: resumeChatID !== null || resumeACPSessionID !== null,
         continuation_source: continuationSource,
         preparation_ms: Math.round(preparationMs * 1000) / 1000,
         first_text_delta_ms: result.metadata.firstTextDeltaMs === null
@@ -4408,7 +4668,6 @@ export function createBridgeServer(config, testHooks) {
     for (const controller of activeControllers) controller.abort();
     for (const child of activeChildren) terminateChild(child);
     activeControllers.clear();
-    sessionRegistry.clear();
   });
   bridgeRuntimes.set(server, { activeControllers, activeChildren, sessionRegistry });
   return server;
@@ -4441,11 +4700,26 @@ export async function stopBridge(server) {
     closed,
     new Promise((resolve) => setTimeout(resolve, 250)),
   ]);
+  if (runtime) {
+    await runtime.sessionRegistry.flush();
+    runtime.sessionRegistry.clear({ persist: false });
+    bridgeRuntimes.delete(server);
+  }
 }
 
 export async function startBridge(config, testHooks) {
   await prepareWorkspace(config.workspace);
-  const server = createBridgeServer(config, testHooks);
+  const sessionRegistry = new CursorSessionRegistry({
+    maxEntries: config.cursorSessionMaxEntries ?? MAX_CURSOR_SESSIONS,
+    ttlMs: config.cursorSessionTTLms ?? CURSOR_SESSION_TTL_MS,
+    now: config.wallClockNow ?? (() => Date.now()),
+    storePath: config.sessionStorePath ?? path.join(
+      path.dirname(config.workspace),
+      "cursor-bridge-sessions-v1.json",
+    ),
+  });
+  await sessionRegistry.load();
+  const server = createBridgeServer(config, testHooks, sessionRegistry);
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(config.port, config.host, resolve);
