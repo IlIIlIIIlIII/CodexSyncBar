@@ -7,7 +7,9 @@ PACKAGE_ROOT="$ROOT/Support/cursor-sdk-runtime"
 BUILD_ROOT="$ROOT/.build/cursor-sdk-runtime"
 ARCHIVE="$BUILD_ROOT/cursor-sdk-runtime.tar.gz"
 MANIFEST="$BUILD_ROOT/cursor-sdk-runtime.manifest"
+FORMAT_MARKER="$BUILD_ROOT/archive-format"
 SDK_VERSION="1.0.28"
+ARCHIVE_FORMAT="portable-no-xattrs-v1"
 
 command -v npm >/dev/null 2>&1 || {
   printf '%s\n' "npm is required to package the Cursor SDK runtime" >&2
@@ -20,9 +22,10 @@ command -v node >/dev/null 2>&1 || {
 
 lock_hash=$(/usr/bin/shasum -a 256 "$PACKAGE_ROOT/package-lock.json" | /usr/bin/awk '{print $1}')
 expected_marker="lock_sha256=$lock_hash"
-if [ -f "$ARCHIVE" ] && [ -f "$MANIFEST" ] && \
+if [ -f "$ARCHIVE" ] && [ -f "$MANIFEST" ] && [ -f "$FORMAT_MARKER" ] && \
    /usr/bin/grep -Fqx "sdk_version=$SDK_VERSION" "$MANIFEST" && \
-   /usr/bin/grep -Fqx "$expected_marker" "$MANIFEST"; then
+   /usr/bin/grep -Fqx "$expected_marker" "$MANIFEST" && \
+   /usr/bin/grep -Fqx "$ARCHIVE_FORMAT" "$FORMAT_MARKER"; then
   printf '%s\n%s\n' "$ARCHIVE" "$MANIFEST"
   exit 0
 fi
@@ -31,9 +34,10 @@ mkdir -p "$ROOT/.build"
 stage=$(mktemp -d "$ROOT/.build/cursor-sdk-runtime-stage.XXXXXX")
 archive_new="$ROOT/.build/.cursor-sdk-runtime.$$.tar.gz"
 manifest_new="$ROOT/.build/.cursor-sdk-runtime.$$.manifest"
+format_marker_new="$ROOT/.build/.cursor-sdk-runtime.$$.format"
 cleanup() {
   rm -rf "$stage"
-  rm -f "$archive_new" "$manifest_new"
+  rm -f "$archive_new" "$manifest_new" "$format_marker_new"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -66,7 +70,7 @@ for (const name of [
 }
 NODE
 
-COPYFILE_DISABLE=1 /usr/bin/tar -czf "$archive_new" -C "$stage" node_modules
+COPYFILE_DISABLE=1 /usr/bin/tar --no-xattrs -czf "$archive_new" -C "$stage" node_modules
 archive_hash=$(/usr/bin/shasum -a 256 "$archive_new" | /usr/bin/awk '{print $1}')
 printf '%s\n%s\n%s\n%s\n' \
   'schema_version=1' \
@@ -74,8 +78,11 @@ printf '%s\n%s\n%s\n%s\n' \
   "$expected_marker" \
   "archive_sha256=$archive_hash" >"$manifest_new"
 chmod 600 "$archive_new" "$manifest_new"
+printf '%s\n' "$ARCHIVE_FORMAT" >"$format_marker_new"
+chmod 600 "$format_marker_new"
 mkdir -p "$BUILD_ROOT"
 mv -f "$archive_new" "$ARCHIVE"
 mv -f "$manifest_new" "$MANIFEST"
+mv -f "$format_marker_new" "$FORMAT_MARKER"
 
 printf '%s\n%s\n' "$ARCHIVE" "$MANIFEST"
