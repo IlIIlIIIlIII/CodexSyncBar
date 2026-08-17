@@ -198,12 +198,16 @@ function baseRequest(overrides = {}) {
 }
 
 function fakeCursorSDK() {
+  let markBufferedBoundaryReady;
   const observed = {
     configurations: [],
     creates: [],
     resumes: [],
     sends: [],
     toolResults: [],
+    bufferedBoundaryReady: new Promise((resolve) => {
+      markBufferedBoundaryReady = resolve;
+    }),
   };
 
   class JsonlLocalAgentStore {
@@ -223,7 +227,26 @@ function fakeCursorSDK() {
     const text = typeof message === "string" ? message : message?.text ?? "";
     queueMicrotask(async () => {
       try {
-        if (text.includes("sdk-tool-roundtrip")) {
+        if (text.includes("sdk-buffered-boundary-roundtrip")) {
+          const entry = Object.entries(options.local?.customTools ?? {})
+            .find(([, tool]) => tool.description?.includes("Outer tool: read_record."));
+          assert.ok(entry, "function callback tool was not exposed through SDK MCP");
+          await options.onDelta?.({ update: { type: "text-delta", text: "첫 도구를 확인합니다." } });
+          const firstResult = entry[1].execute(
+            { id: "record-first" },
+            { toolCallId: "sdk-call-first" },
+          );
+          await new Promise((resolve) => setImmediate(resolve));
+          await options.onDelta?.({ update: { type: "text-delta", text: "경계 사이에 버퍼됨." } });
+          markBufferedBoundaryReady();
+          observed.toolResults.push(await firstResult);
+          await options.onDelta?.({ update: { type: "text-delta", text: "다음 도구를 확인합니다." } });
+          observed.toolResults.push(await entry[1].execute(
+            { id: "record-second" },
+            { toolCallId: "sdk-call-second" },
+          ));
+          await options.onDelta?.({ update: { type: "text-delta", text: "두 결과를 반영했습니다." } });
+        } else if (text.includes("sdk-tool-roundtrip")) {
           await options.onDelta?.({ update: { type: "text-delta", text: "도구를 확인하겠습니다." } });
           const entry = Object.entries(options.local?.customTools ?? {})
             .find(([, tool]) => tool.description?.includes("Outer tool: read_record."));
@@ -1257,6 +1280,134 @@ test("Cursor SDK function callbacks preserve call ids and resume with cached usa
       output_tokens_details: { reasoning_tokens: 3 },
       total_tokens: 132,
     });
+  } finally {
+    await backend?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Cursor SDK replays text buffered between outer tool boundaries", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-boundary-buffer-test-"));
+  const fixture = fakeCursorSDK();
+  let backend;
+  try {
+    backend = await CursorSDKBackend.create({
+      backend: "sdk",
+      apiKey: "cursor_fixture_api_key_1234567890",
+      sdkModule: fixture.module,
+      sdkVersion: "1.0.28",
+      sdkStateRoot: path.join(root, "sdk-state"),
+      sandboxMode: "enabled",
+      workspace: path.join(root, "bridge-workspace"),
+    });
+    const initial = baseRequest({
+      input: [{ role: "user", content: "sdk-buffered-boundary-roundtrip" }],
+      stream: false,
+    });
+    const first = await backend.execute({
+      request: initial,
+      hostRequest: initial,
+      prepared: prepareCursorBackendRequest(initial),
+      model: "composer-2.5",
+      previousSession: null,
+      previousResponseID: null,
+      responseID: "resp_sdk_buffer_first",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.equal(first.pending, true);
+    assert.equal(first.text, "첫 도구를 확인합니다.");
+    assert.equal(first.toolCall.callID, "sdk-call-first");
+
+    await fixture.observed.bufferedBoundaryReady;
+    const replayedDeltas = [];
+    const firstOutput = baseRequest({
+      instructions: undefined,
+      input: [{
+        type: "function_call_output",
+        call_id: "sdk-call-first",
+        output: "first-result",
+      }],
+      tools: [],
+      stream: false,
+    });
+    delete firstOutput.instructions;
+    const streamedEvents = [];
+    const streamedResponse = new StreamingResponseSSE(
+      firstOutput,
+      (event) => streamedEvents.push(event),
+      { responseID: "resp_sdk_buffer_second", structuredToolCalls: true },
+    );
+    streamedResponse.start();
+    const second = await backend.execute({
+      request: firstOutput,
+      hostRequest: firstOutput,
+      prepared: prepareCursorBackendRequest(firstOutput),
+      model: "composer-2.5",
+      previousSession: {
+        sessionID: first.metadata.sessionID,
+        sessionKey: first.sessionKey,
+        instructionHash: first.instructionHash,
+        pendingSDKRun: true,
+      },
+      previousResponseID: "resp_sdk_buffer_first",
+      responseID: "resp_sdk_buffer_second",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+      onTextDelta: (delta) => {
+        replayedDeltas.push(delta);
+        streamedResponse.acceptTextDelta(delta);
+      },
+    });
+    assert.equal(second.pending, true);
+    assert.equal(second.toolCall.callID, "sdk-call-second");
+    assert.equal(second.text, "경계 사이에 버퍼됨.다음 도구를 확인합니다.");
+    assert.deepEqual(replayedDeltas, [
+      "경계 사이에 버퍼됨.",
+      "다음 도구를 확인합니다.",
+    ]);
+    const completedSecond = streamedResponse.complete(second.text, { toolCall: second.toolCall });
+    assert.equal(completedSecond.status, "completed");
+    assert.equal(completedSecond.output[0].content[0].text, second.text);
+    assert.equal(completedSecond.output[1].call_id, "sdk-call-second");
+    assert.equal(streamedEvents.at(-1).type, "response.completed");
+
+    const secondOutput = baseRequest({
+      instructions: undefined,
+      input: [{
+        type: "function_call_output",
+        call_id: "sdk-call-second",
+        output: "second-result",
+      }],
+      tools: [],
+      stream: false,
+    });
+    delete secondOutput.instructions;
+    const third = await backend.execute({
+      request: secondOutput,
+      hostRequest: secondOutput,
+      prepared: prepareCursorBackendRequest(secondOutput),
+      model: "composer-2.5",
+      previousSession: {
+        sessionID: second.metadata.sessionID,
+        sessionKey: second.sessionKey,
+        instructionHash: second.instructionHash,
+        pendingSDKRun: true,
+      },
+      previousResponseID: "resp_sdk_buffer_second",
+      responseID: "resp_sdk_buffer_final",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.equal(third.pending, false);
+    assert.equal(third.text, "두 결과를 반영했습니다.");
+    assert.deepEqual(fixture.observed.toolResults, ["first-result", "second-result"]);
   } finally {
     await backend?.close();
     await rm(root, { recursive: true, force: true });

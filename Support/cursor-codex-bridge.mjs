@@ -3303,6 +3303,12 @@ class CursorSDKRunCoordinator {
 
   setTextListener(listener) {
     this.state.listener = listener ?? null;
+    if (listener) {
+      // The SDK may emit text after one outer response closes but before its
+      // tool result continuation arrives. Replay that gap before live deltas.
+      const buffered = this.text.slice(this.boundaryOffset);
+      if (buffered) listener(buffered);
+    }
   }
 
   takeText() {
@@ -3327,6 +3333,7 @@ class CursorSDKRunCoordinator {
         this.resultPromise.then((result) => ({ type: "final", result })),
         timedOut,
       ]);
+      this.setTextListener(null);
       if (boundary.type === "tool") {
         this.callCount += 1;
         return {
@@ -3355,6 +3362,7 @@ class CursorSDKRunCoordinator {
           : Math.max(0, this.now() - this.startedAt),
       };
     } finally {
+      this.setTextListener(null);
       clearTimeout(timeout);
     }
   }
