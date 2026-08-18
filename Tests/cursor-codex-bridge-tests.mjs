@@ -299,6 +299,10 @@ function fakeCursorSDK() {
           } });
           await options.onDelta?.({ update: { type: "summary-completed" } });
           await options.onDelta?.({ update: { type: "text-delta", text: "sdk-summary-complete" } });
+        } else if (text.includes("sdk-thinking-final")) {
+          await options.onDelta?.({ update: { type: "thinking-delta", text: "경로를 대조한다." } });
+          await options.onDelta?.({ update: { type: "thinking-completed", thinkingDurationMs: 8 } });
+          await options.onDelta?.({ update: { type: "text-delta", text: "예비 경로는 대기 중이다." } });
         } else {
           await options.onDelta?.({ update: { type: "text-delta", text: "sdk-final" } });
         }
@@ -2717,6 +2721,92 @@ test("the backend prompt permits only a concise pre-tool progress update", () =>
   assert.match(prompt, /first write exactly one concise progress update stating the next action/);
   assert.match(prompt, /without revealing private chain-of-thought/);
   assert.match(prompt, /return nothing after the closing tag/);
+});
+
+test("Cursor SDK thinking-delta stays out of the final answer", () => {
+  const thinking = "이미지 한도를 확인한 뒤 실제 요청을 대조한다.";
+  const answer = "이미지 입력은 들어가고, 요청은 200으로 처리됐다.";
+  const response = buildResponseResult(baseRequest(), answer, { thinking });
+  assert.equal(response.output.length, 2);
+  assert.equal(response.output[0].phase, "commentary");
+  assert.equal(response.output[0].content[0].text, thinking);
+  assert.equal(response.output[1].phase, "final_answer");
+  assert.equal(response.output[1].content[0].text, answer);
+  assert.equal(response.output[1].content[0].text.includes("확인한 뒤"), false);
+});
+
+test("text-only SDK output stays a single final message", () => {
+  const answer = "이미지 입력은 들어가고, 요청은 200으로 처리됐다.";
+  const response = buildResponseResult(baseRequest(), answer);
+  assert.equal(response.output.length, 1);
+  assert.equal(response.output[0].phase, "final_answer");
+  assert.equal(response.output[0].content[0].text, answer);
+});
+
+test("streamed SDK thinking-delta becomes commentary before the final text", () => {
+  const thinking = "공개 경로와 예비 경로를 대조한다.";
+  const answer = "최근 12시간 실제 트래픽은 전부 한 경로에서 처리됐다.";
+  const events = [];
+  const stream = new StreamingResponseSSE(baseRequest(), (event) => events.push(event));
+  stream.start();
+  stream.acceptCommentaryDelta(thinking);
+  stream.acceptTextDelta(answer);
+  const response = stream.complete(answer);
+  assert.equal(response.output.length, 2);
+  assert.equal(response.output[0].phase, "commentary");
+  assert.equal(response.output[0].content[0].text, thinking);
+  assert.equal(response.output[1].phase, "final_answer");
+  assert.equal(response.output[1].content[0].text, answer);
+  assert.deepEqual(
+    events.filter((event) => event.type === "response.output_item.done")
+      .map((event) => [event.data.output_index, event.data.item.phase]),
+    [[0, "commentary"], [1, "final_answer"]],
+  );
+});
+
+test("Cursor SDK execute maps thinking-delta to commentary and text-delta to the final answer", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-thinking-test-"));
+  const workspace = path.join(root, "bridge-workspace");
+  const fixture = fakeCursorSDK();
+  let backend;
+  try {
+    backend = await CursorSDKBackend.create({
+      backend: "sdk",
+      apiKey: "cursor_fixture_api_key_1234567890",
+      sdkModule: fixture.module,
+      sdkVersion: "1.0.28",
+      sdkStateRoot: path.join(root, "sdk-state"),
+      sandboxMode: "enabled",
+      workspace,
+    });
+    const request = baseRequest({
+      input: [{ role: "user", content: "sdk-thinking-final" }],
+      tools: [],
+      stream: false,
+    });
+    const result = await backend.execute({
+      request,
+      hostRequest: request,
+      prepared: prepareCursorBackendRequest(request),
+      model: "composer-2.5",
+      previousSession: null,
+      previousResponseID: null,
+      responseID: "resp_sdk_thinking",
+      replay: false,
+      dynamicTools: [],
+      timeoutMs: 2_000,
+      signal: new AbortController().signal,
+    });
+    assert.equal(result.thinking, "경로를 대조한다.");
+    assert.equal(result.text, "예비 경로는 대기 중이다.");
+    const response = buildResponseResult(request, result.text, { thinking: result.thinking });
+    assert.equal(response.output[0].phase, "commentary");
+    assert.equal(response.output[1].phase, "final_answer");
+    assert.equal(response.output[1].content[0].text, result.text);
+  } finally {
+    await backend?.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("required and specific tool choices are enforced", () => {

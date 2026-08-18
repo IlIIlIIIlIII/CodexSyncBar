@@ -3609,6 +3609,29 @@ function sdkTextDelta(update) {
   return "";
 }
 
+function sdkThinkingDelta(update) {
+  if (!update || typeof update !== "object") return "";
+  if (update.type === "thinking-delta" && typeof update.text === "string") return update.text;
+  return "";
+}
+
+function joinedCommentary(...parts) {
+  return parts
+    .map((part) => typeof part === "string" ? part.trim() : "")
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function sdkChannelOutput(text, thinking) {
+  const commentary = joinedCommentary(thinking);
+  return commentary
+    ? [
+        messageItem(commentary, true, "commentary"),
+        messageItem(text, true, "final_answer"),
+      ]
+    : [messageItem(text, true)];
+}
+
 export function responsesUsageFromCursorSDK(usage) {
   if (!usage || typeof usage !== "object") return null;
   const inputTokens = Number(usage.inputTokens);
@@ -3730,6 +3753,8 @@ class CursorSDKRunCoordinator {
     this.collectBilling = collectBilling;
     this.text = state.bufferedText ?? "";
     this.boundaryOffset = 0;
+    this.thinking = state.bufferedThinking ?? "";
+    this.thinkingOffset = 0;
     this.callCount = 0;
     this.finished = false;
     this.resultPromise = Promise.resolve(run.wait()).then((result) => {
@@ -3746,6 +3771,12 @@ class CursorSDKRunCoordinator {
 
   acceptDelta(update) {
     acceptCursorSDKStateUpdate(this.state, update);
+    const thinking = sdkThinkingDelta(update);
+    if (thinking) {
+      this.thinking += thinking;
+      this.state.thinkingListener?.(thinking);
+      return;
+    }
     const text = sdkTextDelta(update);
     if (!text) return;
     this.text += text;
@@ -3765,9 +3796,23 @@ class CursorSDKRunCoordinator {
     }
   }
 
+  setThinkingListener(listener) {
+    this.state.thinkingListener = listener ?? null;
+    if (listener) {
+      const buffered = this.thinking.slice(this.thinkingOffset);
+      if (buffered) listener(buffered);
+    }
+  }
+
   takeText() {
     const value = this.text.slice(this.boundaryOffset);
     this.boundaryOffset = this.text.length;
+    return value;
+  }
+
+  takeThinking() {
+    const value = this.thinking.slice(this.thinkingOffset);
+    this.thinkingOffset = this.thinking.length;
     return value;
   }
 
@@ -3794,6 +3839,7 @@ class CursorSDKRunCoordinator {
           type: "tool",
           toolCall: boundary.call,
           text: this.takeText(),
+          thinking: this.takeThinking(),
           usage: null,
         };
       }
@@ -3815,6 +3861,7 @@ class CursorSDKRunCoordinator {
       return {
         type: "final",
         text: deltaText || (typeof boundary.result.result === "string" ? boundary.result.result : ""),
+        thinking: this.takeThinking(),
         usage: responsesUsageFromCursorSDK(this.state.latestTurnUsage),
         currentUsage: this.state.latestTurnUsage ?? null,
         billing,
@@ -3935,6 +3982,7 @@ export class CursorSDKBackend {
     return {
       text: boundary.text,
       toolCall: boundary.toolCall ?? null,
+      thinking: boundary.thinking ?? "",
       usage: boundary.usage ?? null,
       currentUsage: boundary.currentUsage ?? null,
       billing: boundary.billing ?? null,
@@ -3979,8 +4027,9 @@ export class CursorSDKBackend {
     timeoutMs,
     signal,
     onTextDelta,
+    onThinkingDelta,
     now = () => performance.now(),
-  }) {
+ }) {
     const instructionHash = effectiveCursorSDKInstructionHash(hostRequest, previousSession);
     const sessionKey = this.sessionKey(
       hostRequest,
@@ -3999,6 +4048,7 @@ export class CursorSDKBackend {
       }
       this.pendingRuns.delete(previousResponseID);
       coordinator.setTextListener(onTextDelta);
+      coordinator.setThinkingListener(onThinkingDelta);
       coordinator.collectBilling = coordinator.collectBilling || collectBilling;
       try {
         coordinator.rendezvous.updateDynamicTools(dynamicTools);
@@ -4063,8 +4113,10 @@ export class CursorSDKBackend {
     const state = {
       coordinator: null,
       bufferedText: "",
+      bufferedThinking: "",
       firstTextDeltaMs: null,
       listener: onTextDelta ?? null,
+      thinkingListener: onThinkingDelta ?? null,
       latestTurnUsage: null,
       summaryStarted: false,
       summary: null,
@@ -4074,6 +4126,11 @@ export class CursorSDKBackend {
       if (state.coordinator) state.coordinator.acceptDelta(update);
       else {
         acceptCursorSDKStateUpdate(state, update);
+        const thinking = sdkThinkingDelta(update);
+        if (thinking) {
+          state.bufferedThinking += thinking;
+          state.thinkingListener?.(thinking);
+        }
         const text = sdkTextDelta(update);
         if (text) {
           state.bufferedText += text;
@@ -4390,12 +4447,15 @@ export function buildResponseResult(request, cursorText, options = {}) {
       "required_tool_not_called",
     );
   }
+  const thinking = options.thinking;
   const output = parsed
     ? [
-        ...(parsed.commentary ? [messageItem(parsed.commentary, true, "commentary")] : []),
+        ...(joinedCommentary(thinking, parsed.commentary)
+          ? [messageItem(joinedCommentary(thinking, parsed.commentary), true, "commentary")]
+          : []),
         toolItem(parsed.call, true),
       ]
-    : [messageItem(cursorText, true)];
+    : sdkChannelOutput(cursorText, thinking);
   return responseBase(request, id, "completed", output, options.usage ?? null);
 }
 
@@ -4526,11 +4586,15 @@ export class StreamingResponseSSE {
     this.responseID = options.responseID ?? `resp_${randomUUID().replaceAll("-", "")}`;
     this.messageID = `msg_${randomUUID().replaceAll("-", "")}`;
     this.base = responseBase(request, this.responseID, "in_progress", []);
+    this.commentaryID = `msg_${randomUUID().replaceAll("-", "")}`;
     this.choice = normalizedToolChoice(request);
     this.canCallTool = callableTools(request).length > 0 && this.choice.mode !== "none";
     this.pendingText = "";
     this.streamedText = "";
     this.messageStarted = false;
+    this.commentaryStarted = false;
+    this.commentaryFinished = false;
+    this.commentaryText = "";
     this.toolEnvelopeStarted = false;
     this.started = false;
     this.completed = false;
@@ -4552,11 +4616,80 @@ export class StreamingResponseSSE {
     this.emit("response.in_progress", { response: created });
   }
 
+  textOutputIndex() {
+    return this.commentaryStarted ? 1 : 0;
+  }
+
+  acceptCommentaryDelta(delta) {
+    if (this.completed || typeof delta !== "string" || delta.length === 0) return;
+    if (!this.commentaryStarted) {
+      this.commentaryStarted = true;
+      this.emit("response.output_item.added", {
+        output_index: 0,
+        item: {
+          id: this.commentaryID,
+          type: "message",
+          status: "in_progress",
+          role: "assistant",
+          content: [],
+        },
+      });
+      this.emit("response.content_part.added", {
+        item_id: this.commentaryID,
+        output_index: 0,
+        content_index: 0,
+        part: { type: "output_text", text: "", annotations: [], logprobs: [] },
+      });
+    }
+    this.commentaryText += delta;
+    this.emit("response.output_text.delta", {
+      item_id: this.commentaryID,
+      output_index: 0,
+      content_index: 0,
+      delta,
+      logprobs: [],
+    });
+  }
+
+  finishCommentary() {
+    if (!this.commentaryStarted || this.commentaryFinished) return null;
+    this.commentaryFinished = true;
+    const part = {
+      type: "output_text",
+      text: this.commentaryText,
+      annotations: [],
+      logprobs: [],
+    };
+    const item = {
+      id: this.commentaryID,
+      type: "message",
+      status: "completed",
+      role: "assistant",
+      phase: "commentary",
+      content: [part],
+    };
+    this.emit("response.output_text.done", {
+      item_id: this.commentaryID,
+      output_index: 0,
+      content_index: 0,
+      text: this.commentaryText,
+      logprobs: [],
+    });
+    this.emit("response.content_part.done", {
+      item_id: this.commentaryID,
+      output_index: 0,
+      content_index: 0,
+      part,
+    });
+    this.emit("response.output_item.done", { output_index: 0, item });
+    return item;
+  }
+
   beginMessage() {
     if (this.messageStarted) return;
     this.messageStarted = true;
     this.emit("response.output_item.added", {
-      output_index: 0,
+      output_index: this.textOutputIndex(),
       item: {
         id: this.messageID,
         type: "message",
@@ -4567,7 +4700,7 @@ export class StreamingResponseSSE {
     });
     this.emit("response.content_part.added", {
       item_id: this.messageID,
-      output_index: 0,
+      output_index: this.textOutputIndex(),
       content_index: 0,
       part: { type: "output_text", text: "", annotations: [], logprobs: [] },
     });
@@ -4579,7 +4712,7 @@ export class StreamingResponseSSE {
     this.streamedText += delta;
     this.emit("response.output_text.delta", {
       item_id: this.messageID,
-      output_index: 0,
+      output_index: this.textOutputIndex(),
       content_index: 0,
       delta,
       logprobs: [],
@@ -4656,18 +4789,18 @@ export class StreamingResponseSSE {
     };
     this.emit("response.output_text.done", {
       item_id: this.messageID,
-      output_index: 0,
+      output_index: this.textOutputIndex(),
       content_index: 0,
       text,
       logprobs: [],
     });
     this.emit("response.content_part.done", {
       item_id: this.messageID,
-      output_index: 0,
+      output_index: this.textOutputIndex(),
       content_index: 0,
       part,
     });
-    this.emit("response.output_item.done", { output_index: 0, item: finalItem });
+    this.emit("response.output_item.done", { output_index: this.textOutputIndex(), item: finalItem });
     return finalItem;
   }
 
@@ -4739,23 +4872,55 @@ export class StreamingResponseSSE {
           "invalid_agent_stream",
         );
       }
-      if (this.messageStarted) {
-        const commentary = this.finishMessage(parsed.commentary, "commentary");
+      if (this.commentaryStarted || this.messageStarted) {
+        const output = [
+          ...(this.commentaryStarted ? [this.finishCommentary()] : []),
+          ...(this.messageStarted ? [this.finishMessage(parsed.commentary, "commentary")] : []),
+        ];
         const finalTool = toolItem(parsed.call, true);
-        this.emitToolItem(finalTool, 1);
+        this.emitToolItem(finalTool, output.length);
         const response = {
           ...clone(this.base),
           status: "completed",
-          output: [commentary, finalTool],
+          output: [...output, finalTool],
           usage: options.usage ?? null,
         };
         this.emit("response.completed", { response });
         return response;
       }
       const output = [
-        ...(parsed.commentary ? [messageItem(parsed.commentary, true, "commentary")] : []),
+        ...(joinedCommentary(options.thinking, parsed.commentary)
+          ? [messageItem(joinedCommentary(options.thinking, parsed.commentary), true, "commentary")]
+          : []),
         toolItem(parsed.call, true),
       ];
+      const response = {
+        ...clone(this.base),
+        status: "completed",
+        output,
+        usage: options.usage ?? null,
+      };
+      for (const event of responseSSEEvents(response).slice(2, -1)) {
+        const { type: _type, sequence_number: _sequence, ...payload } = event.data;
+        this.emit(event.type, payload);
+      }
+      this.emit("response.completed", { response });
+      return response;
+    }
+    if (this.commentaryStarted) {
+      const thinkingItem = this.finishCommentary();
+      const finalItem = this.finishMessage(cursorText, "final_answer");
+      const response = {
+        ...clone(this.base),
+        status: "completed",
+        output: [thinkingItem, finalItem],
+        usage: options.usage ?? null,
+      };
+      this.emit("response.completed", { response });
+      return response;
+    }
+    if (joinedCommentary(options.thinking) && !this.messageStarted) {
+      const output = sdkChannelOutput(cursorText, options.thinking);
       const response = {
         ...clone(this.base),
         status: "completed",
@@ -6793,6 +6958,7 @@ export function createBridgeServer(
             timeoutMs: config.timeoutMs,
             signal: controller.signal,
             onTextDelta: (delta) => streamingResponse?.acceptTextDelta(delta),
+            onThinkingDelta: (delta) => streamingResponse?.acceptCommentaryDelta(delta),
             now: monotonicNow,
           });
         }
@@ -6862,6 +7028,7 @@ export function createBridgeServer(
         completed = buildResponseResult(cursorRequest, result.text, {
           responseID,
           toolCall: usesSDK ? result.toolCall : null,
+          thinking: usesSDK ? result.thinking : undefined,
           usage: result.usage ?? null,
         });
         response.writeHead(200, { "Content-Type": "application/json" });
@@ -6869,6 +7036,7 @@ export function createBridgeServer(
       } else {
         completed = streamingResponse.complete(result.text, {
           toolCall: usesSDK ? result.toolCall : null,
+          thinking: usesSDK ? result.thinking : undefined,
           usage: result.usage ?? null,
         });
         response.end();
