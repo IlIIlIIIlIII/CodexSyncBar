@@ -2,7 +2,8 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
@@ -46,6 +47,7 @@ const MAX_CURSOR_MODELS_JSON_BYTES = 128 * 1024;
 const MAX_CURSOR_MODEL_PARAMETERS_JSON_BYTES = 512 * 1024;
 const MAX_CURSOR_MODEL_ROUTES_JSON_BYTES = 512 * 1024;
 const MAX_NATIVE_MODELS_JSON_BYTES = 128 * 1024;
+const MAX_CODEX_AUTH_BYTES = 64 * 1024;
 const MAX_ACP_JSON_LINE_BYTES = 1024 * 1024;
 const MAX_ACP_OUTPUT_TEXT_BYTES = 8 * 1024 * 1024;
 const MAX_RESOURCE_ITEMS = 64;
@@ -5890,6 +5892,8 @@ function parseArguments(argv) {
     parentPID: null,
     fileExtractorPath: defaultPDFExtractorPath(),
     bridgeToken: process.env.SYNCBAR_CURSOR_BRIDGE_TOKEN ?? "",
+    codexAuthFile: process.env.SYNCBAR_CODEX_AUTH_FILE ??
+      path.join(os.homedir(), ".codex", "auth.json"),
     sandboxMode: process.env.SYNCBAR_CURSOR_SANDBOX_MODE ?? "enabled",
     metricsEnabled: process.env.SYNCBAR_CURSOR_METRICS === "1",
     backend: process.env.SYNCBAR_CURSOR_BACKEND ?? "auto",
@@ -6129,18 +6133,71 @@ function safeHeaderValue(value) {
   return null;
 }
 
-function openAIRequestHeaders(request, rawBody, bridgeToken) {
+function configuredCodexAuthFile(config) {
+  const value = config.codexAuthFile;
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !path.isAbsolute(value) ||
+      Buffer.byteLength(value, "utf8") > 4096 || /[\0\r\n]/u.test(value)) {
+    throw new BridgeError(
+      "Codex authentication path is invalid",
+      500,
+      "invalid_codex_auth_path",
+    );
+  }
+  return path.resolve(value);
+}
+
+async function chatGPTCredentialsFromAuthFile(authFile) {
+  if (!authFile) return null;
+  let handle;
+  try {
+    const directoryInfo = await lstat(path.dirname(authFile));
+    const uid = typeof process.getuid === "function" ? process.getuid() : directoryInfo.uid;
+    if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink() ||
+        directoryInfo.uid !== uid || (directoryInfo.mode & 0o022) !== 0) {
+      return null;
+    }
+    handle = await open(authFile, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const info = await handle.stat();
+    if (!info.isFile() || info.uid !== uid || (info.mode & 0o077) !== 0 ||
+        info.size <= 0 || info.size > MAX_CODEX_AUTH_BYTES) {
+      return null;
+    }
+    const value = JSON.parse((await handle.readFile()).toString("utf8"));
+    const accessToken = value?.tokens?.access_token;
+    const accountID = value?.tokens?.account_id;
+    if (value?.auth_mode !== "chatgpt" || typeof accessToken !== "string" ||
+        Buffer.byteLength(accessToken, "utf8") < 16 ||
+        Buffer.byteLength(accessToken, "utf8") > 16 * 1024 ||
+        /[\p{White_Space}\p{Cc}\p{Cf}]/u.test(accessToken) ||
+        typeof accountID !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(accountID)) {
+      return null;
+    }
+    return { authorization: `Bearer ${accessToken}`, accountID };
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function openAIRequestHeaders(request, rawBody, bridgeToken, codexAuthFile) {
   const authorization = request.headers.authorization;
   const bridgeAuthorization = `Bearer ${bridgeToken}`;
+  let fallbackCredentials = null;
   if (typeof authorization !== "string" ||
       authorization.length === 0 ||
       authorization.length > 16 * 1024 ||
       authorization === bridgeAuthorization) {
-    throw new BridgeError(
-      "OpenAI authentication is required for native Codex models",
-      401,
-      "missing_upstream_authentication",
-    );
+    fallbackCredentials = await chatGPTCredentialsFromAuthFile(codexAuthFile);
+    if (!fallbackCredentials) {
+      throw new BridgeError(
+        "OpenAI authentication is required for native Codex models",
+        401,
+        "missing_upstream_authentication",
+      );
+    }
   }
   const headers = {
     "content-type": "application/json",
@@ -6149,6 +6206,10 @@ function openAIRequestHeaders(request, rawBody, bridgeToken) {
   for (const name of OPENAI_REQUEST_HEADERS) {
     const value = safeHeaderValue(request.headers[name]);
     if (value !== null) headers[name] = value;
+  }
+  if (fallbackCredentials) {
+    headers.authorization = fallbackCredentials.authorization;
+    headers["chatgpt-account-id"] = fallbackCredentials.accountID;
   }
   return headers;
 }
@@ -6316,14 +6377,20 @@ async function proxyOpenAIResponse({
   response,
   rawBody,
   bridgeToken,
+  codexAuthFile,
   timeoutMs,
   signal,
   targets,
 }) {
-  const hasChatGPTAccount = typeof request.headers["chatgpt-account-id"] === "string" &&
-    request.headers["chatgpt-account-id"].length > 0;
+  const headers = await openAIRequestHeaders(
+    request,
+    rawBody,
+    bridgeToken,
+    codexAuthFile,
+  );
+  const hasChatGPTAccount = typeof headers["chatgpt-account-id"] === "string" &&
+    headers["chatgpt-account-id"].length > 0;
   const target = hasChatGPTAccount ? targets.chatGPT : targets.api;
-  const headers = openAIRequestHeaders(request, rawBody, bridgeToken);
   for (let attempt = 1; attempt <= OPENAI_INTERNAL_ERROR_MAX_ATTEMPTS; attempt += 1) {
     const upstreamResponse = await openAIUpstreamResponse({
       target,
@@ -6406,6 +6473,7 @@ export function createBridgeServer(
   const modelParameters = configuredCursorModelParameters(config, allowedModels);
   const modelRoutes = configuredCursorModelRoutes(config, allowedModels);
   const nativeModels = configuredNativeModels(config);
+  const codexAuthFile = configuredCodexAuthFile(config);
   validateModelRoutingConfiguration(config.model, allowedModels, modelRoutes, nativeModels);
   const proxyTargets = openAIProxyTargets(testHooks);
   const activeControllers = new Set();
@@ -6514,6 +6582,7 @@ export function createBridgeServer(
           response,
           rawBody,
           bridgeToken: config.bridgeToken,
+          codexAuthFile,
           timeoutMs: config.timeoutMs,
           signal: controller.signal,
           targets: proxyTargets,

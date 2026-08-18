@@ -341,10 +341,13 @@ if (args.length === 1 && args[0] === '--sdk-list-models') {
 const modelParameters = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_PARAMETERS_JSON ?? 'null');
 const modelRoutes = JSON.parse(process.env.SYNCBAR_CURSOR_MODEL_ROUTES_JSON ?? 'null');
 const nativeModels = JSON.parse(process.env.SYNCBAR_NATIVE_MODELS_JSON ?? 'null');
+const codexAuthFile = process.env.SYNCBAR_CODEX_AUTH_FILE ?? '';
 if (!bridgeToken || args.some((value) => value.includes(bridgeToken))) process.exit(81);
 if (!modelParameters || typeof modelParameters !== 'object') process.exit(85);
 if ((modelRoutes !== null && typeof modelRoutes !== 'object') ||
     (nativeModels !== null && !Array.isArray(nativeModels))) process.exit(86);
+if (Array.isArray(nativeModels) && nativeModels.length > 0 &&
+    codexAuthFile !== path.join(realHome, '.codex', 'auth.json')) process.exit(88);
 const value = (name) => args[args.indexOf(name) + 1];
 const port = Number(value('--port'));
 const model = value('--model');
@@ -354,7 +357,8 @@ const generation = existsSync(launchLog)
   ? readFileSync(launchLog, 'utf8').trim().split('\\n').filter(Boolean).length + 1
   : 1;
 appendFileSync(launchLog, JSON.stringify({
-  generation, pid:process.pid, model, modelParameters, modelRoutes, nativeModels, secretFingerprint,
+  generation, pid:process.pid, model, modelParameters, modelRoutes, nativeModels, codexAuthFile,
+  secretFingerprint,
 }) + '\\n', {mode:0o600});
 if (model === 'gpt-5.6-sol-high-fast' && existsSync(path.join(realHome, 'fail-new-bridge'))) process.exit(84);
 const server = http.createServer((request, response) => {
@@ -1477,6 +1481,7 @@ test("show and provision CLI output never disclose stored secrets", async () => 
   assert.deepEqual(launches[0].modelParameters, fixture.modelParameters);
   assert.deepEqual(launches[0].modelRoutes, JSON.parse(fixture.input.modelRoutesJSON));
   assert.deepEqual(launches[0].nativeModels, fixture.input.nativeModels);
+  assert.equal(launches[0].codexAuthFile, path.join(fixture.home, ".codex", "auth.json"));
   assert.doesNotThrow(() => process.kill(launches[0].pid, 0));
 
   const showResult = await spawnManager("show", fixture);

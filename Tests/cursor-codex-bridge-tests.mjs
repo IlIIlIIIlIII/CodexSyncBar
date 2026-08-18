@@ -4643,6 +4643,8 @@ test("expired ACP sessions fall back to one bounded full-history replay", async 
 test("native Codex models proxy only to branded official-upstream test targets", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-codex-native-proxy-test-"));
   const workspace = path.join(root, "workspace");
+  const codexHome = path.join(root, ".codex");
+  const codexAuthFile = path.join(codexHome, "auth.json");
   const bridgeToken = "d".repeat(64);
   const observed = [];
   const requestCounts = new Map();
@@ -4767,6 +4769,14 @@ test("native Codex models proxy only to branded official-upstream test targets",
     chatGPTURL: `http://127.0.0.1:${upstreamAddress.port}/chatgpt/responses`,
     apiURL: `http://127.0.0.1:${upstreamAddress.port}/api/responses`,
   });
+  await mkdir(codexHome, { mode: 0o700 });
+  await writeFile(codexAuthFile, JSON.stringify({
+    auth_mode: "chatgpt",
+    tokens: {
+      access_token: "chatgpt-access-token-from-secure-auth-file",
+      account_id: "account-from-secure-auth-file",
+    },
+  }), { mode: 0o600 });
   const server = await startBridge({
     host: "127.0.0.1",
     port: 0,
@@ -4777,6 +4787,7 @@ test("native Codex models proxy only to branded official-upstream test targets",
     workspace,
     timeoutMs: 5_000,
     bridgeToken,
+    codexAuthFile,
   }, hooks);
   try {
     const address = server.address();
@@ -4822,6 +4833,30 @@ test("native Codex models proxy only to branded official-upstream test targets",
       assert.equal(chatGPTObserved.headers[stripped], undefined, stripped);
     }
 
+    const remoteProviderResponse = await fetch(
+      `http://127.0.0.1:${address.port}/v1/responses`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${bridgeToken}`,
+          "content-type": "application/json",
+        },
+        body: chatGPTBody,
+      },
+    );
+    assert.equal(remoteProviderResponse.status, 429);
+    assert.equal((await remoteProviderResponse.json()).error.message, "rate limited");
+    const remoteProviderObserved = observed.at(-1);
+    assert.equal(remoteProviderObserved.path, "/chatgpt/responses");
+    assert.equal(
+      remoteProviderObserved.headers.authorization,
+      "Bearer chatgpt-access-token-from-secure-auth-file",
+    );
+    assert.equal(
+      remoteProviderObserved.headers["chatgpt-account-id"],
+      "account-from-secure-auth-file",
+    );
+
     const builtInProviderResponse = await fetch(
       `http://127.0.0.1:${address.port}/v1/${bridgeToken}/responses`,
       {
@@ -4858,7 +4893,7 @@ test("native Codex models proxy only to branded official-upstream test targets",
     );
     assert.equal(compressedBuiltInProviderResponse.status, 429);
     assert.equal(observed.at(-1).rawBody, chatGPTBody);
-    assert.equal(observed.filter((item) => item.path === "/chatgpt/responses").length, 3);
+    assert.equal(observed.filter((item) => item.path === "/chatgpt/responses").length, 4);
 
     const wrongPathToken = await fetch(
       `http://127.0.0.1:${address.port}/v1/${"0".repeat(64)}/responses`,
@@ -4947,6 +4982,7 @@ test("native Codex models proxy only to branded official-upstream test targets",
     assert.equal(requestCounts.get("sse-rate-limit-error"), 1);
     assert.match(sseRateLimitBody, /rate_limit_exceeded/);
 
+    await chmod(codexAuthFile, 0o644);
     const missingUpstreamAuth = await fetch(`http://127.0.0.1:${address.port}/v1/responses`, {
       method: "POST",
       headers: {

@@ -1808,6 +1808,7 @@ function detachedBridgeEnvironment(runtime, base = process.env) {
   }
   if (runtime.nativeModels?.length > 0) {
     environment.SYNCBAR_NATIVE_MODELS_JSON = JSON.stringify(runtime.nativeModels);
+    environment.SYNCBAR_CODEX_AUTH_FILE = path.join(runtime.home, ".codex", "auth.json");
   }
   return environment;
 }
