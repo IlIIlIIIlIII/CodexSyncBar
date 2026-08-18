@@ -3485,6 +3485,108 @@ test("HTTP SDK compaction with an expired previous_response_id still completes t
   }
 });
 
+test("HTTP SDK compaction replays into a new agent when host instructions changed", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cursor-sdk-compaction-instruction-change-"));
+  const workspace = path.join(root, "workspace");
+  const fixture = fakeCursorSDK();
+  const bridgeToken = "9".repeat(64);
+  const metrics = [];
+  const server = await startBridge({
+    host: "127.0.0.1",
+    port: 0,
+    agentPath: "/unused/cursor-agent",
+    model: "composer-2.5",
+    allowedModels: ["composer-2.5"],
+    workspace,
+    timeoutMs: 5_000,
+    bridgeToken,
+    backend: "sdk",
+    cursorAPIKey: "cursor_fixture_api_key_1234567890",
+    sdkModule: fixture.module,
+    sdkVersion: "1.0.28",
+    sdkStateRoot: path.join(root, "sdk-state"),
+    sessionStorePath: path.join(root, "cursor-bridge-sessions-v1.json"),
+    sandboxMode: "enabled",
+    metricsSink: (metric) => metrics.push(metric),
+  });
+  try {
+    const address = server.address();
+    const url = `http://127.0.0.1:${address.port}/v1/responses`;
+    const headers = {
+      "content-type": "application/json",
+      "x-syncbar-bridge-token": bridgeToken,
+    };
+    const firstResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        instructions: "Original outer host instructions.",
+        input: [{ role: "user", content: "before instruction-changing compaction" }],
+        tools: [],
+        stream: false,
+      })),
+    });
+    const first = await firstResponse.json();
+    assert.equal(firstResponse.status, 200, JSON.stringify(first));
+
+    const compactedResponse = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(baseRequest({
+        previous_response_id: first.id,
+        instructions: "Replacement outer host instructions after compaction.",
+        input: [{
+          type: "compaction",
+          id: "cmp_changed_instructions",
+          encrypted_content: "opaque instruction-changing compaction state",
+        }, {
+          role: "user",
+          type: "message",
+          content: "continue after instruction-changing compaction",
+        }],
+        tools: [],
+        stream: true,
+      })),
+    });
+    const body = await compactedResponse.text();
+    assert.equal(compactedResponse.status, 200, body);
+    assert.match(body, /event: response\.completed/);
+    assert.doesNotMatch(body, /instructions changed|sdk_session_rotated/);
+    assert.equal(fixture.observed.resumes.length, 0);
+    assert.equal(fixture.observed.creates.length, 2);
+    assert.match(String(fixture.observed.sends.at(-1).message),
+      /opaque instruction-changing compaction state/);
+    assert.equal(metrics.at(-1).sdk_agent_rotated, true);
+    assert.match(metrics.at(-1).continuation_source, /compaction/);
+
+    const changedHash = cursorSDKInstructionHash({
+      instructions: "Replacement outer host instructions after compaction.",
+      input: [{
+        type: "compaction",
+        id: "cmp_changed_instructions",
+        encrypted_content: "opaque instruction-changing compaction state",
+      }, {
+        role: "user",
+        type: "message",
+        content: "continue after instruction-changing compaction",
+      }],
+    });
+    const rule = await readFile(path.join(
+      root,
+      "cursor-sdk-workspaces-v1",
+      changedHash,
+      ".cursor",
+      "rules",
+      "codex-host-policy.mdc",
+    ), "utf8");
+    assert.match(rule, /Replacement outer host instructions after compaction/);
+    assert.doesNotMatch(rule, /Original outer host instructions/);
+  } finally {
+    await stopBridge(server);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("HTTP text continuations reuse Cursor sessions and emit privacy-safe timing metrics", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cursor-http-resume-test-"));
   const workspace = path.join(root, "workspace");

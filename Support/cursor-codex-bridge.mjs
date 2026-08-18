@@ -4011,7 +4011,12 @@ export class CursorSDKBackend {
       }
     }
 
-    if (previousSession && previousSession.sessionKey !== sessionKey) {
+    // A normal resume must keep the exact instruction identity. A replay or
+    // forced agent rotation already carries the host conversation into a new
+    // instruction-scoped workspace, so rejecting that path here would make
+    // compaction unable to apply legitimate host-instruction updates.
+    if (previousSession && previousSession.sessionKey !== sessionKey &&
+        !replay && !forceNewAgent) {
       throw new BridgeError(
         "Cursor SDK instructions changed and require conversation replay",
         409,
