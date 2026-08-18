@@ -47,6 +47,12 @@ enum CodexCursorModelCatalogBuilder {
             throw AppError.processFailed("Codex 번들 모델 카탈로그 형식이 올바르지 않습니다.")
         }
 
+        // These cache-transport fields change on equivalent upstream fetches
+        // and are not consumed as model definitions. Excluding them keeps the
+        // generated catalog deterministic across sequential SSH replicas.
+        root.removeValue(forKey: "etag")
+        root.removeValue(forKey: "fetched_at")
+
         let routes = cursorCatalog.codexModelRoutes
         guard bundledModels.count + routes.count <= maximumModelCount else {
             throw AppError.processFailed(

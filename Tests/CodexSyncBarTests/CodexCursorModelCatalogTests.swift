@@ -132,6 +132,35 @@ final class CodexCursorModelCatalogTests: XCTestCase {
                        "Cursor · Codex 5.3")
     }
 
+    func testIgnoresVolatileBundledCacheMetadata() throws {
+        let cursor = CursorModelCatalog(cliOutput: "composer-2.5 - Composer 2.5")
+        let first = try JSONSerialization.data(withJSONObject: [
+            "client_version": "preserved",
+            "etag": "first-etag",
+            "fetched_at": "2026-08-18T10:41:37Z",
+            "models": [["slug": "gpt-5.6-sol", "priority": 1]],
+        ])
+        let second = try JSONSerialization.data(withJSONObject: [
+            "client_version": "preserved",
+            "etag": "second-etag",
+            "fetched_at": "2026-08-18T10:43:17Z",
+            "models": [["slug": "gpt-5.6-sol", "priority": 1]],
+        ])
+
+        let firstOutput = try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: cursor,
+            bundledCatalogData: first)
+        let secondOutput = try CodexCursorModelCatalogBuilder.build(
+            cursorCatalog: cursor,
+            bundledCatalogData: second)
+        XCTAssertEqual(firstOutput, secondOutput)
+        let root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: firstOutput) as? [String: Any])
+        XCTAssertNil(root["etag"])
+        XCTAssertNil(root["fetched_at"])
+        XCTAssertEqual(root["client_version"] as? String, "preserved")
+    }
+
     func testDefaultCursorVariantDoesNotAdvertiseChangeableReasoning() throws {
         let cursor = CursorModelCatalog(cliOutput: "composer-2.5 - Composer 2.5")
         let template = try JSONSerialization.data(withJSONObject: [
