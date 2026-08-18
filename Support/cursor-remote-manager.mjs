@@ -1712,6 +1712,7 @@ export async function provision(inputValue, options = {}) {
       if (keepLiveBridge && filesUnchanged) {
         return {
           provisioned: true,
+          requiresCodexReload: false,
           model: runtime.model,
           codexModel: runtime.codexModel,
           port: runtime.port,
@@ -1769,6 +1770,7 @@ export async function provision(inputValue, options = {}) {
 
       return {
         provisioned: true,
+        requiresCodexReload: true,
         model: runtime.model,
         codexModel: runtime.codexModel,
         port: runtime.port,

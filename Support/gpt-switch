@@ -3097,7 +3097,7 @@ resolve_cursor_runtime() {
 }
 
 node_cursor_provision() {
-  local payload bytes cursor_node
+  local payload bytes cursor_node provision_result requires_reload
   validate_cursor_helper_source "$CURSOR_REMOTE_MANAGER" "Cursor remote manager"
   payload=$(/usr/bin/head -c 4194305) || die "could not read Cursor provisioning request"
   bytes=${#payload}
@@ -3110,8 +3110,23 @@ node_cursor_provision() {
     die "Cursor Agent installation failed"
   fi
   cursor_node="$RESOLVED_CURSOR_NODE"
-  if printf '%s' "$payload" | "$cursor_node" "$CURSOR_REMOTE_MANAGER" provision >/dev/null 2>&1; then
+  if provision_result=$(printf '%s' "$payload" | \
+      "$cursor_node" "$CURSOR_REMOTE_MANAGER" provision 2>/dev/null); then
     payload=""
+    if ! requires_reload=$(printf '%s' "$provision_result" | /usr/bin/jq -er '
+      if .requiresCodexReload == true then "true"
+      elif .requiresCodexReload == false then "false"
+      else error("missing requiresCodexReload")
+      end
+    ' 2>/dev/null); then
+      provision_result=""
+      die "Cursor provisioning failed; details were withheld to protect credentials"
+    fi
+    provision_result=""
+    if [ "$requires_reload" = false ]; then
+      printf 'cursor=provisioned result=ok\n'
+      return
+    fi
     if ! node_stop_clients >/dev/null 2>&1; then
       # The remote provider and credential are already durably committed and
       # the authenticated bridge is healthy at this point. A long-lived Codex

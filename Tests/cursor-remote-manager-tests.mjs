@@ -616,6 +616,7 @@ test("provision writes a 0600 runtime, validates isolated Cursor SDK, and preser
 
   assert.deepEqual(result, {
     provisioned: true,
+    requiresCodexReload: true,
     model: fixture.input.model,
     codexModel: fixture.input.codexModel,
     port: fixture.port,
@@ -912,12 +913,13 @@ test("identical healthy reprovision keeps the live bridge process", async () => 
   assert.equal(oldHealth.healthy, true);
   detachedPIDs.add(oldHealth.pid);
 
-  await provision(fixture.input, {
+  const result = await provision(fixture.input, {
     home: fixture.home,
     env: fixture.env,
     healthTimeoutMs: 100,
     startTimeoutMs: 2_000,
   });
+  assert.equal(result.requiresCodexReload, false);
   const newHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
   assert.equal(newHealth.healthy, true);
   assert.equal(newHealth.pid, oldHealth.pid);
@@ -936,12 +938,13 @@ test("managed reprovision rotates the API key with the same bridge identity", as
 
   const newAPIKey = `api_${"6".repeat(60)}`;
   const newInput = { ...fixture.input, apiKey: newAPIKey };
-  await provision(newInput, {
+  const result = await provision(newInput, {
     home: fixture.home,
     env: fixture.env,
     healthTimeoutMs: 100,
     startTimeoutMs: 2_000,
   });
+  assert.equal(result.requiresCodexReload, true);
 
   const runtime = await readRuntime({ home: fixture.home, env: fixture.env });
   const health = await bridgeHealth({ runtime });

@@ -1287,9 +1287,9 @@ if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" "$CURSOR_REMOTE_CO
   exit 1
 fi
 
-# A provider that is already committed and authenticated must not be reported
-# as an installation/authentication failure merely because a long-lived Codex
-# client could not be stopped for immediate config reload.
+# An identical healthy reprovision must not stop long-lived Codex clients.
+# Force the stop hook to fail: the no-op still succeeds without reload=pending
+# because the manager reports that no Codex reload is required.
 CURSOR_RELOAD_PENDING_STDOUT="$TMP/cursor-reload-pending.stdout"
 CURSOR_RELOAD_PENDING_STDERR="$TMP/cursor-reload-pending.stderr"
 if ! printf '%s' "$CURSOR_PAYLOAD" | env "${cursor_env[@]}" \
@@ -1299,9 +1299,10 @@ if ! printf '%s' "$CURSOR_PAYLOAD" | env "${cursor_env[@]}" \
   printf 'Committed Cursor provision was misreported after Codex reload failure\n' >&2
   exit 1
 fi
-grep -Fx 'device=staging-node cursor=provisioned result=ok version=2.2.0 reload=pending' \
+grep -Fx 'device=staging-node cursor=provisioned result=ok version=2.2.0' \
   "$CURSOR_RELOAD_PENDING_STDOUT" >/dev/null
 [ ! -s "$CURSOR_RELOAD_PENDING_STDERR" ]
+[ "$(cat "$CURSOR_REMOTE_STOP_CALLS")" = stop-clients ]
 if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
     "$CURSOR_RELOAD_PENDING_STDOUT" "$CURSOR_RELOAD_PENDING_STDERR" >/dev/null; then
   printf 'Cursor reload-pending result leaked a credential\n' >&2
@@ -1356,7 +1357,7 @@ if find "$CURSOR_REMOTE_HOME" -type f \
   printf 'Cursor deprovision left a persisted credential on the remote host\n' >&2
   exit 1
 fi
-[ "$(wc -l <"$CURSOR_REMOTE_STOP_CALLS" | tr -d ' ')" -eq 4 ]
+[ "$(wc -l <"$CURSOR_REMOTE_STOP_CALLS" | tr -d ' ')" -eq 3 ]
 
 auth_before=$(shasum -a 256 "$CODEX/auth.json" | awk '{print $1}')
 profiles_before=$(find "$STATE/profiles" -type f -name '*.auth.json' -exec shasum -a 256 {} + | sort)
