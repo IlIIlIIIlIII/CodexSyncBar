@@ -33,6 +33,7 @@ CURSOR_BRIDGE_HELPER="${GPT_SWITCH_CURSOR_BRIDGE_HELPER:-$HOME/.local/lib/gpt-sw
 CURSOR_REMOTE_MANAGER="${GPT_SWITCH_CURSOR_REMOTE_MANAGER:-$HOME/.local/lib/gpt-switch/cursor-remote-manager.mjs}"
 CURSOR_SDK_RUNTIME="${GPT_SWITCH_CURSOR_SDK_RUNTIME:-$HOME/.local/lib/gpt-switch/cursor-sdk-runtime.tar.gz}"
 CURSOR_SDK_MANIFEST="${GPT_SWITCH_CURSOR_SDK_MANIFEST:-$HOME/.local/lib/gpt-switch/cursor-sdk-runtime.manifest}"
+CODEX_INSTALLER_URL="https://chatgpt.com/codex/install.sh"
 CODEX_APP_SERVER_PATTERN='^(([^[:space:]]*/)?[c]odex([.]js)?|([^[:space:]]*/)?node[[:space:]]+[^[:space:]]*/codex([.]js)?)([[:space:]]+-c[[:space:]]+[^[:space:]]+)*[[:space:]]+app-server[[:space:]]+(proxy([[:space:]]|$)|--listen[[:space:]]+unix://)'
 OSASCRIPT_BIN="${GPT_SWITCH_OSASCRIPT_BIN:-/usr/bin/osascript}"
 OPEN_BIN="${GPT_SWITCH_OPEN_BIN:-/usr/bin/open}"
@@ -1497,7 +1498,7 @@ node_verify() {
 }
 
 node_status() {
-  local active fp mode auth_mode cli_state kind access_fp expires_at
+  local active fp mode auth_mode cli_state kind access_fp expires_at codex_cli
   ensure_dirs
   if ! active=$(detect_active_profile); then
     printf 'active=unknown fingerprint=unknown mode=unknown auth_mode=unknown cli=unknown credential=unknown access_fp=unknown expires_at=unknown\n'
@@ -1509,13 +1510,55 @@ node_status() {
   kind=$(credential_kind "$AUTH_FILE" 2>/dev/null || printf 'invalid')
   access_fp=$(token_fingerprint "$AUTH_FILE" 2>/dev/null || printf 'unknown')
   expires_at=$(access_expiry "$AUTH_FILE" 2>/dev/null || printf 'unknown')
-  if command -v codex >/dev/null 2>&1; then
-    if codex login status >/dev/null 2>&1; then cli_state="logged-in"; else cli_state="logged-out"; fi
+  if codex_cli=$(resolve_codex_cli 2>/dev/null); then
+    if "$codex_cli" login status >/dev/null 2>&1; then cli_state="logged-in"; else cli_state="logged-out"; fi
   else
     cli_state="not-installed"
   fi
   printf 'active=%s fingerprint=%s mode=%s auth_mode=%s cli=%s credential=%s access_fp=%s expires_at=%s\n' \
     "$active" "$fp" "$mode" "$auth_mode" "$cli_state" "$kind" "$access_fp" "$expires_at"
+}
+
+resolve_codex_cli() {
+  local candidate resolved owner
+  if [ -x "$HOME/.local/bin/codex" ]; then
+    candidate="$HOME/.local/bin/codex"
+  elif command -v codex >/dev/null 2>&1; then
+    candidate=$(command -v codex)
+  else
+    return 1
+  fi
+  resolved=$(realpath "$candidate" 2>/dev/null) || return 1
+  [ -x "$resolved" ] && [ -f "$resolved" ] && [ ! -L "$resolved" ] || return 1
+  owner=$(file_owner_id "$resolved")
+  [ "$owner" = "$(id -u)" ] || [ "$owner" = 0 ] || return 1
+  case "$(file_mode "$resolved")" in 500|555|700|755) ;; *) return 1 ;; esac
+  printf '%s\n' "$resolved"
+}
+
+node_install_codex() {
+  local installer="${GPT_SWITCH_TEST_CODEX_INSTALLER:-}"
+  local codex_cli version
+  if [ -n "$installer" ]; then
+    validate_cursor_helper_source "$installer" "Codex installer"
+    if ! /bin/sh "$installer" >/dev/null 2>&1; then
+      die "Codex CLI installation or update failed"
+    fi
+  else
+    [ -x /usr/bin/curl ] || die "curl is required to install Codex CLI"
+    [ -x /bin/sh ] || die "sh is required to install Codex CLI"
+    if ! { /usr/bin/curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --connect-timeout 20 "$CODEX_INSTALLER_URL" | /bin/sh; } >/dev/null 2>&1; then
+      die "Codex CLI installation or update failed"
+    fi
+  fi
+  codex_cli=$(resolve_codex_cli 2>/dev/null) || \
+    die "Codex CLI installer did not produce a safe executable"
+  version=$("$codex_cli" --version 2>/dev/null) || \
+    die "installed Codex CLI could not be verified"
+  case "$version" in codex-cli\ *) version=${version#codex-cli } ;; *) die "installed Codex CLI returned an invalid version" ;; esac
+  case "$version" in ''|*[!0-9A-Za-z.+-]*) die "installed Codex CLI returned an invalid version" ;; esac
+  printf 'codex=installed version=%s\n' "$version"
 }
 
 node_inspect_access() {
@@ -1597,7 +1640,8 @@ node_install_access() {
   local profile="$1"
   local expected_account_fp="$2"
   local expected_access_fp="$3"
-  local incoming profile_file backup_dir active active_flag=0 changed=1 actual profile_existed=0
+  local incoming profile_file backup_dir active active_account_fp=""
+  local active_flag=0 changed=1 actual profile_existed=0
   validate_profile_name "$profile"
   case "$expected_account_fp" in ''|*[!0-9a-f]*) die "invalid account fingerprint" ;; esac
   case "$expected_access_fp" in ''|*[!0-9a-f]*) die "invalid access fingerprint" ;; esac
@@ -1632,7 +1676,16 @@ node_install_access() {
     profile_existed=1
   fi
   active=$(detect_active_profile 2>/dev/null || true)
-  [ "$active" != "$profile" ] || active_flag=1
+  if [ "$active" = "$profile" ]; then
+    active_flag=1
+  elif [ -z "$active" ] && validate_secure_auth_file "$AUTH_FILE"; then
+    # A newly added host can already have a direct Codex login while its
+    # SyncBar profile directory is still empty. detect_active_profile cannot
+    # name that account until this function installs the first matching
+    # profile, so bind the existing auth by its account fingerprint now.
+    active_account_fp=$(fingerprint "$AUTH_FILE" 2>/dev/null || true)
+    [ "$active_account_fp" != "$expected_account_fp" ] || active_flag=1
+  fi
   if [ "$profile_existed" -eq 1 ] && [ "$(token_fingerprint "$profile_file")" = "$expected_access_fp" ]; then
     if [ "$active_flag" -eq 0 ] || { validate_secure_auth_file "$AUTH_FILE" access-only && [ "$(token_fingerprint "$AUTH_FILE")" = "$expected_access_fp" ]; }; then
       changed=0
@@ -2258,7 +2311,7 @@ remote_install_cursor_helpers() {
      ! cp "$sdk_manifest_source" "$payload_dir/cursor-sdk-runtime.manifest" || \
      ! chmod 755 "$payload_dir/cursor-codex-bridge.mjs" "$payload_dir/cursor-remote-manager.mjs" || \
      ! chmod 600 "$payload_dir/cursor-sdk-runtime.tar.gz" "$payload_dir/cursor-sdk-runtime.manifest" || \
-     ! tar -cf "$archive" -C "$payload_dir" \
+     ! COPYFILE_DISABLE=1 tar -cf "$archive" -C "$payload_dir" \
        cursor-codex-bridge.mjs cursor-remote-manager.mjs \
        cursor-sdk-runtime.tar.gz cursor-sdk-runtime.manifest; then
     rm -f "$archive"
@@ -2550,7 +2603,7 @@ remote_install_helpers() {
      ! chmod 755 "$payload_dir/gpt-switch" || \
      ! chmod 700 "$payload_dir/codex-syncbar-askpass" || \
      ! chmod 755 "$payload_dir/usage-summary.mjs" || \
-     ! tar -cf "$archive" -C "$payload_dir" gpt-switch codex-syncbar-askpass usage-summary.mjs; then
+     ! COPYFILE_DISABLE=1 tar -cf "$archive" -C "$payload_dir" gpt-switch codex-syncbar-askpass usage-summary.mjs; then
     rm -f "$archive"
     rm -rf "$payload_dir"
     die "could not build bootstrap payload"
@@ -4403,6 +4456,7 @@ controller_test_device() {
 
 controller_bootstrap_device() {
   local wanted="$1" index=0 found=-1 version active profile profile_file temporary metadata account_fp access_fp enrolled=0
+  local status_line cli_state
   case "$wanted" in ''|*[!a-z0-9-]*|-*) die "invalid device id" ;; esac
   while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
     if [ "${REMOTE_LABELS[$index]}" = "$wanted" ]; then found=$index; break; fi
@@ -4443,6 +4497,11 @@ controller_bootstrap_device() {
   [ "$enrolled" -gt 0 ] || die "no local account credentials are available for bootstrap"
   remote_node "$index" initialize "$active" >/dev/null || die "could not initialize profile $active on $wanted"
   remote_node "$index" verify "$active" >/dev/null || die "profile $active verification failed on $wanted"
+  remote_node "$index" install-codex >/dev/null || \
+    die "Codex CLI installation or update failed on $wanted"
+  status_line=$(remote_node "$index" status) || die "installed Codex CLI status is unavailable on $wanted"
+  cli_state=$(field_value "$status_line" cli 2>/dev/null || true)
+  [ "$cli_state" = logged-in ] || die "installed Codex CLI is not authenticated on $wanted"
   commit_remote_bootstrap_snapshot || die "could not finalize remote bootstrap recovery archive"
   printf 'device=%s result=ok active=%s profiles=%s version=%s\n' \
     "$wanted" "$active" "$enrolled" "$version"
@@ -4654,6 +4713,7 @@ node_main() {
     logout-commit) [ "$#" -eq 3 ] || die "node logout-commit requires operation, profile, and fallback"; node_logout_commit "$1" "$2" "$3" ;;
     install-access) [ "$#" -eq 3 ] || die "node install-access requires profile, account fingerprint, and access fingerprint"; node_install_access "$1" "$2" "$3" ;;
     inspect-access) [ "$#" -eq 2 ] || die "node inspect-access requires profile and access fingerprint"; node_inspect_access "$1" "$2" ;;
+    install-codex) [ "$#" -eq 0 ] || die "node install-codex takes no arguments"; node_install_codex ;;
     usage-summary) [ "$#" -eq 0 ] || die "node usage-summary takes no arguments"; node_usage_summary ;;
     cursor-provision) [ "$#" -eq 0 ] || die "node cursor-provision takes no arguments"; node_cursor_provision ;;
     cursor-deprovision) [ "$#" -eq 0 ] || die "node cursor-deprovision takes no arguments"; node_cursor_deprovision ;;

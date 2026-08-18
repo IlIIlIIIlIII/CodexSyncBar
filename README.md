@@ -154,7 +154,7 @@ shasum -a 256 -c SHA256SUMS
 - 개인 키와 선택적 OpenSSH 인증서·키 암호
 - SSH 비밀번호
 
-활성화할 때 앱은 원격 helper를 설치하고, 등록된 계정을 전송하고, 현재 계정이 실제로 적용됐는지 검증합니다. 중간 단계가 실패하면 새 장치를 활성화하지 않고 가능한 범위에서 이전 상태로 복구합니다. 새로 설치한 앱에는 SSH 장치가 미리 등록되어 있지 않습니다.
+활성화할 때 앱은 원격 helper를 설치하고, 등록된 계정을 전송한 뒤 [공식 standalone installer](https://learn.chatgpt.com/docs/codex/cli)로 Codex CLI를 설치하거나 업데이트합니다. 마지막으로 현재 계정과 Codex CLI 로그인 상태가 실제로 적용됐는지 검증합니다. 중간 단계가 실패하면 새 장치를 활성화하지 않고 가능한 범위에서 이전 helper와 계정 상태를 복구합니다. Cursor provider가 활성 상태라면 장치 활성화 직후 고정된 Cursor SDK runtime·bridge·manager도 설치하고 인증 상태를 확인합니다. 새로 설치한 앱에는 SSH 장치가 미리 등록되어 있지 않습니다.
 
 ### 3. 계정 전환
 

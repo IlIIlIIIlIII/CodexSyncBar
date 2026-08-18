@@ -1398,7 +1398,7 @@ final class AppModel: ObservableObject {
         isManagingProfiles = true
         banner = AppBanner(
             style: .info,
-            message: "\(device.displayName)에 helper와 등록 계정을 안전하게 설치하고 있습니다…")
+            message: "\(device.displayName)에 Codex CLI·helper와 등록 계정을 안전하게 설치하고 있습니다…")
         let expectedActiveProfileID = activeProfileID
         defer {
             isManagingProfiles = false

@@ -193,6 +193,26 @@ esac
 SH
 chmod 700 "$FAKE_NODE"
 
+FAKE_CODEX_INSTALLER="$TMP/install-codex.sh"
+cat >"$FAKE_CODEX_INSTALLER" <<'SH'
+#!/bin/sh
+set -eu
+count_file="$HOME/.codex-install-count"
+count=$(cat "$count_file" 2>/dev/null || printf '0')
+printf '%s\n' "$((count + 1))" >"$count_file"
+mkdir -p "$HOME/.local/bin"
+cat >"$HOME/.local/bin/codex" <<'CODEX'
+#!/bin/sh
+case "${1:-}" in
+  --version) printf 'codex-cli 9.9.9-test\n' ;;
+  login) [ "${2:-}" = status ] ;;
+  *) exit 2 ;;
+esac
+CODEX
+chmod 755 "$HOME/.local/bin/codex"
+SH
+chmod 700 "$FAKE_CODEX_INSTALLER"
+
 # Build the smallest Cursor SDK 1.0.28 runtime accepted by the production
 # remote installer. Account/model validation uses the same SDK entry points as
 # production; response behavior is covered by the Node E2E fixture in
@@ -290,6 +310,7 @@ common_env=(
   GPT_SWITCH_REFRESH_HELPER="$FAKE_REFRESH"
   GPT_SWITCH_USAGE_HELPER="$USAGE_SOURCE"
   GPT_SWITCH_NODE_BIN="$FAKE_NODE"
+  GPT_SWITCH_TEST_CODEX_INSTALLER="$FAKE_CODEX_INSTALLER"
   GPT_SWITCH_CURSOR_SDK_RUNTIME="$CURSOR_SDK_FIXTURE_ARCHIVE"
   GPT_SWITCH_CURSOR_SDK_MANIFEST="$CURSOR_SDK_FIXTURE_MANIFEST"
   GPT_SWITCH_TEST_SSH_ARGS="$SSH_ARGS"
@@ -765,8 +786,13 @@ chmod 600 "$STATE/profiles/3.auth.json" "$CODEX/auth.json"
 rm -rf "$access_backup"
 
 BOOTSTRAP_REMOTE_HOME="$TMP/bootstrap-remote-home"
-mkdir -p "$BOOTSTRAP_REMOTE_HOME"
-chmod 700 "$BOOTSTRAP_REMOTE_HOME"
+mkdir -p "$BOOTSTRAP_REMOTE_HOME/.codex"
+chmod 700 "$BOOTSTRAP_REMOTE_HOME" "$BOOTSTRAP_REMOTE_HOME/.codex"
+# A freshly added host can already have a direct Codex login but no SyncBar
+# profile metadata. Bootstrap must adopt the matching account and replace the
+# remote full credential with the sanitized access-only replica.
+cp "$STATE/profiles/3.auth.json" "$BOOTSTRAP_REMOTE_HOME/.codex/auth.json"
+chmod 600 "$BOOTSTRAP_REMOTE_HOME/.codex/auth.json"
 BOOTSTRAP_SSH="$TMP/bootstrap-ssh"
 cat >"$BOOTSTRAP_SSH" <<'SH'
 #!/usr/bin/env bash
@@ -813,6 +839,7 @@ printf '%s\n' "$bootstrap_output" | grep -F 'device=staging-node result=ok activ
 cmp -s "$HELPER" "$BOOTSTRAP_REMOTE_HOME/.local/bin/gpt-switch"
 cmp -s "$FAKE_ASKPASS" "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/codex-syncbar-askpass"
 cmp -s "$USAGE_SOURCE" "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/usage-summary.mjs"
+[ "$("$BOOTSTRAP_REMOTE_HOME/.local/bin/codex" --version)" = 'codex-cli 9.9.9-test' ]
 [ "$(stat -f '%Lp' "$BOOTSTRAP_REMOTE_HOME/.local/bin/gpt-switch")" = 755 ]
 [ "$(stat -f '%Lp' "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/codex-syncbar-askpass")" = 700 ]
 [ "$(cat "$BOOTSTRAP_REMOTE_HOME/.local/share/gpt-switch/current")" = 3 ]
@@ -822,6 +849,13 @@ for profile in 1 2 3; do
 done
 cmp -s "$BOOTSTRAP_REMOTE_HOME/.codex/auth.json" \
   "$BOOTSTRAP_REMOTE_HOME/.local/share/gpt-switch/profiles/3.auth.json"
+
+bootstrap_repeat_output=$(env "${common_env[@]}" \
+  GPT_SWITCH_SSH_BIN="$BOOTSTRAP_SSH" GPT_SWITCH_TEST_REMOTE_HOME="$BOOTSTRAP_REMOTE_HOME" \
+  "$HELPER" bootstrap-device staging-node)
+printf '%s\n' "$bootstrap_repeat_output" | grep -F \
+  'device=staging-node result=ok active=3 profiles=3' >/dev/null
+[ "$(cat "$BOOTSTRAP_REMOTE_HOME/.codex-install-count")" = 2 ]
 
 bootstrap_tree_manifest() {
   (
@@ -888,6 +922,10 @@ grep -F 'different or unbound SSH endpoint' "$TMP/bootstrap-host-binding.out" >/
 rm -f "$foreign_recovery"
 cp "$STATE/config.valid.json" "$STATE/config.json"
 chmod 600 "$STATE/config.json"
+
+if [ "${GPT_SWITCH_TEST_BOOTSTRAP_ONLY:-0}" = 1 ]; then
+  exit 0
+fi
 
 # Exercise the public Cursor provision/deprovision transport against a local
 # fake SSH endpoint that runs the installed remote helper and real manager.
