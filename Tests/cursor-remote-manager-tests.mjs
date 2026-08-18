@@ -634,6 +634,10 @@ test("provision writes a 0600 runtime, validates isolated Cursor SDK, and preser
   assert.equal(backup.installedModel, fixture.input.codexModel);
   assert.equal(runtime.apiKey, fixture.apiKey);
   assert.equal(runtime.bridgeToken, fixture.bridgeToken);
+  assert.equal(
+    runtime.bridgeSHA256,
+    createHash("sha256").update(await readFile(fixture.bridgePath)).digest("hex"),
+  );
   assert.deepEqual(runtime.modelParameters, fixture.modelParameters);
   assert.match(runtime.cursorHome, /cursor-remote-xdg\/home$/);
   assert.match(runtime.xdgConfig, /cursor-remote-xdg\/config$/);
@@ -677,7 +681,9 @@ test("legacy reprovision migrates a flat model selection to the Codex picker mod
 
   const legacyRuntime = JSON.parse(await readFile(paths.runtime, "utf8"));
   legacyRuntime.schemaVersion = 1;
-  for (const key of ["catalogPath", "codexModel", "modelRoutes", "nativeModels"]) delete legacyRuntime[key];
+  for (const key of [
+    "bridgeSHA256", "catalogPath", "codexModel", "modelRoutes", "nativeModels",
+  ]) delete legacyRuntime[key];
   const legacyRuntimeData = Buffer.from(`${JSON.stringify(legacyRuntime, null, 2)}\n`);
   await writeFile(paths.runtime, legacyRuntimeData, { mode: 0o600 });
   const legacyConfig = (await readFile(paths.config, "utf8"))
@@ -925,6 +931,46 @@ test("identical healthy reprovision keeps the live bridge process", async () => 
   assert.equal(newHealth.pid, oldHealth.pid);
   const launches = await bridgeLaunches(fixture, 2, 250);
   assert.equal(launches.length, 1);
+  await assert.rejects(stat(paths.journal), { code: "ENOENT" });
+});
+
+test("bridge binary refresh restarts only the bridge generation", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  const oldHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(oldHealth.healthy, true);
+  detachedPIDs.add(oldHealth.pid);
+  const configBefore = await readFile(paths.config);
+
+  const oldBridge = await readFile(fixture.bridgePath);
+  await writeFile(fixture.bridgePath, Buffer.concat([
+    oldBridge,
+    Buffer.from("\n// refreshed bridge generation\n", "utf8"),
+  ]));
+  const expectedHash = createHash("sha256")
+    .update(await readFile(fixture.bridgePath))
+    .digest("hex");
+  const result = await provision(fixture.input, {
+    home: fixture.home,
+    env: fixture.env,
+    healthTimeoutMs: 100,
+    startTimeoutMs: 2_000,
+  });
+
+  assert.equal(result.requiresCodexReload, false);
+  assert.deepEqual(await readFile(paths.config), configBefore);
+  const runtime = await readRuntime({ home: fixture.home, env: fixture.env });
+  assert.equal(runtime.bridgeSHA256, expectedHash);
+  const newHealth = await bridgeHealth({ runtime });
+  assert.equal(newHealth.healthy, true);
+  assert.notEqual(newHealth.pid, oldHealth.pid);
+  detachedPIDs.delete(oldHealth.pid);
+  detachedPIDs.add(newHealth.pid);
+  const launches = await bridgeLaunches(fixture, 2);
+  assert.equal(launches.length, 2);
+  assert.equal(pidIsAlive(launches[0].pid), false);
+  assert.equal(pidIsAlive(launches[1].pid), true);
   await assert.rejects(stat(paths.journal), { code: "ENOENT" });
 });
 
@@ -1604,7 +1650,9 @@ test("readRuntime migrates legacy model slugs without guessing context", async (
   await waitForPIDExit(initialHealth.pid);
   const legacy = JSON.parse(await readFile(paths.runtime, "utf8"));
   legacy.schemaVersion = 1;
-  for (const key of ["catalogPath", "codexModel", "modelRoutes", "nativeModels"]) delete legacy[key];
+  for (const key of [
+    "bridgeSHA256", "catalogPath", "codexModel", "modelRoutes", "nativeModels",
+  ]) delete legacy[key];
   delete legacy.modelParameters;
   await writeFile(paths.runtime, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
   await chmod(paths.runtime, 0o600);

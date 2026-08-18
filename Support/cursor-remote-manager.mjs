@@ -108,6 +108,13 @@ function validatedBridgeToken(value) {
   return value;
 }
 
+function validatedSHA256(value, description) {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+    fail(`${description} checksum is invalid`, "invalid_runtime");
+  }
+  return value;
+}
+
 function validatedModel(value) {
   if (typeof value !== "string" || !MODEL_PATTERN.test(value)) {
     fail("model is invalid", "invalid_model");
@@ -490,6 +497,7 @@ function bridgeProcessIdentity(runtime) {
     cursorHome: runtime.cursorHome,
     agentPath: runtime.agentPath,
     bridgePath: runtime.bridgePath,
+    bridgeSHA256: runtime.bridgeSHA256 ?? null,
     nodePath: runtime.nodePath,
     workspace: runtime.workspace,
     xdgConfig: runtime.xdgConfig,
@@ -499,10 +507,23 @@ function bridgeProcessIdentity(runtime) {
   });
 }
 
+function bridgeProcessConfiguration(runtime) {
+  const value = JSON.parse(bridgeProcessIdentity(runtime));
+  delete value.bridgeSHA256;
+  return JSON.stringify(value);
+}
+
 export function sameBridgeProcessIdentity(left, right) {
   if (!left || !right) return false;
   const a = Buffer.from(sha256(Buffer.from(bridgeProcessIdentity(left))), "hex");
   const b = Buffer.from(sha256(Buffer.from(bridgeProcessIdentity(right))), "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function sameBridgeProcessConfiguration(left, right) {
+  if (!left || !right) return false;
+  const a = Buffer.from(sha256(Buffer.from(bridgeProcessConfiguration(left))), "hex");
+  const b = Buffer.from(sha256(Buffer.from(bridgeProcessConfiguration(right))), "hex");
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
@@ -796,13 +817,17 @@ function runtimeFromDisk(value) {
   const currentKeys = [
     ...legacyKeys, "catalogPath", "codexModel", "modelParameters", "modelRoutes", "nativeModels",
   ];
+  const currentKeysWithBridgeHash = [...currentKeys, "bridgeSHA256"];
   const actualKeys = Object.keys(value).sort();
   const isCurrent = value.schemaVersion === RUNTIME_SCHEMA_VERSION;
-  const expectedKeys = isCurrent
-    ? currentKeys.sort()
-    : (Object.hasOwn(value, "modelParameters") ? [...legacyKeys, "modelParameters"].sort() : legacyKeys);
-  if (actualKeys.length !== expectedKeys.length ||
-      actualKeys.some((key, index) => key !== expectedKeys[index])) {
+  const expectedKeySets = isCurrent
+    ? [currentKeys.sort(), currentKeysWithBridgeHash.sort()]
+    : [Object.hasOwn(value, "modelParameters")
+        ? [...legacyKeys, "modelParameters"].sort()
+        : legacyKeys.sort()];
+  if (!expectedKeySets.some((expectedKeys) =>
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index]))) {
     fail("Cursor remote runtime has missing or unknown fields", "invalid_runtime");
   }
   if (!isCurrent && value.schemaVersion !== 1) fail("Cursor remote runtime schema is invalid", "invalid_runtime");
@@ -841,6 +866,9 @@ function runtimeFromDisk(value) {
     cursorHome: validatedAbsolutePath(value.cursorHome, "Cursor isolated HOME"),
     agentPath: validatedAbsolutePath(value.agentPath, "Cursor agent path"),
     bridgePath: validatedAbsolutePath(value.bridgePath, "bridge path"),
+    ...(Object.hasOwn(value, "bridgeSHA256")
+      ? { bridgeSHA256: validatedSHA256(value.bridgeSHA256, "Cursor bridge") }
+      : {}),
     nodePath: validatedAbsolutePath(value.nodePath, "Node path"),
     managerPath: validatedAbsolutePath(value.managerPath, "manager path"),
     workspace: validatedAbsolutePath(value.workspace, "workspace path"),
@@ -1112,6 +1140,11 @@ async function resolvedRuntime(input, paths, environment, options = {}) {
     environment.CURSOR_REMOTE_BRIDGE_PATH ?? paths.defaultBridge,
     "Cursor bridge",
   );
+  const bridgeInfo = await stat(bridgePath);
+  if (bridgeInfo.size > MAX_INSTALLER_BYTES) {
+    fail("Cursor bridge is too large", "unsafe_path");
+  }
+  const bridgeSHA256 = sha256(await readFile(bridgePath));
   const nodePath = await resolvedCursorSDKNode(agentPath, paths, environment);
   const managerPath = await regularFilePath(options.managerPath ?? thisFile, "Cursor remote manager");
   const { catalogData: _catalogData, ...runtimeInput } = input;
@@ -1121,6 +1154,7 @@ async function resolvedRuntime(input, paths, environment, options = {}) {
     cursorHome: paths.cursorHome,
     agentPath,
     bridgePath,
+    bridgeSHA256,
     nodePath,
     managerPath,
     catalogPath: paths.catalog,
@@ -1728,8 +1762,9 @@ export async function provision(inputValue, options = {}) {
       // terminate long-lived Codex clients merely to publish refreshed model
       // metadata. Runtime or config changes retain the existing reload path.
       const requiresCodexReload =
-        !sameSnapshot(runtimeSnapshot, files.runtime.new) ||
-        !sameSnapshot(configSnapshot, files.config.new);
+        !sameSnapshot(configSnapshot, files.config.new) ||
+        (!sameSnapshot(runtimeSnapshot, files.runtime.new) &&
+          !sameBridgeProcessConfiguration(oldRuntime, runtime));
       journal = await writeTransactionJournal(paths, "provision", files, {
         oldBridgeExpected: oldBridgeExpected && !keepLiveBridge,
         // Keep a live equivalent bridge. Replace it only when the process
