@@ -5134,6 +5134,8 @@ function hasReplayableConversationHistory(input) {
     if (!item || typeof item !== "object") return false;
     if (item.role === "assistant") return true;
     return [
+      "compaction",
+      "syncbar_cursor_summary",
       "computer_call",
       "custom_tool_call",
       "function_call",
@@ -6557,6 +6559,7 @@ export function createBridgeServer(
     let acquiredPreviousResponseID = null;
     let continuationSucceeded = false;
     let continuationSource = null;
+    let streamResponseID = null;
     try {
       const { body, rawBody } = await readJSONBody(request);
       if (BRIDGE_REQUEST_TEST_HOOKS.has(testHooks)) {
@@ -6745,6 +6748,7 @@ export function createBridgeServer(
         ? previousSession.sessionID
         : null;
       const responseID = `resp_${randomUUID().replaceAll("-", "")}`;
+      streamResponseID = responseID;
       let streamingResponse;
       if (body.stream !== false) {
         response.writeHead(200, {
@@ -6952,6 +6956,18 @@ export function createBridgeServer(
           message: payload.body.error.message,
           param: null,
         })}\n\n`);
+        response.write(`event: response.failed
+data: ${JSON.stringify({
+          type: "response.failed",
+          response: {
+            id: streamResponseID,
+            object: "response",
+            status: "failed",
+            error: payload.body.error,
+          },
+        })}
+
+`);
         response.end();
       } else {
         response.writeHead(payload.statusCode, { "Content-Type": "application/json" });
