@@ -103,17 +103,24 @@ final class CodexCursorModelCatalogTests: XCTestCase {
             "syncbar-cursor/gpt-5.6-sol",
             "syncbar-cursor/gpt-5.3-codex",
         ])
-        XCTAssertEqual(models[0]["description"] as? String, "bundled sol")
-        XCTAssertEqual(models[1]["description"] as? String, "bundled 5.2")
+       XCTAssertEqual(models[0]["description"] as? String, "bundled sol")
+       XCTAssertEqual(models[1]["description"] as? String, "bundled 5.2")
         XCTAssertEqual(models[1]["supports_reasoning_summaries"] as? Bool, true)
-        XCTAssertFalse(
-            try XCTUnwrap(models[1]["base_instructions"] as? String).isEmpty)
+       XCTAssertFalse(
+           try XCTUnwrap(models[1]["base_instructions"] as? String).isEmpty)
 
-        let grok = models[3]
-        XCTAssertEqual(grok["display_name"] as? String, "Cursor · Grok 4.6")
-        XCTAssertEqual(grok["additional_speed_tiers"] as? [String], ["fast"])
-        let grokTiers = try XCTUnwrap(grok["service_tiers"] as? [[String: String]])
-        XCTAssertEqual(grokTiers.first?["id"], "priority")
+        let composer = models[2]
+        XCTAssertEqual(composer["slug"] as? String, "syncbar-cursor/composer-2.5")
+        XCTAssertEqual(composer["context_window"] as? Int, 200_000)
+        XCTAssertEqual(composer["max_context_window"] as? Int, 200_000)
+
+       let grok = models[3]
+       XCTAssertEqual(grok["display_name"] as? String, "Cursor · Grok 4.6")
+       XCTAssertEqual(grok["additional_speed_tiers"] as? [String], ["fast"])
+       let grokTiers = try XCTUnwrap(grok["service_tiers"] as? [[String: String]])
+       XCTAssertEqual(grokTiers.first?["id"], "priority")
+        XCTAssertEqual(grok["context_window"] as? Int, 256_000)
+        XCTAssertEqual(grok["max_context_window"] as? Int, 256_000)
 
         let gpt = models[4]
         XCTAssertEqual(gpt["display_name"] as? String,

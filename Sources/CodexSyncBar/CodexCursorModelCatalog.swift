@@ -194,12 +194,27 @@ enum CodexCursorModelCatalogBuilder {
             return
         }
 
-        let conservativeWindow = 272_000
+        let conservativeWindow = advertisedNonMaxContextWindow(for: variants)
         let templateWindow = (model["context_window"] as? NSNumber)?.intValue
         let contextWindow = min(templateWindow ?? conservativeWindow, conservativeWindow)
         let templateMaximum = (model["max_context_window"] as? NSNumber)?.intValue
         model["context_window"] = contextWindow
         model["max_context_window"] = min(templateMaximum ?? contextWindow, conservativeWindow)
+    }
+
+    /// Cursor-owned windows that have no 1M variant. Advertising the bundled
+    /// Codex 272k window lets Codex compact after Grok/Composer already overflow.
+    private static func advertisedNonMaxContextWindow(
+        for variants: [CursorModelVariant]) -> Int
+    {
+        let slugs = variants.map { $0.baseSlug.lowercased() }
+        if slugs.contains(where: { $0 == "composer-2.5" || $0.hasPrefix("composer-2.5-") }) {
+            return 200_000
+        }
+        if slugs.contains(where: { $0.contains("grok") }) {
+            return 256_000
+        }
+        return 272_000
     }
 }
 
