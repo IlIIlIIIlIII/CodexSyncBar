@@ -1969,11 +1969,14 @@ final class AppModel: ObservableObject {
             }
             cursorBridgeStatus = await cursorBridgeService.start(
                 preferences: cursorBridgePreferences)
-            if reloadedLegacyConfiguration, cursorBridgeStatus.isHealthy {
+            let catalogChanged = await refreshManagedCursorModelCatalogIfNeeded()
+            if (reloadedLegacyConfiguration || catalogChanged), cursorBridgeStatus.isHealthy {
                 do {
                     try await switchService.reloadLocalCodexConfiguration()
                 } catch {
-                    cursorBridgeError = "기존 Codex 작업용 provider 경로를 적용했지만 Codex reload에 실패했습니다: \(error.localizedDescription)"
+                    cursorBridgeError = reloadedLegacyConfiguration
+                        ? "기존 Codex 작업용 provider 경로를 적용했지만 Codex reload에 실패했습니다: \(error.localizedDescription)"
+                        : "모델 카탈로그는 갱신했지만 Codex reload에 실패했습니다: \(error.localizedDescription)"
                     return
                 }
             }
@@ -1982,6 +1985,23 @@ final class AppModel: ObservableObject {
                 preferences: cursorBridgePreferences)
         }
         cursorBridgeError = cursorBridgeStatus.detail
+    }
+
+    @discardableResult
+    private func refreshManagedCursorModelCatalogIfNeeded() async -> Bool {
+        do {
+            let catalog = try await cursorBridgeService.loadModelCatalog(
+                preferredAgentPath: cursorBridgePreferences.agentPath)
+            let exposedCatalog = try catalog.exposingCodexModelIDs(
+                cursorBridgePreferences.exposedModelIDs)
+            cursorModelCatalog = catalog
+            cursorModelCatalogError = nil
+            return try await codexCursorModelCatalogService.refreshIfChanged(
+                cursorCatalog: exposedCatalog)
+        } catch {
+            cursorModelCatalogError = error.localizedDescription
+            return false
+        }
     }
 
     func enableCursorProvider(
@@ -2034,15 +2054,6 @@ final class AppModel: ObservableObject {
                 bridgeToken: requestedPreferences.bridgeToken).validated()
             cursorModelCatalog = catalog
             cursorModelCatalogError = nil
-            if !wasActive,
-               let configuredCatalogPath = try codexConfigService.configuredModelCatalogPath(),
-               pathsReferToSameFile(
-                   configuredCatalogPath,
-                   codexCursorModelCatalogService.catalogURL.path)
-            {
-                throw AppError.processFailed(
-                    "기존 Codex 설정이 SyncBar 관리 모델 카탈로그 경로를 이미 사용하고 있어 파일을 덮어쓰지 않았습니다: \(configuredCatalogPath)")
-            }
             previousCatalogData = try await codexCursorModelCatalogService.install(
                 cursorCatalog: exposedCatalog)
             installedCatalog = true

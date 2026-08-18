@@ -367,6 +367,66 @@ final class CodexCursorModelCatalogTests: XCTestCase {
     }
 
     @MainActor
+    func testServiceRefreshIfChangedSkipsIdenticalBytesAndRewritesStaleWindows() async throws {
+        let fileManager = FileManager.default
+        let home = fileManager.temporaryDirectory
+            .appendingPathComponent("codex-cursor-refresh-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: home, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: home) }
+
+        let template = try JSONSerialization.data(withJSONObject: [
+            "models": [[
+                "slug": "gpt-5.6-sol",
+                "display_name": "GPT-5.6-Sol",
+                "default_reasoning_level": "low",
+                "supported_reasoning_levels": [],
+                "context_window": 272_000,
+                "max_context_window": 272_000,
+            ]],
+        ])
+        let service = CodexCursorModelCatalogService(
+            home: home,
+            bundledCatalogOverride: template)
+        let cursorCatalog = CursorModelCatalog(cliOutput: """
+        composer-2.5 - Composer 2.5
+        cursor-grok-4.6-high - Cursor Grok 4.6
+        """)
+        let wroteInitial = try await service.refreshIfChanged(cursorCatalog: cursorCatalog)
+        XCTAssertTrue(wroteInitial)
+        let firstData = try Data(contentsOf: service.catalogURL)
+        let wroteIdentical = try await service.refreshIfChanged(cursorCatalog: cursorCatalog)
+        XCTAssertFalse(wroteIdentical)
+        XCTAssertEqual(try Data(contentsOf: service.catalogURL), firstData)
+
+        var root = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: firstData) as? [String: Any])
+        var models = try XCTUnwrap(root["models"] as? [[String: Any]])
+        models = models.map { model in
+            var updated = model
+            if let slug = model["slug"] as? String,
+               slug.contains("composer") || slug.contains("grok")
+            {
+                updated["context_window"] = 272_000
+                updated["max_context_window"] = 272_000
+            }
+            return updated
+        }
+        root["models"] = models
+        try JSONSerialization.data(withJSONObject: root).write(to: service.catalogURL)
+        let wroteStaleWindows = try await service.refreshIfChanged(cursorCatalog: cursorCatalog)
+        XCTAssertTrue(wroteStaleWindows)
+        let refreshed = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: service.catalogURL)) as? [String: Any])
+        let refreshedModels = try XCTUnwrap(refreshed["models"] as? [[String: Any]])
+        let bySlug = Dictionary(uniqueKeysWithValues: refreshedModels.compactMap { model -> (String, [String: Any])? in
+            guard let slug = model["slug"] as? String else { return nil }
+            return (slug, model)
+        })
+        XCTAssertEqual(bySlug["syncbar-cursor/composer-2.5"]?["context_window"] as? Int, 200_000)
+        XCTAssertEqual(bySlug["syncbar-cursor/cursor-grok-4.6"]?["context_window"] as? Int, 256_000)
+    }
+
+    @MainActor
     func testServicePrefersSafeCodexModelCacheOverBundledProbe() async throws {
         let fileManager = FileManager.default
         let home = fileManager.temporaryDirectory
