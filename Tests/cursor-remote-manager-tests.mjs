@@ -904,6 +904,28 @@ test("healthy reprovision replaces the bridge generation and API-key environment
   await assert.rejects(stat(paths.journal), { code: "ENOENT" });
 });
 
+test("identical healthy reprovision keeps the live bridge process", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  const oldHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(oldHealth.healthy, true);
+  detachedPIDs.add(oldHealth.pid);
+
+  await provision(fixture.input, {
+    home: fixture.home,
+    env: fixture.env,
+    healthTimeoutMs: 100,
+    startTimeoutMs: 2_000,
+  });
+  const newHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(newHealth.healthy, true);
+  assert.equal(newHealth.pid, oldHealth.pid);
+  const launches = await bridgeLaunches(fixture, 2, 250);
+  assert.equal(launches.length, 1);
+  await assert.rejects(stat(paths.journal), { code: "ENOENT" });
+});
+
 test("managed reprovision rotates the API key with the same bridge identity", async () => {
   const fixture = await makeFixture();
   const paths = managerPaths({ home: fixture.home, env: fixture.env });

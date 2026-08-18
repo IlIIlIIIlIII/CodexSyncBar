@@ -476,6 +476,36 @@ function sameSnapshot(first, second) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function bridgeProcessIdentity(runtime) {
+  return JSON.stringify({
+    apiKey: runtime.apiKey,
+    bridgeToken: runtime.bridgeToken,
+    port: runtime.port,
+    model: runtime.model,
+    models: runtime.models,
+    modelParameters: runtime.modelParameters,
+    modelRoutes: runtime.modelRoutes ?? {},
+    nativeModels: runtime.nativeModels ?? [],
+    home: runtime.home,
+    cursorHome: runtime.cursorHome,
+    agentPath: runtime.agentPath,
+    bridgePath: runtime.bridgePath,
+    nodePath: runtime.nodePath,
+    workspace: runtime.workspace,
+    xdgConfig: runtime.xdgConfig,
+    xdgData: runtime.xdgData,
+    xdgCache: runtime.xdgCache,
+    xdgState: runtime.xdgState,
+  });
+}
+
+export function sameBridgeProcessIdentity(left, right) {
+  if (!left || !right) return false;
+  const a = Buffer.from(sha256(Buffer.from(bridgeProcessIdentity(left))), "hex");
+  const b = Buffer.from(sha256(Buffer.from(bridgeProcessIdentity(right))), "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 async function syncDirectory(directory) {
   const handle = await open(directory, "r");
   try {
@@ -1673,16 +1703,33 @@ export async function provision(inputValue, options = {}) {
         config: { old: configSnapshot, new: candidate(patchedData) },
         backup: { old: backupSnapshot, new: candidate(backupData) },
       };
+      const keepLiveBridge = Boolean(
+        oldBridgeExpected &&
+        oldBridgeHealth?.healthy &&
+        sameBridgeProcessIdentity(oldRuntime, runtime),
+      );
+      const filesUnchanged = Object.values(files).every((pair) => sameSnapshot(pair.old, pair.new));
+      if (keepLiveBridge && filesUnchanged) {
+        return {
+          provisioned: true,
+          model: runtime.model,
+          codexModel: runtime.codexModel,
+          port: runtime.port,
+          models: runtime.models,
+          modelParameters: runtime.modelParameters,
+          modelRoutes: runtime.modelRoutes,
+          nativeModels: runtime.nativeModels,
+          agentPath: runtime.agentPath,
+        };
+      }
       journal = await writeTransactionJournal(paths, "provision", files, {
-        oldBridgeExpected,
-        // Provision is not complete until the newly committed runtime has a
-        // token-authenticated bridge. This is true for both first provision
-        // and reprovision; callers must never need a separate `auth` command
-        // merely to make a successful provision usable.
-        newBridgeExpected: true,
+        oldBridgeExpected: oldBridgeExpected && !keepLiveBridge,
+        // Keep a live equivalent bridge. Replace it only when the process
+        // identity (API key, token, model, or binary path) actually changed.
+        newBridgeExpected: !keepLiveBridge,
       });
       crashAfter(options, "provision", "after-journal");
-      if (oldBridgeExpected) {
+      if (oldBridgeExpected && !keepLiveBridge) {
         await stopHealthyBridge(oldRuntime, {
           required: true,
           expectedPID: oldBridgeHealth.pid,
@@ -1691,17 +1738,32 @@ export async function provision(inputValue, options = {}) {
       }
       crashAfter(options, "provision", "after-stop-old");
 
-      await atomicCompareAndSwap(paths.runtime, runtimeSnapshot, files.runtime.new);
+      if (!sameSnapshot(runtimeSnapshot, files.runtime.new)) {
+        await atomicCompareAndSwap(paths.runtime, runtimeSnapshot, files.runtime.new);
+      }
       crashAfter(options, "provision", "after-runtime-commit");
-      await atomicCompareAndSwap(paths.catalog, catalogSnapshot, files.catalog.new);
+      if (!sameSnapshot(catalogSnapshot, files.catalog.new)) {
+        await atomicCompareAndSwap(paths.catalog, catalogSnapshot, files.catalog.new);
+      }
       crashAfter(options, "provision", "after-catalog-commit");
-      await atomicCompareAndSwap(paths.config, configSnapshot, files.config.new);
+      if (!sameSnapshot(configSnapshot, files.config.new)) {
+        await atomicCompareAndSwap(paths.config, configSnapshot, files.config.new);
+      }
       crashAfter(options, "provision", "after-config-commit");
-      await atomicCompareAndSwap(paths.backup, backupSnapshot, files.backup.new);
+      if (!sameSnapshot(backupSnapshot, files.backup.new)) {
+        await atomicCompareAndSwap(paths.backup, backupSnapshot, files.backup.new);
+      }
       crashAfter(options, "provision", "after-backup-commit");
 
-      await ensureDetachedBridge({ ...options, paths, runtime });
-      crashAfter(options, "provision", "after-start-new");
+      if (!keepLiveBridge) {
+        await ensureDetachedBridge({ ...options, paths, runtime });
+        crashAfter(options, "provision", "after-start-new");
+      } else {
+        const live = await healthRequest(runtime, options.healthTimeoutMs);
+        if (!live.healthy) {
+          await ensureDetachedBridge({ ...options, paths, runtime });
+        }
+      }
       await clearTransactionJournal(paths, journal);
       journal = null;
 
