@@ -1043,6 +1043,7 @@ test("Cursor SDK account and model utilities use the issued credential", async (
                   { id: "context", value: "1m" },
                   { id: "reasoning", value: "high" },
                   { id: "fast", value: "true" },
+                  { id: "speed", value: "fast" },
                 ],
               },
             ],
@@ -1064,6 +1065,81 @@ test("Cursor SDK account and model utilities use the issued credential", async (
     ["me", { apiKey }],
     ["models", { apiKey }],
   ]);
+});
+
+test("Cursor SDK model catalog maps speed onto the existing fast variant", () => {
+  assert.equal(
+    cursorSDKModelCatalogText([{
+      id: "gpt-5.6-sol",
+      displayName: "GPT-5.6 Sol",
+      variants: [
+        {
+          displayName: "High",
+          params: [
+            { id: "context", value: "1m" },
+            { id: "reasoning", value: "high" },
+            { id: "speed", value: "default" },
+          ],
+        },
+        {
+          displayName: "High Fast",
+          params: [
+            { id: "cyber", value: "false" },
+            { id: "context", value: "1m" },
+            { id: "reasoning", value: "high" },
+            { id: "speed", value: "fast" },
+          ],
+        },
+      ],
+    }]),
+    "gpt-5.6-sol-high - GPT-5.6 Sol High 1M\n" +
+      "gpt-5.6-sol-high-fast - GPT-5.6 Sol High Fast 1M\n",
+  );
+
+  assert.equal(
+    cursorSDKModelCatalogText([{
+      id: "composer-2.5",
+      displayName: "Composer 2.5",
+      variants: [{
+        displayName: "Fast",
+        params: [
+          { id: "fast", value: "true" },
+          { id: "speed", value: "fast" },
+        ],
+      }],
+    }]),
+    "composer-2.5-fast - Composer 2.5 Fast\n",
+  );
+
+  assert.throws(
+    () => cursorSDKModelCatalogText([{
+      id: "future-model",
+      displayName: "Future Model",
+      variants: [{
+        displayName: "Conflicting speed",
+        params: [
+          { id: "fast", value: "false" },
+          { id: "speed", value: "fast" },
+        ],
+      }],
+    }]),
+    (error) => error instanceof BridgeError &&
+      error.code === "sdk_invalid_models" &&
+      error.message.includes("speed"),
+  );
+  assert.throws(
+    () => cursorSDKModelCatalogText([{
+      id: "future-model",
+      displayName: "Future Model",
+      variants: [{
+        displayName: "Unknown speed",
+        params: [{ id: "speed", value: "turbo" }],
+      }],
+    }]),
+    (error) => error instanceof BridgeError &&
+      error.code === "sdk_invalid_models" &&
+      error.message.includes("speed"),
+  );
 });
 
 test("Cursor SDK model catalog rejects ambiguous or unsupported variants", () => {

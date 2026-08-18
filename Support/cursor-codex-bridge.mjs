@@ -3366,6 +3366,8 @@ const CURSOR_SDK_EFFORTS = new Map([
   ["extra-high", "xhigh"],
   ["max", "max"],
 ]);
+const CURSOR_SDK_SPEED_FAST = new Set(["fast", "true"]);
+const CURSOR_SDK_SPEED_STANDARD = new Set(["default", "false", "standard", "normal"]);
 
 function cursorSDKCatalogBaseSlug(modelID) {
   return new Map([
@@ -3386,6 +3388,21 @@ function cursorSDKBooleanParameter(value, id) {
   throw new BridgeError(`Cursor SDK model parameter ${id} is invalid`, 502, "sdk_invalid_models");
 }
 
+function cursorSDKFastParameter(values) {
+  const flagged = values.has("fast") ? cursorSDKBooleanParameter(values.get("fast"), "fast") : null;
+  const speedValue = values.get("speed");
+  let speedFast = null;
+  if (speedValue !== undefined) {
+    if (CURSOR_SDK_SPEED_FAST.has(speedValue)) speedFast = true;
+    else if (CURSOR_SDK_SPEED_STANDARD.has(speedValue)) speedFast = false;
+    else throw new BridgeError("Cursor SDK speed parameter is invalid", 502, "sdk_invalid_models");
+  }
+  if (flagged !== null && speedFast !== null && flagged !== speedFast) {
+    throw new BridgeError("Cursor SDK speed parameter is invalid", 502, "sdk_invalid_models");
+  }
+  return flagged ?? speedFast ?? false;
+}
+
 function normalizedCursorSDKModelVariant(variant) {
   const values = new Map();
   const params = Array.isArray(variant?.params) ? variant.params : [];
@@ -3398,7 +3415,8 @@ function normalizedCursorSDKModelVariant(variant) {
     values.set(parameter.id, parameter.value);
   }
   const known = new Set([
-    "context", "context_window", "effort", "fast", "reasoning", "reasoning_effort", "thinking",
+    "context", "context_window", "effort", "fast", "reasoning", "reasoning_effort", "speed",
+    "thinking",
   ]);
   const inactiveUnknownValues = new Set(["default", "false"]);
   for (const [id, value] of values) {
@@ -3412,7 +3430,7 @@ function normalizedCursorSDKModelVariant(variant) {
   if (!effort) {
     throw new BridgeError("Cursor SDK reasoning parameter is invalid", 502, "sdk_invalid_models");
   }
-  const fast = values.has("fast") ? cursorSDKBooleanParameter(values.get("fast"), "fast") : false;
+  const fast = cursorSDKFastParameter(values);
   const thinking = values.has("thinking")
     ? cursorSDKBooleanParameter(values.get("thinking"), "thinking")
     : false;
