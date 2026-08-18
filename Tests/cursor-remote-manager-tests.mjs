@@ -928,6 +928,39 @@ test("identical healthy reprovision keeps the live bridge process", async () => 
   await assert.rejects(stat(paths.journal), { code: "ENOENT" });
 });
 
+test("catalog-only reprovision keeps the live bridge and does not require Codex reload", async () => {
+  const fixture = await makeFixture();
+  const paths = managerPaths({ home: fixture.home, env: fixture.env });
+  await provision(fixture.input, { home: fixture.home, env: fixture.env });
+  const oldHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(oldHealth.healthy, true);
+  detachedPIDs.add(oldHealth.pid);
+  const runtimeBefore = await readFile(paths.runtime);
+  const configBefore = await readFile(paths.config);
+
+  const refreshedCatalog = Buffer.from(JSON.stringify({ models: [
+    { slug: "gpt-5.6-sol", display_name: "GPT-5.6 Sol (refreshed)" },
+    { slug: fixture.input.codexModel, display_name: "Cursor Composer 2.5 (refreshed)" },
+  ] })).toString("base64");
+  const result = await provision({ ...fixture.input, catalogData: refreshedCatalog }, {
+    home: fixture.home,
+    env: fixture.env,
+    healthTimeoutMs: 100,
+    startTimeoutMs: 2_000,
+  });
+
+  assert.equal(result.requiresCodexReload, false);
+  assert.deepEqual(await readFile(paths.runtime), runtimeBefore);
+  assert.deepEqual(await readFile(paths.config), configBefore);
+  assert.equal((await readFile(paths.catalog)).toString("base64"), refreshedCatalog);
+  const newHealth = await bridgeHealth({ home: fixture.home, env: fixture.env });
+  assert.equal(newHealth.healthy, true);
+  assert.equal(newHealth.pid, oldHealth.pid);
+  const launches = await bridgeLaunches(fixture, 2, 250);
+  assert.equal(launches.length, 1);
+  await assert.rejects(stat(paths.journal), { code: "ENOENT" });
+});
+
 test("managed reprovision rotates the API key with the same bridge identity", async () => {
   const fixture = await makeFixture();
   const paths = managerPaths({ home: fixture.home, env: fixture.env });

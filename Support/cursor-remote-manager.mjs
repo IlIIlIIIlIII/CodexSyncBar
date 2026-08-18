@@ -1723,6 +1723,13 @@ export async function provision(inputValue, options = {}) {
           agentPath: runtime.agentPath,
         };
       }
+      // Updating the model catalog in place does not change the provider
+      // endpoint, authentication command, or live bridge generation. Do not
+      // terminate long-lived Codex clients merely to publish refreshed model
+      // metadata. Runtime or config changes retain the existing reload path.
+      const requiresCodexReload =
+        !sameSnapshot(runtimeSnapshot, files.runtime.new) ||
+        !sameSnapshot(configSnapshot, files.config.new);
       journal = await writeTransactionJournal(paths, "provision", files, {
         oldBridgeExpected: oldBridgeExpected && !keepLiveBridge,
         // Keep a live equivalent bridge. Replace it only when the process
@@ -1770,7 +1777,7 @@ export async function provision(inputValue, options = {}) {
 
       return {
         provisioned: true,
-        requiresCodexReload: true,
+        requiresCodexReload,
         model: runtime.model,
         codexModel: runtime.codexModel,
         port: runtime.port,

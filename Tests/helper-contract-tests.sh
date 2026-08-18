@@ -1287,12 +1287,16 @@ if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" "$CURSOR_REMOTE_CO
   exit 1
 fi
 
-# An identical healthy reprovision must not stop long-lived Codex clients.
-# Force the stop hook to fail: the no-op still succeeds without reload=pending
-# because the manager reports that no Codex reload is required.
+# A catalog-only refresh must not stop long-lived Codex clients. It commits the
+# new metadata while keeping the runtime, provider config, and bridge process.
+CURSOR_CATALOG_ONLY_PAYLOAD=$(printf '%s' "$CURSOR_PAYLOAD" | jq -c '
+  .catalogData = ({models:[
+    {slug:"gpt-5.6-sol",display_name:"GPT-5.6 Sol refreshed"},
+    {slug:"syncbar-cursor/composer-2.5",display_name:"Cursor Composer refreshed"}
+  ]} | tojson | @base64)')
 CURSOR_RELOAD_PENDING_STDOUT="$TMP/cursor-reload-pending.stdout"
 CURSOR_RELOAD_PENDING_STDERR="$TMP/cursor-reload-pending.stderr"
-if ! printf '%s' "$CURSOR_PAYLOAD" | env "${cursor_env[@]}" \
+if ! printf '%s' "$CURSOR_CATALOG_ONLY_PAYLOAD" | env "${cursor_env[@]}" \
     GPT_SWITCH_TEST_CURSOR_STOP_FAILURE=1 \
     "$HELPER" provision-cursor staging-node \
     >"$CURSOR_RELOAD_PENDING_STDOUT" 2>"$CURSOR_RELOAD_PENDING_STDERR"; then
@@ -1308,6 +1312,19 @@ if grep -F -e "$CURSOR_API_CANARY" -e "$CURSOR_BRIDGE_CANARY" \
   printf 'Cursor reload-pending result leaked a credential\n' >&2
   exit 1
 fi
+
+# The now-identical healthy reprovision also remains a strict no-op.
+if ! printf '%s' "$CURSOR_CATALOG_ONLY_PAYLOAD" | env "${cursor_env[@]}" \
+    GPT_SWITCH_TEST_CURSOR_STOP_FAILURE=1 \
+    "$HELPER" provision-cursor staging-node \
+    >"$CURSOR_RELOAD_PENDING_STDOUT" 2>"$CURSOR_RELOAD_PENDING_STDERR"; then
+  printf 'Identical Cursor reprovision was misreported after Codex reload failure\n' >&2
+  exit 1
+fi
+grep -Fx 'device=staging-node cursor=provisioned result=ok version=2.2.0' \
+  "$CURSOR_RELOAD_PENDING_STDOUT" >/dev/null
+[ ! -s "$CURSOR_RELOAD_PENDING_STDERR" ]
+[ "$(cat "$CURSOR_REMOTE_STOP_CALLS")" = stop-clients ]
 
 # Deprovision commits the exact restore before client reload. Force that reload
 # to fail, verify the generic/secret-free partial failure, then prove a retry is
