@@ -355,7 +355,7 @@ struct PopoverView: View {
             }
             .buttonStyle(.plain)
             .disabled(
-                model.managementActionsDisabled || model.isSwitching || model.isMaintainingAuth)
+                model.configurationError != nil)
             .accessibilityLabel("\(model.selectedProfile.alias) 계정 재로그인")
             .accessibilityHint("전용 Chromium 로그인 창을 엽니다")
             .accessibilityIdentifier("reauthentication-button")
