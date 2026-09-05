@@ -308,7 +308,7 @@ struct SettingsView: View {
                 Button("재로그인") { model.beginLogin(profileID: profile.id) }
                     .buttonStyle(.borderedProminent)
                     .tint(AppTheme.yellow)
-                    .disabled(accountActionDisabled)
+                    .disabled(settingsMutationDisabled)
             } else {
                 Button("로그아웃", role: .destructive) { accountToLogout = profile }
                     .disabled(model.profiles.count < 2 || accountActionDisabled)
