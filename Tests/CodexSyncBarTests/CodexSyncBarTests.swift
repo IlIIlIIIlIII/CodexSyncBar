@@ -3124,6 +3124,44 @@ final class CodexSyncBarTests: XCTestCase {
         }
     }
 
+    func testRecoverLocalStateIgnoresUnknownActiveNodeStatus() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexSyncBarRecoverLocalStateUnknown-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let executable = root.appendingPathComponent("gpt-switch")
+        let script = """
+        #!/bin/bash
+        if [ "$1" = "__node" ] && [ "$2" = "status" ]; then
+          printf 'active=unknown fingerprint=unknown mode=unknown auth_mode=unknown cli=unknown credential=unknown access_fp=unknown expires_at=unknown\\n'
+          exit 1
+        fi
+        exit 64
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        try await SwitchService(executable: executable).recoverLocalState()
+    }
+
+    func testRecoverLocalStateThrowsForActiveNodeFailure() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexSyncBarRecoverLocalStateFailure-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let executable = root.appendingPathComponent("gpt-switch")
+        try Data("#!/bin/bash\nprintf 'active=error fingerprint=error mode=error auth_mode=error\\n' >&2\nexit 1\n".utf8)
+            .write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+
+        do {
+            try await SwitchService(executable: executable).recoverLocalState()
+            XCTFail("recoverLocalState unexpectedly succeeded")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("active=error"))
+        }
+    }
+
     func testSwitchServiceRunsReadableHelperThroughBash() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexSyncBarReadableHelper-\(UUID().uuidString)", isDirectory: true)

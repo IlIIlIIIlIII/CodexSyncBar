@@ -72,11 +72,27 @@ actor SwitchService {
         await acquireMaintenanceSlot()
         defer { releaseMaintenanceSlot() }
         let result = try await run(arguments: ["__node", "status"])
+        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.status != 0 && Self.isUnknownActiveNodeStatus(output) {
+            return
+        }
         guard result.status == 0 else {
-            let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = output
             throw AppError.processFailed(
                 message.isEmpty ? "로컬 인증 복구 상태를 확인하지 못했습니다." : message)
         }
+    }
+
+    private static func isUnknownActiveNodeStatus(_ output: String) -> Bool {
+        guard !output.isEmpty else { return false }
+        for line in output.split(whereSeparator: \.isNewline) {
+            for token in line.split(whereSeparator: \.isWhitespace) {
+                if token == "active=unknown" {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     /// Recovers durable controller-level login/logout transactions after the
