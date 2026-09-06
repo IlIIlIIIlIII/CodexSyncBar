@@ -50,6 +50,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var isSwitching = false
     @Published private(set) var isManagingProfiles = false
+    @Published private(set) var isUpdatingRemoteCodex = false
+    @Published private(set) var remoteCodexUpdateResults: [RemoteCodexUpdateResult] = []
+    @Published private(set) var remoteCodexUpdateProgress = ""
     @Published private(set) var isMaintainingAuth = false
     @Published private(set) var loginRequiredProfileIDs: Set<Int> = []
     @Published private(set) var browserCleanupPendingProfileIDs: Set<Int> = []
@@ -1215,6 +1218,41 @@ final class AppModel: ObservableObject {
                     ? "SSH 장치 설정을 저장하고 비활성화했습니다. ‘설치 및 활성화’로 새 연결을 검증해 주세요."
                     : "SSH 장치 설정을 저장했습니다."))
         }
+    }
+
+    func updateAllRemoteCodex() async {
+        guard !managementActionsDisabled, !isManagingProfiles, !isSwitching,
+              !isMaintainingAuth, !isUpdatingRemoteCodex, loginWindowController == nil
+        else {
+            banner = AppBanner(style: .warning, message: configurationMutationBlockMessage)
+            return
+        }
+        let targets = configuredDevices.filter(\.enabled)
+        guard !targets.isEmpty else { return }
+        // Reuse the existing device/profile mutation gate for the whole batch.
+        isManagingProfiles = true
+        isUpdatingRemoteCodex = true
+        remoteCodexUpdateResults = []
+        defer {
+            isManagingProfiles = false
+            isUpdatingRemoteCodex = false
+            scheduleQueuedForcedSyncIfPossible()
+        }
+        for (index, device) in targets.enumerated() {
+            remoteCodexUpdateProgress = "\(index + 1)/\(targets.count) · \(device.displayName) 업데이트 및 재시작 중…"
+            do {
+                let result = try await switchService.updateRemoteCodex(deviceID: device.id)
+                remoteCodexUpdateResults.append(result)
+            } catch {
+                remoteCodexUpdateResults.append(RemoteCodexUpdateResult(
+                    deviceID: device.id, exitStatus: 1, output: error.localizedDescription))
+            }
+        }
+        let succeeded = remoteCodexUpdateResults.filter(\.succeeded).count
+        remoteCodexUpdateProgress = "총 \(targets.count)대 · 완료 \(succeeded)대 · 확인 필요 \(targets.count - succeeded)대"
+        banner = AppBanner(
+            style: succeeded == targets.count ? .success : .warning,
+            message: "SSH Codex CLI 업데이트: \(remoteCodexUpdateProgress)")
     }
 
     func testDevice(id: String) async {

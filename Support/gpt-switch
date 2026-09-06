@@ -98,6 +98,7 @@ Usage:
   gpt-switch accounts-json
   gpt-switch test-device DEVICE-ID
   gpt-switch bootstrap-device DEVICE-ID
+  gpt-switch update-codex [DEVICE-ID|all]
   gpt-switch --version
   gpt-switch help
 
@@ -1765,6 +1766,145 @@ node_stop_clients() {
 
   warn "Codex app-server processes are still running on $(hostname)"
   return 1
+}
+
+# Resolve symlinks without depending on GNU readlink -f (SSH Macs lack it).
+codex_real_path() {
+  local path="$1" link hops=0
+  while [ -L "$path" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    link=$(readlink "$path") || return 1
+    case "$link" in /*) path="$link" ;; *) path="$(dirname "$path")/$link" ;; esac
+  done
+  printf '%s/%s\n' "$(cd "$(dirname "$path")" && pwd -P)" "$(basename "$path")"
+}
+
+codex_cli_version() {
+  "$1" --version 2>/dev/null | sed -nE 's/^codex(-cli)? ([0-9]+\.[0-9]+\.[0-9]+[^[:space:]]*)$/\2/p' | head -1
+}
+
+codex_app_servers_run_version() {
+  local expected="$1" pid executable version count=0
+  local pids
+  pids=$(codex_app_server_pids)
+  [ -n "$pids" ] || return 1
+  while IFS= read -r pid; do
+    if [ -d /proc ]; then
+      executable=$(readlink "/proc/$pid/exe") || return 1
+      case "$executable" in */node|*/nodejs) continue ;; esac
+      version=$(codex_cli_version "/proc/$pid/exe")
+    else
+      # On macOS verify the executable mapped by the replacement process.
+      executable=$(lsof -a -p "$pid" -d txt -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+      case "$executable" in */node|*/nodejs) continue ;; esac
+      [ -n "$executable" ] || return 1
+      version=$(codex_cli_version "$executable")
+    fi
+    [ "$version" = "$expected" ] || return 1
+    count=$((count + 1))
+  done <<<"$pids"
+  [ "$count" -gt 0 ]
+}
+
+node_update_codex() {
+  local cli resolved npm_bin npm_root standalone_root manager before after stopped attempts
+  local installer="" restart="not-running"
+  # Keep the login shell's selected toolchain first. Add common install paths
+  # for noninteractive SSH sessions, and load nvm only if Codex is absent.
+  export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"
+  if ! command -v codex >/dev/null 2>&1 && [ -s "$HOME/.nvm/nvm.sh" ]; then
+    set +u
+    . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1
+    set -u
+  fi
+  cli=$(command -v codex) || die "Codex CLI is not installed or is missing from the SSH login PATH"
+  case "$cli" in /*) ;; *) die "Codex must resolve to an executable file" ;; esac
+  resolved=$(codex_real_path "$cli") || die "could not resolve the installed Codex CLI"
+  before=$(codex_cli_version "$cli")
+  [ -n "$before" ] || die "could not verify the installed Codex CLI version"
+  manager=""
+  case "$resolved" in
+    */lib/node_modules/@openai/codex/*)
+      npm_bin="${resolved%%/lib/node_modules/@openai/codex/*}/bin/npm"
+      [ -x "$npm_bin" ] || npm_bin=$(command -v npm) || die "npm is unavailable for this Codex installation"
+      # npm's env-node shebang must use the same Node toolchain as Codex.
+      export PATH="$(dirname "$npm_bin"):$PATH"
+      npm_root=$("$npm_bin" root -g) || die "could not identify the npm installation"
+      npm_root=$(cd "$npm_root" && pwd -P) || die "npm global root is unavailable"
+      case "$resolved" in "$npm_root/@openai/codex/"*) manager=npm ;; esac
+      ;;
+    */Caskroom/codex/*) manager=brew-cask ;;
+    */Cellar/codex/*) manager=brew-formula ;;
+    *)
+      if [ -d "$CODEX_DIR/packages/standalone" ]; then
+        standalone_root=$(cd "$CODEX_DIR/packages/standalone" && pwd -P)
+        case "$resolved" in "$standalone_root/"*) manager=standalone ;; esac
+      fi
+      ;;
+  esac
+  [ -n "$manager" ] || die "unsupported or ambiguous Codex installation: $cli; update it with its original installer"
+
+  # Never stop a working server until installation and version validation pass.
+  case "$manager" in
+    npm)
+      "$npm_bin" install --global @openai/codex@latest --no-audit --no-fund \
+        --fetch-retries=1 --fetch-timeout=60000 </dev/null || die "npm Codex update failed; existing clients were not stopped"
+      ;;
+    brew-cask|brew-formula)
+      command -v brew >/dev/null || die "Homebrew is unavailable"
+      if [ "$manager" = brew-cask ]; then
+        brew upgrade --cask codex </dev/null || die "Homebrew Codex update failed"
+      else
+        brew upgrade --formula codex </dev/null || die "Homebrew Codex update failed"
+      fi
+      ;;
+    standalone)
+      installer=$(mktemp "${TMPDIR:-/tmp}/codex-syncbar-install.XXXXXX") || die "could not prepare installer"
+      if ! curl -fsSL --connect-timeout 10 --max-time 60 https://chatgpt.com/codex/install.sh >"$installer"; then
+        rm -f "$installer"
+        die "could not download the official Codex installer"
+      fi
+      if ! CODEX_NON_INTERACTIVE=1 CODEX_INSTALL_DIR="$(dirname "$cli")" sh "$installer" </dev/null; then
+        rm -f "$installer"
+        die "official Codex update failed"
+      fi
+      rm -f "$installer"
+      ;;
+  esac
+  hash -r
+  after=$(codex_cli_version "$cli")
+  [ -n "$after" ] || die "updated Codex failed version validation; existing clients were not stopped"
+  stopped=$(node_stop_clients) || die "Codex was updated to $after, but the old SSH app-server could not be stopped"
+  if [ "$(field_value "$stopped" stopped_processes)" != 0 ]; then
+    restart=reconnect-pending
+    # The desktop owns proxy stdin and the Unix socket launch configuration.
+    # Let it reconnect rather than spawning an orphan server with guessed args.
+    attempts=0
+    while [ "$attempts" -lt 30 ]; do
+      if codex_app_servers_run_version "$after"; then restart=reconnected; break; fi
+      attempts=$((attempts + 1))
+      sleep 1
+    done
+  fi
+  printf 'before=%s after=%s manager=%s restart=%s\n' "$before" "$after" "$manager" "$restart"
+  [ "$restart" != reconnect-pending ] || return 2
+}
+
+controller_update_codex() {
+  local index output rc
+  local failed=0
+  for index in "${!REMOTE_LABELS[@]}"; do
+    rc=0
+    # Stream this version of the helper: older replicas need no helper install
+    # or auth-file mutation in order to gain CLI update support. The subshell
+    # isolates per-device SSH validation failures so the batch can continue.
+    output=$( (remote_ssh "$index" 'bash -l -s -- __node update-codex' <"$0") 2>&1) || rc=$?
+    jq -cn --arg deviceID "${REMOTE_LABELS[$index]}" --arg output "$output" \
+      --argjson exitStatus "$rc" '{deviceID:$deviceID,exitStatus:$exitStatus,output:$output}'
+    [ "$rc" -eq 0 ] || failed=1
+  done
+  [ "$failed" -eq 0 ] || return 2
 }
 
 has_refresh_transaction() {
@@ -4088,6 +4228,7 @@ node_main() {
     verify) [ "$#" -eq 1 ] || die "node verify requires a profile"; node_verify "$1" ;;
     status) [ "$#" -eq 0 ] || die "node status takes no arguments"; node_status ;;
     stop-clients) [ "$#" -eq 0 ] || die "node stop-clients takes no arguments"; node_stop_clients ;;
+    update-codex) [ "$#" -eq 0 ] || die "node update-codex takes no arguments"; node_update_codex ;;
     profile-map) [ "$#" -eq 0 ] || die "node profile-map takes no arguments"; node_profile_map ;;
     swap-profiles) [ "$#" -eq 0 ] || die "node swap-profiles takes no arguments"; node_swap_profiles ;;
     initialize) [ "$#" -eq 1 ] || die "node initialize requires a profile"; node_initialize "$1" ;;
@@ -4157,6 +4298,9 @@ main() {
   esac
 
   case "$command" in
+    update-codex)
+      if [ "$#" -eq 2 ] && [ "$2" != all ]; then load_configuration "$2"; else load_configuration; fi
+      ;;
     test-device|bootstrap-device)
       if [ "$#" -eq 2 ]; then load_configuration "$2"; else load_configuration; fi
       ;;
@@ -4190,6 +4334,11 @@ main() {
 
   case "$command" in
     __direct-switch) ;;
+    update-codex)
+      [ "$#" -le 2 ] || die "update-codex takes an optional device id or all"
+      controller_update_codex
+      return
+      ;;
     switch)
       [ "$#" -ge 2 ] || die "switch requires a profile"
       profile="$2"

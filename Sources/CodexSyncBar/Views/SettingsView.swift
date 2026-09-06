@@ -335,6 +335,49 @@ struct SettingsView: View {
         SettingsPage(title: "SSH 장치", subtitle: "비밀번호와 키 암호는 macOS Keychain에만 저장됩니다.") {
             if let banner = model.banner { BannerView(banner: banner) }
 
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    SettingsGroupTitle("Codex CLI 업데이트")
+                    Spacer()
+                    if model.isUpdatingRemoteCodex {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button("모든 SSH Codex 업데이트 및 재시작") {
+                        Task { await model.updateAllRemoteCodex() }
+                    }
+                    .disabled(settingsMutationDisabled || !model.configuredDevices.contains(where: \.enabled))
+                    .accessibilityIdentifier("update-all-ssh-codex")
+                }
+                Text("활성 SSH 장치 \(model.configuredDevices.filter(\.enabled).count)대의 CLI를 최신 버전으로 업데이트합니다. SSH Codex가 재연결되며 진행 중인 작업이 중단될 수 있습니다.")
+                    .font(.system(size: 11)).foregroundStyle(AppTheme.muted)
+                if !model.remoteCodexUpdateProgress.isEmpty {
+                    Text(model.remoteCodexUpdateProgress)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                ForEach(model.remoteCodexUpdateResults) { result in
+                    DisclosureGroup {
+                        Text(result.output)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model.configuredDevices.first(where: { $0.id == result.deviceID })?.displayName ?? result.deviceID)
+                                Text(result.detail).foregroundStyle(AppTheme.muted)
+                            }
+                        } icon: {
+                            Image(systemName: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(result.succeeded ? AppTheme.green : AppTheme.yellow)
+                        }
+                        .font(.system(size: 11))
+                    }
+                }
+            }
+            .padding(14)
+            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppTheme.border))
+
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Image(systemName: "laptopcomputer")

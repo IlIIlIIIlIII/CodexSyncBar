@@ -29,6 +29,48 @@ struct DeviceBootstrapResult: Sendable, Equatable {
     let output: String
 }
 
+struct RemoteCodexUpdateResult: Codable, Sendable, Equatable, Identifiable {
+    let deviceID: String
+    let exitStatus: Int32
+    let output: String
+    var id: String { deviceID }
+
+    private var summary: [String: String] {
+        guard let line = output.split(separator: "\n").last else { return [:] }
+        var fields: [String: String] = [:]
+        for token in line.split(separator: " ") {
+            let pair = token.split(separator: "=", maxSplits: 1)
+            guard pair.count == 2, fields[String(pair[0])] == nil else { return [:] }
+            fields[String(pair[0])] = String(pair[1])
+        }
+        guard Set(fields.keys) == ["before", "after", "manager", "restart"],
+              ["npm", "brew-cask", "brew-formula", "standalone"].contains(fields["manager"] ?? ""),
+              ["before", "after"].allSatisfy({ key in
+                  fields[key]?.range(of: #"^\d+\.\d+\.\d+[A-Za-z0-9.+-]*$"#, options: .regularExpression) != nil
+              })
+        else { return [:] }
+        return fields
+    }
+
+    var succeeded: Bool {
+        exitStatus == 0 && summary["after"] != nil
+            && ["reconnected", "not-running"].contains(summary["restart"] ?? "")
+    }
+
+    var detail: String {
+        guard let before = summary["before"], let after = summary["after"] else {
+            return "업데이트 실패 · 상세 로그를 확인하세요."
+        }
+        let versions = "\(before) → \(after)"
+        switch summary["restart"] {
+        case "reconnected" where succeeded: return "\(versions) · 새 버전 재시작 확인"
+        case "not-running" where succeeded: return "\(versions) · 실행 중인 SSH Codex 없음"
+        case "reconnect-pending": return "\(versions) · Codex 앱에서 SSH를 다시 연결해 주세요."
+        default: return "\(versions) · 재시작 확인 실패"
+        }
+    }
+}
+
 actor SwitchService {
     private let executable: URL
     private var maintenanceBusy = false
@@ -176,6 +218,22 @@ actor SwitchService {
             throw AppError.processFailed(message.isEmpty ? "계정 전환에 실패했습니다." : message)
         }
         return result.output
+    }
+
+    func updateRemoteCodex(deviceID: String) async throws -> RemoteCodexUpdateResult {
+        await acquireMaintenanceSlot()
+        defer { releaseMaintenanceSlot() }
+        let result = try await run(arguments: ["update-codex", deviceID])
+        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard [0, 2].contains(result.status),
+              let data = output.data(using: .utf8),
+              let update = try? JSONDecoder().decode(RemoteCodexUpdateResult.self, from: data),
+              update.deviceID == deviceID,
+              (result.status == 0) == update.succeeded
+        else {
+            throw AppError.processFailed(output.isEmpty ? "SSH Codex 업데이트 응답이 비어 있습니다." : output)
+        }
+        return update
     }
 
     func fetchLocalProfileMap() async throws -> ProfileSlotMap {

@@ -27,6 +27,7 @@ cp "$ASKPASS_REPOSITORY_SOURCE" "$ASKPASS_SOURCE"
 chmod 700 "$HELPER" "$ASKPASS_SOURCE"
 
 node "$ROOT/Tests/usage-summary-tests.mjs"
+bash "$ROOT/Tests/remote-codex-update-tests.sh"
 
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/.local/share/gpt-switch"
