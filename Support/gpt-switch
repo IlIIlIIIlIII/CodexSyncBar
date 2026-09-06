@@ -5,7 +5,7 @@ set -euo pipefail
 
 PROGRAM_NAME="gpt-switch"
 SCRIPT_VERSION="2.1.3"
-USAGE_SCHEMA_VERSION=5
+USAGE_SCHEMA_VERSION=6
 STATE_ROOT="${GPT_SWITCH_STATE_ROOT:-$HOME/.local/share/gpt-switch}"
 CONFIG_FILE="${GPT_SWITCH_CONFIG_FILE:-$STATE_ROOT/config.json}"
 PROFILE_DIR="$STATE_ROOT/profiles"
@@ -183,9 +183,9 @@ def delta($a; $b):
     reasoningOutputTokens: ($a.reasoningOutputTokens - $b.reasoningOutputTokens),
     totalTokens: ($a.totalTokens - $b.totalTokens)
   } end;
-def add_bucket($key; $model; $tier; $inc):
+def add_bucket($key; $model; $tier; $inc; $long):
   if .buckets[$key] == null then
-    .buckets[$key] = {model:$model,serviceTier:$tier,inputTokens:0,cachedInputTokens:0,
+    .buckets[$key] = {model:$model,serviceTier:$tier,isLongContext:$long,inputTokens:0,cachedInputTokens:0,
       cacheWriteInputTokens:0,outputTokens:0,reasoningOutputTokens:0,totalTokens:0,requests:0}
   else . end |
   .buckets[$key].inputTokens += $inc.inputTokens |
@@ -234,7 +234,8 @@ else
       (if $current.totalTokens > 0 then .last = $current else . end) |
       if .inherited or .model == null then .
       elif ($inc.totalTokens > 0 and (($e.timestamp // $now) >= $cutoff)) then
-        add_bucket((.model + "\u001f" + .tier); .model; .tier; $inc)
+        ( (if $lastUsage.inputTokens > 0 then $lastUsage.inputTokens else $inc.inputTokens end) > 272000) as $long |
+        add_bucket((.model + "\u001f" + .tier + "\u001f" + ($long|tostring)); .model; .tier; $inc; $long)
       else . end
     else . end
   ) | {buckets:[.buckets[]?]}
@@ -287,7 +288,7 @@ JQ
   done < <(jq -j '.[] | .file, "\u0000", (.index | tostring), "\u0000", ((.parentIndex // -1) | tostring), "\u0000"' "$ordered")
   jq -sc --arg generatedAt "$generated" --arg windowStartedAt "$cutoff" --argjson scannedFiles "$scanned" '
     reduce .[] as $b ({};
-      ($b.model + "\u001f" + $b.serviceTier) as $key |
+      ($b.model + "\u001f" + $b.serviceTier + "\u001f" + ($b.isLongContext|tostring)) as $key |
       if .[$key] == null then .[$key] = $b else
         .[$key].inputTokens += $b.inputTokens |
         .[$key].cachedInputTokens += $b.cachedInputTokens |
@@ -303,7 +304,7 @@ JQ
       .cacheWriteInputTokens += $b.cacheWriteInputTokens | .outputTokens += $b.outputTokens |
       .reasoningOutputTokens += $b.reasoningOutputTokens | .totalTokens += $b.totalTokens |
       .requests += $b.requests)) as $totals |
-    {schemaVersion:5,generatedAt:$generatedAt,windowDays:30,windowStartedAt:$windowStartedAt,
+    {schemaVersion:6,generatedAt:$generatedAt,windowDays:30,windowStartedAt:$windowStartedAt,
       scannedFiles:$scannedFiles,
       requests:$totals.requests,inputTokens:$totals.inputTokens,
       cachedInputTokens:$totals.cachedInputTokens,cacheWriteInputTokens:$totals.cacheWriteInputTokens,

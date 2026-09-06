@@ -553,7 +553,7 @@ struct PopoverView: View {
                     }
                     if hasUnpriced {
                         Label(
-                            "미공개 가격 \(TokenUsageFormatting.tokens(snapshot.unpricedTokens))",
+                            "단가 미등록 \(TokenUsageFormatting.tokens(snapshot.unpricedTokens))",
                             systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(AppTheme.yellow)
                     }
@@ -574,7 +574,7 @@ struct PopoverView: View {
             }
         }
         .appCard()
-        .help("최근 30일의 세션 이벤트만 합산한 추정치입니다. 모델별 공개 API 단가를 적용하고, priority/fast 세션에는 해당 모델의 API Priority 단가를 적용하며, 미공개 모델은 제외합니다.")
+        .help("최근 30일의 세션 이벤트만 합산한 추정치입니다. 모델별 공개 API 단가를 적용하고, priority/fast 세션에는 해당 모델의 API Priority 단가를 적용하며, 단가 미등록 모델은 제외합니다. Astra·5.6은 요청별 272K 초과 입력과 캐시 쓰기 할증을 반영합니다. 이전 모델의 긴 세션 할증, 지역·도구 요금은 제외하며 최근 30일 전체를 현재 단가로 환산합니다.")
         .accessibilityIdentifier("token-usage-card")
     }
 

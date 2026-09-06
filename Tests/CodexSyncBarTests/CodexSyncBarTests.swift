@@ -203,7 +203,7 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertTrue(estimate.isPriced)
         XCTAssertEqual(estimate.canonicalModel, "GPT-5.6 Sol")
         XCTAssertEqual(estimate.multiplier, Decimal(string: "2"))
-        XCTAssertEqual(estimate.pricedUSD, Decimal(string: "12.4"))
+        XCTAssertEqual(estimate.pricedUSD, Decimal(string: "9.12"))
     }
 
     func testTokenPricingUsesPublishedModelSpecificPriorityRates() {
@@ -241,6 +241,32 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(TokenUsagePricing.estimateUSD(for: gpt55).pricedUSD, Decimal(string: "12.5"))
         XCTAssertEqual(TokenUsagePricing.estimateUSD(for: gpt52).pricedUSD, Decimal(string: "3.5"))
         XCTAssertEqual(TokenUsagePricing.estimateUSD(for: mini).pricedUSD, Decimal(string: "4.5"))
+    }
+
+    func testTokenPricingCurrentRatesAndLongContextCacheWrites() {
+        let cases: [(String, String, String)] = [
+            ("gpt-6-astra", "11.65", "20.8"),
+            ("gpt-5.6-sol", "4.66", "8.32"),
+            ("gpt-5.6-terra", "2.53", "4.46"),
+            ("gpt-5.6-luna", "0.253", "0.446"),
+        ]
+        for (model, standard, long) in cases {
+            // Aggregate of small requests: 600K uncached (100K writes), 400K reads,
+            // 100K output including 50K reasoning. Never charge reasoning twice.
+            var usage = ModelTokenUsage(model: model, serviceTier: "default",
+                inputTokens: 1_000_000, cachedInputTokens: 400_000,
+                cacheWriteInputTokens: 100_000, outputTokens: 100_000,
+                reasoningOutputTokens: 50_000, totalTokens: 1_100_000, requests: 10)
+            XCTAssertEqual(TokenUsagePricing.estimateUSD(for: usage).pricedUSD,
+                           Decimal(string: standard), model)
+            usage.isLongContext = true
+            XCTAssertEqual(TokenUsagePricing.estimateUSD(for: usage).pricedUSD,
+                           Decimal(string: long), model)
+        }
+        let fast = ModelTokenUsage(model: "gpt-6-astra", serviceTier: "fast",
+            inputTokens: 1_000_000, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+            outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 1_000_000, requests: 10)
+        XCTAssertEqual(TokenUsagePricing.estimateUSD(for: fast).pricedUSD, 20)
     }
 
     func testDollarFormattingUsesThousandsSeparatorsAndKeepsCompactDecimals() {
@@ -324,7 +350,7 @@ final class CodexSyncBarTests: XCTestCase {
         }
 
         let first = try collect()
-        XCTAssertEqual(first.schemaVersion, 5)
+        XCTAssertEqual(first.schemaVersion, 6)
         XCTAssertEqual(first.totalTokens, 160)
         XCTAssertEqual(first.buckets.count, 2)
         XCTAssertEqual(try collect().totalTokens, 160)
@@ -380,7 +406,7 @@ final class CodexSyncBarTests: XCTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0, String(decoding: data, as: UTF8.self))
         let summary = try JSONDecoder().decode(DeviceTokenUsageSummary.self, from: data)
-        XCTAssertEqual(summary.schemaVersion, 5)
+        XCTAssertEqual(summary.schemaVersion, 6)
         XCTAssertEqual(summary.totalTokens, 100)
         XCTAssertEqual(summary.buckets.first?.serviceTier, "priority")
     }

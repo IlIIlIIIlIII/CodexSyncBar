@@ -30,7 +30,9 @@ struct ModelTokenUsage: Codable, Equatable, Sendable, Identifiable {
     let totalTokens: Int64
     let requests: Int64
 
-    var id: String { "\(model)\u{1f}\(serviceTier)" }
+    var isLongContext: Bool? = nil
+
+    var id: String { "\(model)\u{1f}\(serviceTier)\u{1f}\(isLongContext == true)" }
     var counts: TokenCounts {
         TokenCounts(
             inputTokens: inputTokens,
@@ -119,6 +121,8 @@ enum TokenUsagePricing {
         let cachedInput: Decimal
         let output: Decimal
         let priorityMultiplier: Decimal?
+        var cacheWriteMultiplier: Decimal = 1
+        var supportsLongContext: Bool = false
     }
 
     static func isPriorityPricedServiceTier(_ tier: String) -> Bool {
@@ -134,10 +138,15 @@ enum TokenUsagePricing {
             : 1
         let cached = max(0, min(usage.cachedInputTokens, usage.inputTokens))
         let uncached = max(0, usage.inputTokens - cached)
+        let writes = max(0, min(usage.cacheWriteInputTokens, uncached))
+        let longContext = rate.supportsLongContext && usage.isLongContext == true
+        let inputMultiplier: Decimal = longContext ? 2 : 1
+        let outputMultiplier: Decimal = longContext ? 1.5 : 1
         let million = Decimal(1_000_000)
-        let base = (Decimal(uncached) * rate.input
-            + Decimal(cached) * rate.cachedInput
-            + Decimal(max(0, usage.outputTokens)) * rate.output) / million
+        let base = ((Decimal(uncached - writes) * rate.input
+            + Decimal(writes) * rate.input * rate.cacheWriteMultiplier
+            + Decimal(cached) * rate.cachedInput) * inputMultiplier
+            + Decimal(max(0, usage.outputTokens)) * rate.output * outputMultiplier) / million
         return TokenCostEstimate(
             pricedUSD: base * multiplier,
             isPriced: true,
@@ -146,28 +155,32 @@ enum TokenUsagePricing {
     }
 
     private static func rate(for rawModel: String) -> Rate? {
+        // USD per 1M tokens, verified 2026-09-06: https://developers.openai.com/api/docs/pricing
         let model = rawModel.lowercased()
+        if model.contains("cyber") || model.contains("-pro") { return nil }
+        if model == "gpt-6-astra" || model.hasPrefix("gpt-6-astra-") {
+            return Rate(canonicalModel: "GPT-6 Astra", input: 10, cachedInput: 1, output: 50, priorityMultiplier: 2, cacheWriteMultiplier: 1.25, supportsLongContext: true)
+        }
         if model == "codex-auto-review" || model.contains("gpt-5.3-codex") && !model.contains("spark") {
             return Rate(canonicalModel: "GPT-5.3-Codex", input: 1.75, cachedInput: 0.175, output: 14, priorityMultiplier: 2)
         }
         if model.contains("gpt-5.3-codex-spark") || model.contains("spark") { return nil }
         if model.contains("gpt-5.6-terra") {
-            return Rate(canonicalModel: "GPT-5.6 Terra", input: 2.5, cachedInput: 0.25, output: 15, priorityMultiplier: 2)
+            return Rate(canonicalModel: "GPT-5.6 Terra", input: 2, cachedInput: 0.2, output: 12, priorityMultiplier: 2, cacheWriteMultiplier: 1.25, supportsLongContext: true)
         }
         if model.contains("gpt-5.6-luna") {
-            return Rate(canonicalModel: "GPT-5.6 Luna", input: 1, cachedInput: 0.1, output: 6, priorityMultiplier: 2)
+            return Rate(canonicalModel: "GPT-5.6 Luna", input: 0.2, cachedInput: 0.02, output: 1.2, priorityMultiplier: 2, cacheWriteMultiplier: 1.25, supportsLongContext: true)
         }
-        if model.contains("gpt-5.6") {
-            return Rate(canonicalModel: "GPT-5.6 Sol", input: 5, cachedInput: 0.5, output: 30, priorityMultiplier: 2)
+        if model == "gpt-5.6" || model == "gpt-5.6-sol" || model.hasPrefix("gpt-5.6-sol-") {
+            return Rate(canonicalModel: "GPT-5.6 Sol", input: 4, cachedInput: 0.4, output: 20, priorityMultiplier: 2, cacheWriteMultiplier: 1.25, supportsLongContext: true)
         }
-        if model.contains("cyber") { return nil }
         if model.contains("gpt-5.5") {
             return Rate(canonicalModel: "GPT-5.5", input: 5, cachedInput: 0.5, output: 30, priorityMultiplier: 2.5)
         }
         if model.contains("gpt-5.4-mini") {
             return Rate(canonicalModel: "GPT-5.4 Mini", input: 0.75, cachedInput: 0.075, output: 4.5, priorityMultiplier: 2)
         }
-        if model.contains("gpt-5.4") {
+        if model == "gpt-5.4" || model.range(of: #"^gpt-5\.4-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil {
             return Rate(canonicalModel: "GPT-5.4", input: 2.5, cachedInput: 0.25, output: 15, priorityMultiplier: 2)
         }
         if model.contains("gpt-5.2") {

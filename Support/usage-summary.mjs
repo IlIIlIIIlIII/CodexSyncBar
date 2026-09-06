@@ -5,7 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import crypto from "node:crypto";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const ROLLING_WINDOW_DAYS = 30;
 const ROLLING_WINDOW_MS = ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const TOKEN_KEYS = [
@@ -167,12 +167,13 @@ function eventTimeMs(event, fallbackTimeMs) {
   return Number.isFinite(parsed) ? parsed : fallbackTimeMs;
 }
 
-function bucketFor(state, eventTime) {
+function bucketFor(state, eventTime, isLongContext) {
   const startedAt = minuteStart(eventTime);
-  const key = `${startedAt}\u001f${state.model}\u001f${state.serviceTier}`;
+  const key = `${startedAt}\u001f${state.model}\u001f${state.serviceTier}\u001f${isLongContext}`;
   if (!state.buckets[key]) {
     state.buckets[key] = {
       startedAt,
+      isLongContext,
       model: state.model,
       serviceTier: state.serviceTier,
       ...emptyTokens(),
@@ -271,7 +272,7 @@ function processEvent(state, event, fallbackTimeMs, cutoffMs, ancestors) {
   if (increment.totalTokens <= 0) return;
   const occurredAt = eventTimeMs(event, fallbackTimeMs);
   if (occurredAt < cutoffMs) return;
-  const bucket = bucketFor(state, occurredAt);
+  const bucket = bucketFor(state, occurredAt, (last.inputTokens || increment.inputTokens) > 272_000);
   addTokens(bucket, increment);
   bucket.requests += 1;
 }
@@ -435,10 +436,11 @@ async function main() {
   for (const state of Object.values(cache.files)) {
     for (const bucket of Object.values(state.buckets ?? {})) {
       if (Date.parse(bucket.startedAt ?? "") < cutoffMs) continue;
-      const key = `${bucket.model}\u001f${bucket.serviceTier}`;
+      const key = `${bucket.model}\u001f${bucket.serviceTier}\u001f${bucket.isLongContext}`;
       if (!merged[key]) {
         merged[key] = {
           model: bucket.model,
+          isLongContext: bucket.isLongContext,
           serviceTier: bucket.serviceTier,
           ...emptyTokens(),
           requests: 0,

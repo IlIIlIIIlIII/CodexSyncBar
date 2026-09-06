@@ -205,7 +205,7 @@ case " $* " in
   *" __node version "*) printf '2.1.3\n' ;;
   *" __node usage-summary "*)
     if [ -f "$GPT_SWITCH_TEST_USAGE_REMOTE_STATE" ]; then
-      printf '%s\n' '{"schemaVersion":5,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":2,"inputTokens":18,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":20,"buckets":[],"errors":[]}'
+      printf '%s\n' '{"schemaVersion":6,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":2,"inputTokens":18,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":20,"buckets":[],"errors":[]}'
     else
       printf '%s\n' '{"schemaVersion":4,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":99,"inputTokens":990,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":9,"reasoningOutputTokens":0,"totalTokens":999,"buckets":[],"errors":[]}'
     fi
@@ -227,9 +227,9 @@ usage_output=$(env "${common_env[@]}" \
   GPT_SWITCH_TEST_USAGE_REMOTE_STATE="$USAGE_REMOTE_STATE" \
   "$HELPER" usage-summary)
 printf '%s\n' "$usage_output" | jq -e -s '
-  length == 2 and .[0].id == "macbook" and .[0].summary.schemaVersion == 5 and
+  length == 2 and .[0].id == "macbook" and .[0].summary.schemaVersion == 6 and
   .[1].id == "usage-node" and .[1].isReachable == true and
-  .[1].summary.schemaVersion == 5 and .[1].summary.totalTokens == 20
+  .[1].summary.schemaVersion == 6 and .[1].summary.totalTokens == 20
 ' >/dev/null
 [ -f "$USAGE_REMOTE_STATE" ]
 

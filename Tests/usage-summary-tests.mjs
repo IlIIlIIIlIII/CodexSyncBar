@@ -190,7 +190,7 @@ try {
   const first = collectNode();
   assert.equal(first.totalTokens, 875, "fork replay must not be charged");
   assert.equal(first.requests, 14);
-  assert.equal(first.schemaVersion, 5);
+  assert.equal(first.schemaVersion, 6);
   assert.deepEqual(
     first.buckets.map(({ model, serviceTier, totalTokens }) => ({ model, serviceTier, totalTokens })),
     [
@@ -201,7 +201,7 @@ try {
     ],
   );
   const rebuiltCache = JSON.parse(fs.readFileSync(cache, "utf8"));
-  assert.equal(rebuiltCache.schemaVersion, 5);
+  assert.equal(rebuiltCache.schemaVersion, 6);
   assert.equal(rebuiltCache.files["stale.jsonl"], undefined);
 
   assert.deepEqual(comparable(collectNode()), comparable(first), "unchanged cache scan must be idempotent");
@@ -216,7 +216,20 @@ try {
   const jqSummary = collectJQ();
   assert.deepEqual(comparable(jqSummary), comparable(afterAppend), "Node and jq paths must agree");
 
+  const short = { input_tokens: 272000, cached_input_tokens: 100000, cache_write_input_tokens: 1000,
+    output_tokens: 100, reasoning_output_tokens: 50, total_tokens: 272100 };
+  const long = { ...short, input_tokens: 272001, total_tokens: 272101 };
+  writeSession("astra.jsonl", [sessionMeta("astra"), turnContext("gpt-6-astra"),
+    tokenCount(short, short), tokenCount(long, addUsage(short, long))]);
+  const astra = collectNode();
+  const astraBuckets = astra.buckets.filter((b) => b.model === "gpt-6-astra");
+  assert.equal(astraBuckets.length, 2);
+  assert.equal(astraBuckets.find((b) => b.isLongContext).inputTokens, 272001);
+  assert.equal(astraBuckets.find((b) => !b.isLongContext).inputTokens, 272000);
+  assert.deepEqual(comparable(collectNode()), comparable(astra));
+  assert.deepEqual(comparable(collectJQ()), comparable(astra));
   process.stdout.write("usage-summary regression tests passed\n");
+
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
