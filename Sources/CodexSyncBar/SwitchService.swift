@@ -52,8 +52,8 @@ actor SwitchService {
     }
 
     func fetchTokenUsage() async throws -> TokenUsageSnapshot {
-        await acquireMaintenanceSlot()
-        defer { releaseMaintenanceSlot() }
+        // Session-log accounting does not mutate account state. A cold scan can
+        // take minutes and must not hold the account maintenance/status queue.
         let result = try await run(arguments: ["usage-summary"])
         guard result.status == 0 else {
             let message = result.output.trimmingCharacters(in: .whitespacesAndNewlines)

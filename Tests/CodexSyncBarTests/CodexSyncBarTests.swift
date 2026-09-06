@@ -3207,6 +3207,47 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(statuses.map(\.profileID), [2])
     }
 
+    func testTokenScanDoesNotBlockStatusRefresh() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexSyncBarSlowScan-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let executable = root.appendingPathComponent("gpt-switch")
+        let started = root.appendingPathComponent("started")
+        let released = root.appendingPathComponent("released")
+        let script = """
+        #!/bin/bash
+        case "$1" in
+          usage-summary)
+            touch "\(started.path)"
+            for i in {1..100}; do
+              [ -f "\(released.path)" ] && break
+              sleep 0.02
+            done
+            [ -f "\(released.path)" ] || exit 1
+            printf '{"id":"macbook","displayName":"Mac","isReachable":true,"summary":null,"error":null}\\n'
+            ;;
+          status-json)
+            touch "\(released.path)"
+            printf '{"id":"macbook","displayName":"Mac","profileID":1,"accountFingerprint":null,"authMode":"chatgpt","cliState":"logged-in","isReachable":true}\\n'
+            ;;
+          *) exit 64 ;;
+        esac
+        """
+        try Data(script.utf8).write(to: executable)
+        let service = SwitchService(executable: executable)
+        let scan = Task { try await service.fetchTokenUsage() }
+        for _ in 0..<100 {
+            if FileManager.default.fileExists(atPath: started.path) { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: started.path))
+        let statuses = try await service.fetchStatus()
+        let summary = try await scan.value
+        XCTAssertEqual(statuses.count, 1)
+        XCTAssertEqual(summary.devices.count, 1)
+    }
+
     func testStatusWaitsForInAppAuthMaintenanceInsteadOfReportingControllerBusy() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodexSyncBarStatusSerialization-\(UUID().uuidString)", isDirectory: true)

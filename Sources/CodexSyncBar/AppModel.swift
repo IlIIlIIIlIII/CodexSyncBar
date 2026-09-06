@@ -443,9 +443,11 @@ final class AppModel: ObservableObject {
         beginUsageRefresh()
         defer { endUsageRefresh() }
 
+        // Token accounting has its own spinner and duplicate-request guard.
+        // Do not keep the account refresh button spinning during a cold scan.
+        Task { [weak self] in await self?.refreshTokenUsage() }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.refreshDeviceStatus() }
-            group.addTask { await self.refreshTokenUsage() }
             for profile in profiles {
                 group.addTask {
                     await self.refresh(
