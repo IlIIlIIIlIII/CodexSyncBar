@@ -228,6 +228,25 @@ try {
   assert.equal(astraBuckets.find((b) => !b.isLongContext).inputTokens, 272000);
   assert.deepEqual(comparable(collectNode()), comparable(astra));
   assert.deepEqual(comparable(collectJQ()), comparable(astra));
+
+  // A Cursor -> native transition must keep the cumulative baseline while
+  // excluding Cursor tokens, requests, and cached buckets from the output.
+  const cursor = usage(1000, 20);
+  const native = usage(30, 21);
+  writeSession("cursor-transition.jsonl", [sessionMeta("cursor-transition"),
+    turnContext("syncbar-cursor/gpt-5.6-sol"), tokenCount(cursor, cursor),
+    turnContext("gpt-5.6-sol"), tokenCount(native, addUsage(cursor, native))]);
+  writeSession("cursor-model.jsonl", [sessionMeta("cursor-model"),
+    turnContext("CURSOR-grok-4.6"), tokenCount(cursor, cursor)]);
+  const filtered = collectNode();
+  assert.equal(filtered.totalTokens, astra.totalTokens + 30);
+  assert.equal(filtered.requests, astra.requests + 1);
+  assert.ok(filtered.buckets.every((b) => !/cursor/i.test(b.model)));
+  const cursorCache = JSON.parse(fs.readFileSync(cache, "utf8"));
+  assert.ok(Object.values(cursorCache.files["cursor-transition.jsonl"].buckets)
+    .some((b) => /cursor/i.test(b.model)), "retain cached baselines without rebuilding");
+  assert.deepEqual(comparable(collectNode()), comparable(filtered));
+  assert.deepEqual(comparable(collectJQ()), comparable(filtered));
   process.stdout.write("usage-summary regression tests passed\n");
 
 } finally {

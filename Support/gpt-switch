@@ -288,6 +288,7 @@ JQ
     fi
   done < <(jq -j '.[] | .file, "\u0000", (.index | tostring), "\u0000", ((.parentIndex // -1) | tostring), "\u0000"' "$ordered")
   jq -sc --arg generatedAt "$generated" --arg windowStartedAt "$cutoff" --argjson scannedFiles "$scanned" '
+    map(select(.model | test("cursor"; "i") | not)) |
     reduce .[] as $b ({};
       ($b.model + "\u001f" + $b.serviceTier + "\u001f" + ($b.isLongContext|tostring)) as $key |
       if .[$key] == null then .[$key] = $b else

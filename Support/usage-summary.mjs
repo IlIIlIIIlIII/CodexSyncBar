@@ -436,6 +436,9 @@ async function main() {
   for (const state of Object.values(cache.files)) {
     for (const bucket of Object.values(state.buckets ?? {})) {
       if (Date.parse(bucket.startedAt ?? "") < cutoffMs) continue;
+      // Filter at output time so existing caches remain usable. Keep Cursor
+      // counters internally for correct deltas and parent replay detection.
+      if (/cursor/i.test(bucket.model)) continue;
       const key = `${bucket.model}\u001f${bucket.serviceTier}\u001f${bucket.isLongContext}`;
       if (!merged[key]) {
         merged[key] = {
