@@ -139,11 +139,20 @@ require_usage_helper() {
   case "$(file_mode "$USAGE_HELPER")" in 500|700|755) ;; *) die "usage summary helper permissions are unsafe" ;; esac
 }
 
+ensure_usage_dirs() {
+  umask 077
+  [ ! -L "$STATE_ROOT" ] || die "refusing symlinked state directory: $STATE_ROOT"
+  [ ! -L "$CODEX_DIR" ] || die "refusing symlinked Codex directory: $CODEX_DIR"
+  mkdir -p "$STATE_ROOT"
+  [ "$(file_owner_id "$STATE_ROOT")" = "$(id -u)" ] || die "usage state directory owner is unsafe"
+  chmod 700 "$STATE_ROOT"
+}
+
 jq_usage_summary() {
   local buckets program manifest ordered sequences empty_sequence result
   local scanned=0 generated cutoff file sequence_index parent_index entry_index
   command -v jq >/dev/null 2>&1 || die "jq is required for usage collection"
-  ensure_dirs
+  ensure_usage_dirs
   buckets=$(mktemp "$STATE_ROOT/.usage-jq-buckets.XXXXXX") || die "could not prepare usage collection"
   program=$(mktemp "$STATE_ROOT/.usage-jq-program.XXXXXX") || { rm -f "$buckets"; die "could not prepare usage collection"; }
   manifest=$(mktemp "$STATE_ROOT/.usage-jq-manifest.XXXXXX") || { rm -f "$buckets" "$program"; die "could not prepare usage collection"; }
@@ -319,6 +328,7 @@ JQ
 }
 
 node_usage_summary() {
+  ensure_usage_dirs
   require_usage_helper
   if command -v "$NODE_BIN" >/dev/null 2>&1; then
     "$NODE_BIN" "$USAGE_HELPER" "$CODEX_DIR/sessions" "$STATE_ROOT/usage-cache.json"
@@ -925,7 +935,9 @@ release_lock() {
 
 acquire_controller_lock() {
   [ "$CONTROLLER_LOCK_HELD" -eq 0 ] || return 0
-  ensure_dirs
+  # A usage-triggered helper repair must acquire the gate before any auth
+  # recovery. Busy account operations must remain untouched by the collector.
+  if [ "${1:-}" = usage-repair ]; then ensure_usage_dirs; else ensure_dirs; fi
   acquire_controller_gate
   acquire_file_lock "$CONTROLLER_LOCK_PATH" controller
   CONTROLLER_LOCK_TOKEN="$ACQUIRED_FILE_LOCK_TOKEN"
@@ -4037,6 +4049,25 @@ print_usage_summary_json() {
   fi
 }
 
+controller_usage_repair_helpers() (
+  local wanted="${REMOTE_LABELS[$1]}" index=0
+  acquire_controller_lock usage-repair
+  ensure_no_device_activation_transaction
+  [ -f "$CONFIG_FILE" ] && [ ! -L "$CONFIG_FILE" ] || return 1
+  controller_recover_login_transactions >/dev/null || return 1
+  # Configuration can change while logs are scanned. Only repair a device
+  # that is still enabled, using its current connection/credential settings.
+  load_configuration
+  while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
+    if [ "${REMOTE_LABELS[$index]}" = "$wanted" ]; then
+      remote_install_helpers "$index"
+      return $?
+    fi
+    index=$((index + 1))
+  done
+  return 1
+)
+
 controller_usage_summary() {
   local summary index=0 version error
   if summary=$("$0" __node usage-summary 2>&1); then
@@ -4048,12 +4079,12 @@ controller_usage_summary() {
   while [ "$index" -lt "${#REMOTE_LABELS[@]}" ]; do
     version=$(remote_node "$index" version 2>/dev/null || true)
     if [ "$version" != "$SCRIPT_VERSION" ]; then
-      remote_install_helpers "$index" >/dev/null 2>&1 || true
+      controller_usage_repair_helpers "$index" >/dev/null 2>&1 || true
     fi
     if summary=$(remote_node "$index" usage-summary 2>&1); then
       if ! printf '%s\n' "$summary" | jq -e --argjson expected "$USAGE_SCHEMA_VERSION" \
           '.schemaVersion == $expected' >/dev/null 2>&1; then
-        if remote_install_helpers "$index" >/dev/null 2>&1; then
+        if controller_usage_repair_helpers "$index" >/dev/null 2>&1; then
           summary=$(remote_node "$index" usage-summary 2>&1 || true)
         fi
       fi
@@ -4293,6 +4324,17 @@ main() {
     return
   fi
 
+  # Session accounting reads log files and writes only its own cache. It must
+  # neither hold the account controller lock during a long scan nor recover
+  # in-flight authentication work. Helper upgrades take their own short lock.
+  if [ "$command" = usage-summary ]; then
+    [ "$#" -eq 1 ] || die "usage-summary takes no arguments"
+    ensure_usage_dirs
+    load_configuration
+    controller_usage_summary
+    return
+  fi
+
   case "$command" in
     accounts-json|help|-h|--help) ;;
     *) acquire_controller_lock ;;
@@ -4354,11 +4396,6 @@ main() {
     status-json)
       [ "$#" -eq 1 ] || die "status-json takes no arguments"
       controller_status_json
-      return
-      ;;
-    usage-summary)
-      [ "$#" -eq 1 ] || die "usage-summary takes no arguments"
-      controller_usage_summary
       return
       ;;
     accounts-json)

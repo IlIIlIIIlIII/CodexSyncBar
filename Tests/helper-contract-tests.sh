@@ -28,6 +28,7 @@ chmod 700 "$HELPER" "$ASKPASS_SOURCE"
 
 node "$ROOT/Tests/usage-summary-tests.mjs"
 bash "$ROOT/Tests/remote-codex-update-tests.sh"
+bash "$ROOT/Tests/usage-controller-concurrency-tests.sh"
 
 HOME_DIR="$TMP/home"
 STATE="$HOME_DIR/.local/share/gpt-switch"
