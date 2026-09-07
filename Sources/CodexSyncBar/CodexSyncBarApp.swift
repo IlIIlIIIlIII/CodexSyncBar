@@ -35,11 +35,13 @@ struct CodexSyncBarApp: App {
                 .onReceive(NotificationCenter.default.publisher(
                     for: NSApplication.didBecomeActiveNotification)) { _ in
                     guard !Self.isSpecialLaunch else { return }
+                    Task { await model.refreshDeviceStatusIfStale() }
                     Task { await model.refreshUsageIfStale() }
                 }
                 .onReceive(NSWorkspace.shared.notificationCenter.publisher(
                     for: NSWorkspace.didWakeNotification)) { _ in
                     guard !Self.isSpecialLaunch else { return }
+                    Task { await model.refreshDeviceStatus() }
                     Task { await model.refreshUsageOnly() }
                 }
         }

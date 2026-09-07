@@ -91,6 +91,8 @@ final class AppModel: ObservableObject {
     private var hasStarted = false
     private var activeUsageRefreshCount = 0
     private var queuedUsageRefresh = false
+    private var activeDeviceStatusRefreshCount = 0
+    private var lastDeviceStatusRefreshAt: Date?
 
     private let fullSyncDefaultsKey = "lastFullAuthSyncAt"
     private let pendingSecretCleanupDefaultsKey = "pendingSSHSecretCleanupIdentifiers"
@@ -610,10 +612,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshDeviceStatusIfStale(now: Date = Date()) async {
+        guard activeDeviceStatusRefreshCount == 0 else { return }
+        guard lastDeviceStatusRefreshAt.map({ now.timeIntervalSince($0) < 30 }) != true else { return }
+        await refreshDeviceStatus()
+    }
+
     func refreshDeviceStatus() async {
-        guard configurationError == nil else { return }
+        guard configurationError == nil, !isReadmeDemo else { return }
+        // Foreground hooks share pending work; explicit post-mutation checks
+        // must still await their own fresh status response.
+        activeDeviceStatusRefreshCount += 1
+        defer { activeDeviceStatusRefreshCount -= 1 }
         do {
             devices = try await switchService.fetchStatus()
+            lastDeviceStatusRefreshAt = Date()
             if let active = activeProfileID,
                UserDefaults.standard.object(forKey: "selectedProfileID") == nil
             {

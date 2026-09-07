@@ -132,6 +132,7 @@ struct PopoverView: View {
         .preferredColorScheme(.dark)
         .task {
             await model.start()
+            await model.refreshDeviceStatusIfStale()
             await model.refreshUsageIfStale()
         }
     }

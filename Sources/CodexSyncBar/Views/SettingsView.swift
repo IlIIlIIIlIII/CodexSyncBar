@@ -72,7 +72,10 @@ struct SettingsView: View {
         .frame(minWidth: 720, minHeight: readmeDetailOnly ? 0 : 540)
         .accessibilityIdentifier("settings-root")
         .preferredColorScheme(.dark)
-        .task { await model.start() }
+        .task {
+            await model.start()
+            await model.refreshDeviceStatusIfStale()
+        }
         .onDisappear {
             model.dismissTransientBannerAfterFocusLoss()
         }
@@ -82,8 +85,14 @@ struct SettingsView: View {
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 if !model.isReadmeDemo { model.refreshLaunchAtLoginState() }
+                Task { await model.refreshDeviceStatusIfStale() }
             } else {
                 model.dismissTransientBannerAfterFocusLoss()
+            }
+        }
+        .onChange(of: selection) { section in
+            if section == .devices {
+                Task { await model.refreshDeviceStatusIfStale() }
             }
         }
         .sheet(item: $deviceDraft) { draft in
