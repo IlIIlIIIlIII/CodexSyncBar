@@ -493,7 +493,8 @@ final class CodexSyncBarTests: XCTestCase {
             lastHandledResetAt: nil,
             lastAttemptAt: now.addingTimeInterval(-10 * 60),
             lastSuccessAt: nil,
-            lastError: "failed")
+            lastError: "failed",
+            lastAttemptConfigurationID: WeeklyAnchorConfiguration.id)
         let unused = UsageWindow(usedPercent: 0, resetsAt: nil, durationSeconds: nil)
 
         XCTAssertEqual(
@@ -606,7 +607,8 @@ final class CodexSyncBarTests: XCTestCase {
             lastHandledResetAt: nil,
             lastAttemptAt: now.addingTimeInterval(-10 * 60),
             lastSuccessAt: nil,
-            lastError: "failed")
+            lastError: "failed",
+            lastAttemptConfigurationID: WeeklyAnchorConfiguration.id)
         record.resetDriftCandidateAt = shifted
         record.resetDriftObservationCount = 1
 
@@ -619,22 +621,105 @@ final class CodexSyncBarTests: XCTestCase {
             .none)
     }
 
-    func testWeeklyAnchorDecisionImmediatelyRetriesLegacyLocalRunnerFailure() {
+    func testWeeklyAnchorConfigurationChangeRetriesFailedSendOnlyOnceAcrossRestart() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
-        let record = WeeklyAnchorRecord(
-            nextResetAt: nil,
-            lastHandledResetAt: nil,
-            lastAttemptAt: now.addingTimeInterval(-5 * 60),
-            lastSuccessAt: nil,
-            lastError: "Reading additional input from stdin… no_biscuit_no_service")
+        let unused = UsageWindow(usedPercent: 0, resetsAt: nil, durationSeconds: nil)
+        for previousConfiguration in [nil, "retired-model:low", "gpt-5.6-luna:medium"] as [String?] {
+            var record = WeeklyAnchorRecord(
+                nextResetAt: nil,
+                lastHandledResetAt: nil,
+                lastAttemptAt: now.addingTimeInterval(-5 * 60),
+                lastSuccessAt: nil,
+                lastError: "model is not supported",
+                lastAttemptConfigurationID: previousConfiguration)
 
+            XCTAssertEqual(
+                WeeklyAnchorDecisionEngine.decision(enabled: true, window: unused, record: record, now: now),
+                .trigger(expectedResetAt: nil))
+            record.beginAttempt(at: now)
+            XCTAssertNil(record.lastError)
+            XCTAssertEqual(record.lastAttemptConfigurationID, WeeklyAnchorConfiguration.id)
+            record.lastError = "Reading additional input from stdin... model is not supported"
+            let reloaded = try JSONDecoder().decode(
+                WeeklyAnchorRecord.self, from: JSONEncoder().encode(record))
+            XCTAssertEqual(
+                WeeklyAnchorDecisionEngine.decision(enabled: true, window: unused, record: reloaded, now: now),
+                .none)
+            XCTAssertEqual(
+                WeeklyAnchorDecisionEngine.decision(
+                    enabled: true, window: unused, record: reloaded,
+                    now: now.addingTimeInterval(WeeklyAnchorDecisionEngine.retryInterval)),
+                .trigger(expectedResetAt: nil))
+        }
+    }
+
+    func testWeeklyAnchorGeneralOutputNeverBypassesCurrentConfigurationCooldown() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        for error in ["Reading additional input from stdin...", "no_biscuit_no_service", "network timeout"] {
+            var record = WeeklyAnchorRecord.empty
+            record.beginAttempt(at: now.addingTimeInterval(-60))
+            record.lastError = error
+            XCTAssertEqual(
+                WeeklyAnchorDecisionEngine.decision(
+                    enabled: true,
+                    window: UsageWindow(usedPercent: 0, resetsAt: nil, durationSeconds: nil),
+                    record: record, now: now),
+                .none)
+        }
+    }
+
+    func testWeeklyAnchorLegacyRecordPreservesFailureWhileConfirmingDrift() throws {
+        let now = Date(timeIntervalSinceReferenceDate: 1000)
+        let legacy = Data(#"{"nextResetAt":2000,"lastAttemptAt":900,"lastError":"model is not supported"}"#.utf8)
+        var record = try JSONDecoder().decode(WeeklyAnchorRecord.self, from: legacy)
+        XCTAssertNil(record.lastAttemptConfigurationID)
+        let shifted = Date(timeIntervalSinceReferenceDate: 3000)
+        let window = UsageWindow(usedPercent: 0, resetsAt: shifted, durationSeconds: nil)
+        XCTAssertEqual(
+            WeeklyAnchorDecisionEngine.decision(enabled: true, window: window, record: record, now: now),
+            .confirmResetDrift(observedResetAt: shifted))
+        record.confirmResetDrift(observedResetAt: shifted)
+        XCTAssertEqual(record.lastError, "model is not supported")
+        XCTAssertEqual(
+            WeeklyAnchorDecisionEngine.decision(
+                enabled: true, window: window, record: record, now: now.addingTimeInterval(30)),
+            .trigger(expectedResetAt: Date(timeIntervalSinceReferenceDate: 2000)))
+    }
+
+    func testWeeklyAnchorConfigurationRecoveryHonorsDisabledAndAlreadyActiveAccounts() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(7 * 86_400)
+        var record = WeeklyAnchorRecord.empty
+        record.lastAttemptAt = now.addingTimeInterval(-60)
+        record.lastError = "unsupported model"
+        XCTAssertEqual(
+            WeeklyAnchorDecisionEngine.decision(
+                enabled: false,
+                window: UsageWindow(usedPercent: 0, resetsAt: reset, durationSeconds: nil),
+                record: record, now: now),
+            .none)
         XCTAssertEqual(
             WeeklyAnchorDecisionEngine.decision(
                 enabled: true,
-                window: UsageWindow(usedPercent: 0, resetsAt: nil, durationSeconds: nil),
-                record: record,
-                now: now),
-            .trigger(expectedResetAt: nil))
+                window: UsageWindow(usedPercent: 2, resetsAt: reset, durationSeconds: nil),
+                record: record, now: now),
+            .observe(nextResetAt: reset))
+        record.lastError = nil
+        XCTAssertTrue(WeeklyAnchorDecisionEngine.retryIsCoolingDown(record: record, now: now))
+    }
+
+    func testWeeklyAnchorFailureStatusExplainsModelFailureAndActualRetryPolicy() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var record = WeeklyAnchorRecord.empty
+        XCTAssertNil(record.failureStatusText(relativeTo: now))
+        record.lastAttemptAt = now.addingTimeInterval(-60)
+        record.lastError = "The 'some-model' model is not supported when using Codex with a ChatGPT account."
+        XCTAssertEqual(record.failureStatusText(relativeTo: now), "모델 미지원으로 실행 실패 · 다음 확인 때 재시도")
+        record.lastAttemptConfigurationID = WeeklyAnchorConfiguration.id
+        XCTAssertTrue(record.failureStatusText(relativeTo: now)!.hasPrefix("모델 미지원으로 실행 실패 · "))
+        XCTAssertTrue(record.failureStatusText(relativeTo: now)!.hasSuffix(" 후 재시도"))
+        record.lastError = "connection timed out"
+        XCTAssertTrue(record.failureStatusText(relativeTo: now)!.hasPrefix("실행 실패 · "))
     }
 
     func testWeeklyAnchorServiceUsesEphemeralProviderWithoutRefreshToken() async throws {
@@ -694,7 +779,8 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertTrue(arguments.contains("--ignore-user-config"))
         XCTAssertTrue(arguments.contains("--ignore-rules"))
         XCTAssertTrue(arguments.contains("read-only"))
-        XCTAssertTrue(arguments.contains("gpt-5.4-mini"))
+        XCTAssertTrue(arguments.contains("--model\ngpt-5.6-luna\n"))
+        XCTAssertTrue(arguments.contains("--config\nmodel_reasoning_effort=\"low\"\n"))
         XCTAssertTrue(arguments.contains("syncbar_chatgpt"))
         XCTAssertTrue(arguments.contains("CODEX_SYNCBAR_ACCESS_TOKEN"))
         XCTAssertTrue(arguments.contains("CODEX_SYNCBAR_ACCOUNT_ID"))

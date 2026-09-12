@@ -421,15 +421,7 @@ final class AppModel: ObservableObject {
         guard isWeeklyAnchorEnabled(profileID: profileID) else { return "사용 안 함" }
         if weeklyAnchorRunningProfileIDs.contains(profileID) { return "메시지 전송 중…" }
         let record = weeklyAnchorRecords[profileID] ?? .empty
-        if record.lastError != nil {
-            if let lastAttemptAt = record.lastAttemptAt {
-                let retryAt = lastAttemptAt.addingTimeInterval(WeeklyAnchorDecisionEngine.retryInterval)
-                if retryAt > now {
-                    return "실행 실패 · \(Formatting.resetCreditExpiryDescription(retryAt, relativeTo: now)) 후 재시도"
-                }
-            }
-            return "실행 실패 · 다음 확인 때 재시도"
-        }
+        if let failure = record.failureStatusText(relativeTo: now) { return failure }
         if (record.resetDriftObservationCount ?? 0) > 0 {
             return "초기화 시각 변경 확인 중…"
         }
@@ -685,9 +677,7 @@ final class AppModel: ObservableObject {
             record.lastError = nil
             saveWeeklyAnchorRecord(record, profileID: profileID)
         case let .confirmResetDrift(observedResetAt):
-            record.resetDriftCandidateAt = observedResetAt
-            record.resetDriftObservationCount = (record.resetDriftObservationCount ?? 0) + 1
-            record.lastError = nil
+            record.confirmResetDrift(observedResetAt: observedResetAt)
             saveWeeklyAnchorRecord(record, profileID: profileID)
         case let .alreadyActive(nextResetAt):
             record.lastHandledResetAt = record.nextResetAt
@@ -719,8 +709,7 @@ final class AppModel: ObservableObject {
         else { return }
 
         var record = weeklyAnchorRecords[profileID] ?? .empty
-        record.lastAttemptAt = now
-        record.lastError = nil
+        record.beginAttempt(at: now)
         saveWeeklyAnchorRecord(record, profileID: profileID)
         weeklyAnchorRunningProfileIDs.insert(profileID)
 

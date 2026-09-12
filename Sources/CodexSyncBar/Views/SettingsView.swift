@@ -505,7 +505,7 @@ struct SettingsView: View {
                 Divider().overlay(AppTheme.border)
                 SettingsGroupTitle("주간 주기 고정")
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("켜는 시점에 주간 사용량이 100%면 즉시 한 번 실행합니다. 이후에는 초기화 뒤 사용량이 그대로이거나 예정 시각이 계속 밀리면 이를 확인한 뒤 계정별로 짧은 읽기 전용 Codex 요청을 보내 다음 주기를 시작합니다.")
+                    Text("켜는 시점에 주간 잔여량이 100%면 즉시 한 번 실행합니다. 이후에는 초기화 뒤 잔여량이 그대로이거나 예정 시각이 계속 밀리면 이를 확인한 뒤 계정별로 짧은 읽기 전용 Codex 요청을 보내 다음 주기를 시작합니다.")
                         .font(.system(size: 10))
                         .foregroundStyle(AppTheme.muted)
                     Text("자동 실행에는 refresh token을 전달하지 않습니다. Mac이 잠든 동안 놓친 실행은 깨어난 뒤 처리합니다.")

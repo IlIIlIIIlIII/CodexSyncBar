@@ -1,5 +1,11 @@
 import Foundation
 
+enum WeeklyAnchorConfiguration {
+    static let model = "gpt-5.6-luna"
+    static let reasoningEffort = "low"
+    static let id = "\(model):\(reasoningEffort)"
+}
+
 struct WeeklyAnchorPreferences: Equatable, Sendable {
     var enabledProfileIDs: Set<Int>
 
@@ -26,6 +32,36 @@ struct WeeklyAnchorRecord: Codable, Equatable, Sendable {
     var lastError: String?
     var resetDriftCandidateAt: Date? = nil
     var resetDriftObservationCount: Int? = nil
+    var lastAttemptConfigurationID: String? = nil
+
+    mutating func beginAttempt(at now: Date) {
+        lastAttemptAt = now
+        lastAttemptConfigurationID = WeeklyAnchorConfiguration.id
+        lastError = nil
+    }
+
+    mutating func confirmResetDrift(observedResetAt: Date) {
+        resetDriftCandidateAt = observedResetAt
+        resetDriftObservationCount = (resetDriftObservationCount ?? 0) + 1
+        // Observing a drifting reset does not resolve a failed send. Keep its
+        // configuration so the next evaluation can apply upgrade recovery.
+    }
+
+    func failureStatusText(relativeTo now: Date) -> String? {
+        guard let lastError else { return nil }
+        let error = lastError.lowercased()
+        let modelUnavailable = error.contains("model")
+            && (error.contains("not supported") || error.contains("not available")
+                || error.contains("model_not_found"))
+        let reason = modelUnavailable ? "모델 미지원으로 실행 실패" : "실행 실패"
+        if WeeklyAnchorDecisionEngine.retryIsCoolingDown(record: self, now: now),
+           let lastAttemptAt
+        {
+            let retryAt = lastAttemptAt.addingTimeInterval(WeeklyAnchorDecisionEngine.retryInterval)
+            return "\(reason) · \(Formatting.resetCreditExpiryDescription(retryAt, relativeTo: now)) 후 재시도"
+        }
+        return "\(reason) · 다음 확인 때 재시도"
+    }
 
     static let empty = WeeklyAnchorRecord(
         nextResetAt: nil,
@@ -87,16 +123,15 @@ enum WeeklyAnchorDecisionEngine {
     static let resetDriftTolerance: TimeInterval = 2 * 60
     static let requiredResetDriftObservations = 2
 
-    private static func retryIsCoolingDown(record: WeeklyAnchorRecord, now: Date) -> Bool {
+    static func retryIsCoolingDown(record: WeeklyAnchorRecord, now: Date) -> Bool {
         guard let lastAttemptAt = record.lastAttemptAt,
               now.timeIntervalSince(lastAttemptAt) < retryInterval
         else { return false }
-        // 2.2.1 inherited stdin and warmed the remote plugin catalog. Those
-        // local runner failures are fixed in 2.2.2, so do not make the user
-        // wait for the old cooldown after updating.
-        if let error = record.lastError,
-           error.contains("Reading additional input from stdin")
-            || error.contains("no_biscuit_no_service")
+        // Only a failed attempt with an older configuration may skip backoff.
+        // beginAttempt stamps the current configuration before launching, so
+        // another failure (or an app restart) cannot repeatedly bypass it.
+        if record.lastError != nil,
+           record.lastAttemptConfigurationID != WeeklyAnchorConfiguration.id
         {
             return false
         }
@@ -265,7 +300,8 @@ actor WeeklyUsageAnchorService {
             "--skip-git-repo-check",
             "--sandbox", "read-only",
             "--color", "never",
-            "--model", "gpt-5.4-mini",
+            "--model", WeeklyAnchorConfiguration.model,
+            "--config", "model_reasoning_effort=\"\(WeeklyAnchorConfiguration.reasoningEffort)\"",
             "--config", "model_provider=\"syncbar_chatgpt\"",
             "--config", "model_providers.syncbar_chatgpt.name=\"ChatGPT SyncBar\"",
             "--config", "model_providers.syncbar_chatgpt.base_url=\"https://chatgpt.com/backend-api/codex\"",
