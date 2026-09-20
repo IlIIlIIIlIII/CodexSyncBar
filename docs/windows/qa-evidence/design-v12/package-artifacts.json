@@ -1,0 +1,98 @@
+{
+  "verifiedAtUtc": "2026-09-19T13:00:51.839372+00:00",
+  "version": "1.0.0.12",
+  "result": "passed",
+  "artifacts": [
+    {
+      "file": "CodexSyncBar-1.0.0.12-x64.msix",
+      "version": "1.0.0.12",
+      "architecture": "x64",
+      "bytes": 224771375,
+      "sha256": "83639df93cc60ac41a317074bd0a016914e6e5ee29597363394fb6d46ee1d097",
+      "authenticodeSignature": "Valid",
+      "signerCertificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "zipCrcVerified": true,
+      "zipEntriesVerified": 1061,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0x8664",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0x8664",
+        "Runtime/node.exe": "0x8664"
+      },
+      "allPackagedIconsAndPreviewMatchSource": [
+        "Square44x44Logo.scale-200.png",
+        "Square44x44Logo.targetsize-48_altform-lightunplated.png",
+        "Square44x44Logo.targetsize-24_altform-unplated.png",
+        "StoreLogo.png",
+        "WidgetPreview.png",
+        "Square150x150Logo.scale-200.png",
+        "LockScreenLogo.scale-200.png",
+        "Wide310x150Logo.scale-200.png",
+        "SplashScreen.scale-200.png",
+        "AppIcon.ico",
+        "SyncBarIcon.png"
+      ],
+      "sharedCorePayloadIdentical": true,
+      "copiedArtifactSha256Verified": true
+    },
+    {
+      "file": "CodexSyncBar-1.0.0.12-arm64.msix",
+      "version": "1.0.0.12",
+      "architecture": "arm64",
+      "bytes": 215048562,
+      "sha256": "5b3dfa2595d5d9ec70d6b92f75f9698fdc0bac0ebf3b5b241fbee91e08a00231",
+      "authenticodeSignature": "Valid",
+      "signerCertificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "zipCrcVerified": true,
+      "zipEntriesVerified": 1053,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0xaa64",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0xaa64",
+        "Runtime/node.exe": "0xaa64"
+      },
+      "allPackagedIconsAndPreviewMatchSource": [
+        "Square44x44Logo.scale-200.png",
+        "Square44x44Logo.targetsize-48_altform-lightunplated.png",
+        "Square44x44Logo.targetsize-24_altform-unplated.png",
+        "StoreLogo.png",
+        "WidgetPreview.png",
+        "Square150x150Logo.scale-200.png",
+        "LockScreenLogo.scale-200.png",
+        "Wide310x150Logo.scale-200.png",
+        "SplashScreen.scale-200.png",
+        "AppIcon.ico",
+        "SyncBarIcon.png"
+      ],
+      "sharedCorePayloadIdentical": true,
+      "copiedArtifactSha256Verified": true
+    }
+  ],
+  "requiredPayloadPaths": [
+    "AppxManifest.xml",
+    "AppxSignature.p7x",
+    "AppxBlockMap.xml",
+    "[Content_Types].xml",
+    "CodexSyncBar.Windows.exe",
+    "CodexSyncBar.Windows.dll",
+    "CodexSyncBar.Windows.Core.dll",
+    "CodexSyncBar.Windows.runtimeconfig.json",
+    "CodexSyncBar.Windows.deps.json",
+    "Widgets/CodexSyncBar.Windows.Widgets.exe",
+    "Widgets/CodexSyncBar.Windows.Widgets.dll",
+    "Widgets/CodexSyncBar.Windows.Core.dll",
+    "Widgets/CodexSyncBar.Windows.Widgets.runtimeconfig.json",
+    "Widgets/CodexSyncBar.Windows.Widgets.deps.json",
+    "Runtime/node.exe",
+    "Runtime/gpt-switch",
+    "Runtime/usage-summary.mjs",
+    "Runtime/codex-syncbar-askpass",
+    "Public/README.txt",
+    "Assets/WidgetPreview.png",
+    "Assets/StoreLogo.png",
+    "Assets/AppIcon.ico",
+    "Assets/SyncBarIcon.png"
+  ],
+  "privateKeyAccessed": false,
+  "scope": "Native Windows Authenticode, ZIP CRC, manifest, executable architectures, packaged artwork source equality, copied file hashes. Not actual tray-click UI QA."
+}

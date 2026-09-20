@@ -1,0 +1,12 @@
+{
+  "NativePackage": "1.0.0.19",
+  "Profile": "main",
+  "LastAttemptAt": "2026-09-20T23:25:56.7257773+09:00",
+  "LastSuccessAt": "2026-09-20T23:26:00.9897389+09:00",
+  "Succeeded": true,
+  "Model": "gpt-5.6-luna",
+  "ReasoningEffort": "low",
+  "TemporaryRuntimeCount": 0,
+  "EnabledProfileCount": 0,
+  "RealResetBoundaryTested": false
+}

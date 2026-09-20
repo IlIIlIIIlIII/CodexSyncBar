@@ -1,0 +1,130 @@
+{
+  "verifiedAtUtc": "2026-09-19T08:52:38.110811+00:00",
+  "version": "1.0.0.9",
+  "publisher": "CN=CodexSyncBar",
+  "certificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+  "artifacts": [
+    {
+      "file": "CodexSyncBar-1.0.0.9-x64.msix",
+      "version": "1.0.0.9",
+      "architecture": "x64",
+      "bytes": 224248864,
+      "sha256": "ee0309fff4f4de8450c4532da40f7277fb0f512d75b574dedadf68116a1a40fd",
+      "zipCrcVerified": true,
+      "zipEntriesVerified": 1060,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0x8664",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0x8664",
+        "Runtime/node.exe": "0x8664"
+      },
+      "manifestRegistration": {
+        "widgetAppExtension": "CodexSyncBar.Widgets",
+        "widgetDefinition": "CodexSyncBar.Usage",
+        "comClass": "D946A8F4-089F-4FD3-AF58-372F5033415D",
+        "sizes": [
+          "large",
+          "medium"
+        ],
+        "startupTaskPresent": true
+      },
+      "packagedPreview": {
+        "width": 300,
+        "height": 304,
+        "sha256": "01b5f24270c68a690f179d6e258362676ba4c7cf3a70c8b087036c3eb0d85e7a",
+        "matchesSource": true
+      },
+      "sharedCorePayloadIdentical": true,
+      "runtimeSourcePayloadSha256": {
+        "Runtime/gpt-switch": "5ae9f1b65121db29e3760ff6d5a63686ba53f3fcd93bb4e4d0b0453bf11691c9",
+        "Runtime/usage-summary.mjs": "33577020e6b35c26789f66d1b41302287a33f363b8df96a120b30cd77cfda0c3",
+        "Runtime/codex-syncbar-askpass": "7a2a3f66e52f326b91b4c5d9a6d51ef324ea585ae32e603c8c02b1cb213a0a1e"
+      },
+      "authenticodeSignature": "Valid",
+      "signatureVerificationMethod": "Windows PowerShell Get-AuthenticodeSignature on source MSIX; SHA-256 equality verified after copying",
+      "signerCertificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "copiedArtifactSha256Verified": true
+    },
+    {
+      "file": "CodexSyncBar-1.0.0.9-arm64.msix",
+      "version": "1.0.0.9",
+      "architecture": "arm64",
+      "bytes": 214510051,
+      "sha256": "d1728c1c20b1fea02cc4cac2aa7526cb2ee7b1f9df2e91e31c7f79b51ed386de",
+      "zipCrcVerified": true,
+      "zipEntriesVerified": 1052,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0xaa64",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0xaa64",
+        "Runtime/node.exe": "0xaa64"
+      },
+      "manifestRegistration": {
+        "widgetAppExtension": "CodexSyncBar.Widgets",
+        "widgetDefinition": "CodexSyncBar.Usage",
+        "comClass": "D946A8F4-089F-4FD3-AF58-372F5033415D",
+        "sizes": [
+          "large",
+          "medium"
+        ],
+        "startupTaskPresent": true
+      },
+      "packagedPreview": {
+        "width": 300,
+        "height": 304,
+        "sha256": "01b5f24270c68a690f179d6e258362676ba4c7cf3a70c8b087036c3eb0d85e7a",
+        "matchesSource": true
+      },
+      "sharedCorePayloadIdentical": true,
+      "runtimeSourcePayloadSha256": {
+        "Runtime/gpt-switch": "5ae9f1b65121db29e3760ff6d5a63686ba53f3fcd93bb4e4d0b0453bf11691c9",
+        "Runtime/usage-summary.mjs": "33577020e6b35c26789f66d1b41302287a33f363b8df96a120b30cd77cfda0c3",
+        "Runtime/codex-syncbar-askpass": "7a2a3f66e52f326b91b4c5d9a6d51ef324ea585ae32e603c8c02b1cb213a0a1e"
+      },
+      "authenticodeSignature": "Valid",
+      "signatureVerificationMethod": "Windows PowerShell Get-AuthenticodeSignature on source MSIX; SHA-256 equality verified after copying",
+      "signerCertificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "copiedArtifactSha256Verified": true
+    },
+    {
+      "file": "CodexSyncBar.Development.cer",
+      "bytes": 784,
+      "sha256": "33e4e5fccef18ee648f06fa63f050991c364f984713f5e586aa8e5254acd146a",
+      "certificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "publicCertificateOnly": true,
+      "existingCertificatePreserved": true,
+      "matchesBothPackageSigners": true
+    }
+  ],
+  "requiredPayloadPaths": [
+    "AppxManifest.xml",
+    "AppxSignature.p7x",
+    "AppxBlockMap.xml",
+    "[Content_Types].xml",
+    "CodexSyncBar.Windows.exe",
+    "CodexSyncBar.Windows.dll",
+    "CodexSyncBar.Windows.Core.dll",
+    "CodexSyncBar.Windows.runtimeconfig.json",
+    "CodexSyncBar.Windows.deps.json",
+    "Widgets/CodexSyncBar.Windows.Widgets.exe",
+    "Widgets/CodexSyncBar.Windows.Widgets.dll",
+    "Widgets/CodexSyncBar.Windows.Core.dll",
+    "Widgets/CodexSyncBar.Windows.Widgets.runtimeconfig.json",
+    "Widgets/CodexSyncBar.Windows.Widgets.deps.json",
+    "Runtime/node.exe",
+    "Runtime/gpt-switch",
+    "Runtime/usage-summary.mjs",
+    "Runtime/codex-syncbar-askpass",
+    "Public/README.txt",
+    "Assets/WidgetPreview.png",
+    "Assets/StoreLogo.png",
+    "Assets/AppIcon.ico"
+  ],
+  "result": "passed",
+  "privateKeyAccessed": false,
+  "scope": "Read package contents and public certificate; validate CRC, manifest, payload, native PE architecture and Windows Authenticode; copy identical MSIX files into dist/windows.",
+  "limits": [
+    "Package validation does not establish actual app or Widgets Board UI behavior.",
+    "ARM64 runtime QA was not performed on this x64 PC."
+  ]
+}

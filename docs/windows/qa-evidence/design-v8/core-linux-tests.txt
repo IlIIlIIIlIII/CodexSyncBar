@@ -1,0 +1,26 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CodexSyncBar.Windows.Core -> /home/sunggu/Projects/Personal/CodexSyncBar/Windows/CodexSyncBar.Windows.Core/bin/Release/net10.0/CodexSyncBar.Windows.Core.dll
+  CodexSyncBar.Windows.Core.Tests -> /home/sunggu/Projects/Personal/CodexSyncBar/Windows/CodexSyncBar.Windows.Core.Tests/bin/Release/net10.0/CodexSyncBar.Windows.Core.Tests.dll
+Test run for /home/sunggu/Projects/Personal/CodexSyncBar/Windows/CodexSyncBar.Windows.Core.Tests/bin/Release/net10.0/CodexSyncBar.Windows.Core.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.21]     CodexSyncBar.Windows.Core.Tests.PrivateFileAclTests.NormalInheritedSystemAndAdministratorsReadersAreAccepted [SKIP]
+[xUnit.net 00:00:00.22]     CodexSyncBar.Windows.Core.Tests.PrivateFileAclTests.UnrelatedNonBroadPrincipalCannotReadPrivateAuth [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.PrivateFileAclTests.NormalInheritedSystemAndAdministratorsReadersAreAccepted [1 ms]
+  Skipped CodexSyncBar.Windows.Core.Tests.PrivateFileAclTests.UnrelatedNonBroadPrincipalCannotReadPrivateAuth [1 ms]
+[xUnit.net 00:00:00.27]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.DisplayOnlyDeviceEditsReuseCredentialNamespace [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.DisplayOnlyDeviceEditsReuseCredentialNamespace [1 ms]
+[xUnit.net 00:00:00.27]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptStandardInputRoundTripsThroughNativeLaunch [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptStandardInputRoundTripsThroughNativeLaunch [1 ms]
+[xUnit.net 00:00:00.27]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.ElevatedAdministratorOwnerIsAcceptedForPrivateFiles [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.ElevatedAdministratorOwnerIsAcceptedForPrivateFiles [1 ms]
+[xUnit.net 00:00:00.28]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.EndpointChangeCannotSilentlyReuseStoredKeyPassphrase [SKIP]
+[xUnit.net 00:00:00.29]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.InstalledCodexCommandAcceptsTheLoginHomeEnvironment [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.EndpointChangeCannotSilentlyReuseStoredKeyPassphrase [1 ms]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.InstalledCodexCommandAcceptsTheLoginHomeEnvironment [1 ms]
+[xUnit.net 00:00:00.29]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptArgumentsSurviveCmdEscaping [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptArgumentsSurviveCmdEscaping [1 ms]
+[xUnit.net 00:00:00.29]     CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptEnvironmentOverrideReachesTheChildProcess [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptEnvironmentOverrideReachesTheChildProcess [1 ms]
+
+Passed!  - Failed:     0, Passed:   177, Skipped:     9, Total:   186, Duration: 4 s - CodexSyncBar.Windows.Core.Tests.dll (net10.0)

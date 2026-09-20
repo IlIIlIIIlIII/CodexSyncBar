@@ -1,195 +1,149 @@
 # Codex SyncBar
 
 <p align="center">
-  <img src="Resources/AppIcon.png" width="128" alt="Codex SyncBar 아이콘">
+  <img src="Windows/CodexSyncBar.Windows/Assets/Square150x150Logo.scale-200.png" width="96" alt="Codex SyncBar Windows 아이콘">
 </p>
 
-여러 ChatGPT/Codex 계정을 이 Mac과 SSH 장치에서 한 번에 전환하는 macOS 메뉴 막대 앱입니다. 계정별 사용량과 인증 상태를 확인하고, 독립된 Chrome 로그인 세션을 이용해 필요한 계정만 안전하게 다시 로그인할 수 있습니다.
+**여러 Codex 계정의 사용량을 확인하고, Windows·WSL·SSH 장치의 계정을 한 번에 전환하는 Windows 11 트레이·위젯 앱입니다.**
 
-> 이 프로젝트는 개인용 유틸리티이며 OpenAI의 공식 제품이 아닙니다. ChatGPT 사용량 응답은 공개된 안정 API가 아니므로 OpenAI의 응답 형식이 바뀌면 일부 표시가 일시적으로 동작하지 않을 수 있습니다.
+계정별 남은 사용량과 초기화 시각을 확인하고, 연결된 기기의 Codex CLI도 병렬로 업데이트할 수 있습니다. 창을 닫아 트레이에 둔 상태에서도 사용량 갱신과 설정한 주간 자동 메시지가 동작합니다.
 
-## 사용자 UI
+[Windows 설치·빌드 안내](docs/windows/README.md) · [macOS 앱 안내](docs/macos/README.md) · [검증 기록](docs/windows/QA.md)
 
-아래 화면의 계정, 장치와 사용량은 README를 위해 만든 가상 예시이며 실제 사용자 정보가 아닙니다.
+> OpenAI의 공식 제품이 아닌 개인용 유틸리티입니다. 사용량 조회는 공개된 안정 API가 아니므로 응답 형식 변경에 따라 수정이 필요할 수 있습니다.
 
-### 메뉴 막대 화면
+## Windows 화면
 
-계정을 선택하면 사용량, 초기화권과 모든 장치의 적용 상태를 한눈에 확인할 수 있습니다.
+아래 관리 화면은 **가상 데이터로 구성한 데모**입니다. 실제 앱의 모든 조작을 재현하지 않으며, 계정·이메일·장치는 모두 예시입니다.
 
 <p align="center">
-  <img src="docs/images/readme-popover.png" width="420" alt="가상 데이터로 구성한 Codex SyncBar 메뉴 막대 화면">
+  <img src="docs/images/windows-dashboard.png" width="760" alt="Windows 데모: 왼쪽 계정 목록과 오른쪽 잔여 사용량, 초기화권, Windows·WSL·SSH 장치">
 </p>
 
-### 설정 화면
+### Windows 위젯
 
-계정의 별칭과 표시 순서를 관리하고, 필요한 계정만 다시 로그인하거나 로그아웃할 수 있습니다.
+`Win + W`로 위젯 보드를 열고 **Codex 사용량 및 계정**을 추가합니다. 중간 크기에서는 사용량과 계정 전환을, 큰 크기에서는 초기화권과 장치 적용 상태까지 확인할 수 있습니다.
+
+아래 이미지는 앱의 실제 위젯 템플릿에 가상 데이터를 넣어 렌더링한 예시입니다. Windows 위젯 보드의 여백·글꼴은 시스템 설정에 따라 달라질 수 있습니다.
 
 <p align="center">
-  <img src="docs/images/readme-settings.png" width="760" alt="가상 데이터로 구성한 Codex SyncBar 계정 설정 화면">
+  <img src="docs/images/windows-widget-medium.png" width="300" alt="밝은 테마 중간 위젯: 5시간·주간 잔여량과 계정 전환">
+  &nbsp;&nbsp;
+  <img src="docs/images/windows-widget-large.png" width="300" alt="어두운 테마 큰 위젯: 잔여량, 초기화권, 장치 적용 상태">
 </p>
 
 ## 주요 기능
 
-- 계정을 두 개 이상 등록하고 별칭과 표시 순서를 관리합니다.
-- 5시간, 주간, Spark 5시간, Spark 주간 한도를 막대 형태로 표시합니다.
-- 메뉴 막대에는 원하는 사용량 항목을 0~2개까지 선택해 표시합니다.
-- 초기화권 수량과 다음 만료 시각을 보기 쉽게 표시합니다.
-- 선택한 계정을 이 Mac과 등록된 SSH 장치에 한 번에 적용합니다.
-- 장치별 연결 상태, 적용 계정, 최근 30일 토큰 사용량과 API 가격 기준 추정 비용을 보여 줍니다.
-- 계정마다 별도의 영구 Chrome 프로필을 사용해 Google 로그인과 패스키·Touch ID를 지원합니다.
-- 로그인, 로그아웃, 인증 새로고침, 시작 프로그램 및 SSH 장치 관리는 설정 창에 모아 두었습니다.
+| 기능 | 할 수 있는 일 |
+| --- | --- |
+| 계정 관리 | 계정 추가·재로그인, 별칭 편집, 표시 순서 관리, 계정별 Chrome 로그인 세션 분리 |
+| 사용량 확인 | 5시간·주간 **잔여량**, 초기화 날짜, 초기화권 수량과 만료 일정 확인 |
+| 여러 장치에 적용 | 이 Windows PC와 활성화한 WSL·SSH 장치의 계정을 함께 전환하고 결과 검증 |
+| SSH 연결 | 비밀번호·개인 키·기존 OpenSSH 설정 지원, 호스트 키 지문 확인, 연결 테스트와 설치·활성화 |
+| CLI 관리 | 기기별 버전·설치 경로 조회, 개별 또는 **전체 병렬 업데이트**, 기기별 진행 결과와 재시도 |
+| 주간 자동 메시지 | 선택한 계정의 주간 초기화 후 확인 메시지 전송, 실행 기록과 실패 재시도 |
+| 트레이·위젯 | 창을 닫아도 백그라운드 갱신, 위젯에서 사용량 확인과 계정 적용 |
+| 토큰 집계 | 연결된 장치의 최근 30일 토큰 사용량과 API 가격 기준 예상 비용 확인 |
 
-## 설치 전 확인
+계정에 5시간 한도가 제공되지 않으면 주간 한도만 표시합니다. 예상 비용은 ChatGPT 구독 청구액과 다른 참고용 추정치입니다.
 
-- macOS 13 Ventura 이상
-- `/Applications/Google Chrome.app`에 설치된 Google Chrome
-- 공식 Codex CLI (`/opt/homebrew/bin/codex`, `/usr/local/bin/codex` 또는 `~/.local/bin/codex`)
-- 로컬 및 SSH 장치의 `bash`, `jq`, `node`, `tar`
-- SSH 장치를 사용할 경우, 해당 호스트의 키를 미리 `known_hosts`에 등록해야 합니다.
+## 설치
 
-## 릴리즈로 설치하기
+- **Windows 11 x64 또는 ARM64**가 필요합니다. 위젯은 Windows Web Experience Pack을 사용합니다.
+- 계정 로그인에는 Google Chrome과 실행 가능한 Codex CLI가 필요합니다.
+- WSL·SSH 기능을 사용할 대상에는 `bash`, `jq`, `node`, `tar`와 Codex CLI가 필요합니다.
 
-1. [Releases](https://github.com/IlIIlIIIlIII/CodexSyncBar/releases)에서 최신 `Codex-SyncBar-*-macOS-universal.zip`을 받습니다.
-2. ZIP을 풀고 `Codex SyncBar.app`을 `/Applications`로 옮깁니다.
-3. Finder에서 앱을 엽니다. 1.0.4 이후 공개 릴리즈는 Apple 공증을 거치므로 별도의 Gatekeeper 우회가 필요하지 않습니다.
-4. 메뉴 막대의 Codex SyncBar를 열고 **설정 → 계정 → 계정 추가**를 선택합니다.
+현재 Windows 패키지는 소스에서 빌드하거나 [Windows CI 실행 결과](https://github.com/IlIIlIIIlIII/CodexSyncBar/actions/workflows/windows.yml)에서 받을 수 있습니다. CI 산출물은 **서명되지 않은 개발용 MSIX**이므로 바로 설치할 배포본과는 다릅니다. 직접 빌드·서명하는 절차와 인증서 신뢰 설정은 [Windows 설치 안내](docs/windows/README.md#빌드와-설치)를 참고하세요. macOS용 ZIP은 Windows 설치 파일이 아닙니다.
 
-1.0.4 이후 공개 릴리즈는 Developer ID로 서명하고 Apple 공증을 통과한 뒤 공증 티켓을 앱에 첨부합니다. 다운로드한 ZIP을 풀어 `/Applications`로 옮기면 Gatekeeper가 개발자 신원과 공증 상태를 확인할 수 있습니다. 로컬 `./build-app.sh` 실행은 Developer ID가 없으면 기존처럼 ad-hoc 서명을 사용합니다.
+이미 신뢰하는 발급자가 서명한 MSIX를 받았다면 파일을 열어 설치하거나, 저장소 루트의 PowerShell에서 실행합니다.
 
-원한다면 릴리즈에 함께 첨부된 `SHA256SUMS`로 다운로드 파일을 확인할 수 있습니다.
-
-```bash
-shasum -a 256 -c SHA256SUMS
+```powershell
+./Scripts/Windows/install.ps1 -PackagePath C:\Downloads\CodexSyncBar.Windows.msix
 ```
 
-## 처음 설정하기
+Codex CLI가 없다면 다음 준비 스크립트를 사용할 수 있습니다. 공식 바이너리의 체크섬을 검증하며 계정 로그인이나 현재 인증 파일은 변경하지 않습니다.
 
-### 1. 계정 추가
-
-설정의 **계정** 페이지에서 계정을 추가하면 앱 전용 Chrome 창이 열립니다. 로그인 완료 전까지 기존 `auth.json`은 바뀌지 않습니다. 새 인증이 완전한 Codex 계정이고 다른 슬롯과 중복되지 않는지 확인한 뒤에만 계정 목록에 반영합니다.
-
-각 계정은 고정된 양의 ID를 사용합니다.
-
-- 인증 파일: `~/.local/share/gpt-switch/profiles/<계정 ID>.auth.json`
-- Chrome 프로필: `~/Library/Application Support/Codex SyncBar/ChromeProfiles/profile-<계정 ID>`
-
-별칭 변경이나 순서 이동은 표시만 바꾸며 인증 파일과 Chrome 세션의 위치는 바꾸지 않습니다.
-
-### 2. SSH 장치 추가
-
-설정의 **장치** 페이지에서 호스트, 포트, 사용자 이름과 인증 방법을 입력합니다. 새 장치는 비활성 상태로 저장되며 **설치 및 활성화**가 성공해야 전체 전환 대상에 포함됩니다.
-
-지원하는 인증 방법은 다음과 같습니다.
-
-- 기존 OpenSSH 설정
-- 개인 키와 선택적 OpenSSH 인증서·키 암호
-- SSH 비밀번호
-
-활성화할 때 앱은 원격 helper를 설치하고, 등록된 계정을 전송하고, 현재 계정이 실제로 적용됐는지 검증합니다. 중간 단계가 실패하면 새 장치를 활성화하지 않고 가능한 범위에서 이전 상태로 복구합니다. 새로 설치한 앱에는 SSH 장치가 미리 등록되어 있지 않습니다.
-
-### 3. 계정 전환
-
-메뉴의 계정 버튼을 누르고 **모든 장치에 전환**을 선택하면 추가 확인 창 없이 전환을 시작합니다. 모든 장치를 먼저 점검한 뒤 변경하며, 실패하면 이미 변경된 장치를 이전 계정으로 되돌립니다.
-
-전환 후에는 이전 인증을 캐시할 수 있는 Codex `app-server`만 선별해 다시 시작합니다. 실행 중인 일반 Codex CLI 작업과 TCP 기반의 별도 서버는 종료하지 않습니다.
-
-## 인증과 보안
-
-- 전체 refresh token은 이 Mac의 권한 `0600` 인증 파일에만 보관합니다.
-- SSH 장치에는 `refresh_token`을 비운 access-only 인증만 전달합니다.
-- SSH 비밀번호와 개인 키 암호는 macOS Keychain의 기기 전용 항목에만 저장합니다.
-- 비밀값은 설정 JSON, 프로세스 인자, 환경 변수 또는 로그에 기록하지 않습니다.
-- 개인 키와 인증서는 절대 경로의 일반 파일이어야 하며 심볼릭 링크를 허용하지 않습니다.
-- 개인 키 소유자는 현재 사용자여야 하고 권한은 `0400` 또는 `0600`이어야 합니다.
-- SSH는 strict host-key checking을 사용하고 agent, X11, 포트 포워딩과 TTY 할당을 차단합니다.
-- 인증 파일 변경은 임시 파일 작성, 권한 검증, 원자적 교체 순서로 진행합니다.
-- 계정 전환은 모든 장치의 사전 점검과 사후 검증을 통과해야 완료됩니다.
-
-Chrome 쿠키와 Codex 토큰은 서로 다른 세션입니다. 앱 업데이트나 일시적인 네트워크 오류만으로 삭제되지는 않지만, OpenAI/Google에서 로그아웃했거나 보안 설정 변경·관리자 회수·refresh token 폐기가 발생하면 재로그인이 필요할 수 있습니다.
-
-## SSH Codex CLI 일괄 업데이트
-
-설정 → **SSH 장치**에서 **모든 SSH Codex 업데이트 및 재시작**을 누르면 활성 장치를 차례로 처리합니다. 비활성 장치와 이 Mac의 CLI는 대상에서 제외됩니다.
-
-- 기존 설치 경로를 확인해 npm, Homebrew 또는 공식 standalone 설치 방식으로 최신 버전을 적용합니다. 설치 방식을 확인할 수 없거나 권한이 부족하면 해당 장치를 실패로 표시합니다.
-- 업데이트된 CLI의 버전을 확인한 뒤 SSH용 Codex app-server를 종료하고 Codex 앱의 재연결을 기다립니다. 진행 중인 SSH 작업이 중단될 수 있습니다. 일반 터미널의 CLI는 종료하지 않습니다.
-- 재연결된 프로세스의 버전까지 확인하면 완료로 표시합니다. 30초 안에 확인하지 못하면 **Codex 앱에서 SSH를 다시 연결**하라는 안내를 표시합니다. 실행 중인 서버가 없으면 다음 연결부터 새 버전을 사용합니다.
-- 장치별 버전, 재시작 결과와 상세 로그를 표시하며, 한 장치가 실패해도 나머지는 계속 처리합니다.
-
-터미널에서는 `gpt-switch update-codex all` 또는 `gpt-switch update-codex DEVICE-ID`로 실행할 수 있습니다. 일괄 명령은 일부 장치 실패나 재연결 대기가 있으면 종료 코드 2를 반환합니다.
-
-## 사용량과 비용 표시
-
-- 계정 한도는 현재 선택한 계정의 Codex 호환 사용량 응답을 이용합니다.
-- 장치 누적 사용량은 각 장치에 보존된 Codex 세션을 최근 30일 기준으로 집계합니다.
-- 비용은 모델별 공개 API 가격과 캐시 입력 가격을 기준으로 계산한 **추정치**입니다.
-- Fast/Priority 배율을 반영하지만, 공개 가격이 없는 모델은 임의의 가격을 만들지 않습니다.
-- 이 값은 ChatGPT 구독 청구액이 아니며 OpenAI 사용량 대시보드와 완전히 같지 않을 수 있습니다.
-
-## 문제가 생겼을 때
-
-### 재로그인 안내가 반복되는 경우
-
-설정의 계정 상태에서 **재로그인**을 선택하세요. 인증 파일이 존재하는 것만으로 refresh token의 유효성을 보장할 수 없으므로 앱은 실제 갱신 경로를 확인합니다.
-
-### SSH 장치에 이전 계정이 남는 경우
-
-1. 장치 상태를 새로고침합니다.
-2. 설정의 장치 페이지에서 해당 장치를 다시 **설치 및 활성화**합니다.
-3. helper 버전과 현재 계정 검증이 완료된 뒤 다시 전환합니다.
-
-### `another controller operation is already running`이 표시되는 경우
-
-다른 전환·갱신 작업이 끝날 때까지 잠시 기다린 뒤 새로고침하세요. 앱과 shell helper가 같은 잠금을 사용하므로 동시에 인증 파일을 변경하지 않습니다. 비정상 종료된 작업의 잠금은 소유 프로세스와 파일 권한을 확인한 뒤에만 자동 복구합니다.
-
-### Chrome 로그인이 원하는 계정으로 열리지 않는 경우
-
-설정의 해당 계정에서 Chrome 세션을 로그아웃한 뒤 재로그인하세요. 계정별 Chrome 프로필은 분리되어 있으며 다른 계정의 쿠키를 삭제하지 않습니다.
-
-## 소스에서 빌드하기
-
-```bash
-bash Tests/helper-contract-tests.sh
-swift test
-./build-app.sh
+```powershell
+./Scripts/Windows/setup-cli.ps1
 ```
 
-유니버설 바이너리로 패키징하려면 다음과 같이 실행합니다.
+## 처음 사용하기
 
-```bash
-CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
+### 1. 계정 추가와 전환
+
+1. 앱의 **계정 추가**를 누르고 전용 Chrome 창에서 로그인합니다.
+2. 왼쪽 목록에서 사용할 계정을 선택합니다. 선택만으로 실제 계정이 바뀌지는 않습니다.
+3. **모든 장치에 적용**을 누르면 이 PC와 활성화된 장치에 적용하고 결과를 확인합니다.
+
+전환 중 문제가 생기면 변경한 장치를 이전 상태로 복구합니다. 복구를 확인하지 못한 경우에는 성공으로 표시하지 않고 후속 변경을 막습니다.
+
+### 2. SSH·WSL 장치 연결
+
+**연결된 장치 → 장치 추가**에서 장치를 등록합니다. SSH의 기본 입력은 표시 이름·호스트·포트·사용자 이름이며, 포트 기본값은 `22`입니다.
+
+| SSH 인증 방식 | 표시되는 입력 |
+| --- | --- |
+| 비밀번호 | 비밀번호 입력 |
+| 개인 키 | 키 파일 선택, 선택 사항인 키 암호. 인증서 경로는 고급 옵션 |
+| 기존 OpenSSH 설정 | Windows OpenSSH 설정 사용 안내 |
+
+저장된 비밀번호나 키 암호는 다시 표시하지 않습니다. 기존 장치를 편집할 때 빈칸이면 저장된 비밀을 유지하며, 삭제는 별도 옵션을 사용합니다.
+
+처음 접속하는 서버는 **SHA-256 호스트 키 지문**을 확인하고 신뢰 등록합니다. 기존 키가 달라진 경우에는 자동으로 덮어쓰지 않습니다. 비활성 장치도 **연결 테스트**를 할 수 있고, **설치 및 활성화**에 성공해야 전체 계정 전환 대상에 포함됩니다.
+
+WSL은 사용할 배포판을 선택해 설치·검증합니다. 주기적인 상태 조회로 정지된 배포판을 시작하지는 않으며, 명시적인 전환·설치·업데이트는 해당 배포판을 시작할 수 있습니다.
+
+### 3. Codex CLI 업데이트
+
+**연결된 장치** 영역에 두 버튼이 있습니다.
+
+- **Codex CLI 관리:** 선택한 기기의 현재 버전·설치 경로를 확인하고 업데이트합니다. 지원하는 Windows 설치가 없으면 설치를 제공합니다.
+- **모든 기기 CLI 업데이트:** 등록된 Windows·SSH·WSL 기기를 **병렬**로 처리하며 기기별 진행 상태, 이전/이후 버전, 실패 이유를 표시합니다. 한 기기의 실패로 나머지 작업이 중단되지 않으며 실패한 기기만 다시 시도할 수 있습니다.
+
+설치 후 새 버전을 검증하고 해당 기기의 관리 대상 Codex 연결을 재연결합니다. **설치 실패**와 **업데이트 완료·재연결 대기**는 구분해서 표시합니다. 일반 터미널에서 실행한 Codex 작업은 종료하지 않습니다. 설치 방식이 지원되지 않거나 호스트 키 확인이 필요하면 이유를 안내합니다.
+
+Windows는 기존 npm 설치 또는 SyncBar 관리 바이너리를 업데이트합니다. 관리 바이너리는 공식 안정 릴리스의 해시를 검증합니다. SSH·WSL은 원격 helper가 지원하는 기존 설치 방식을 사용합니다.
+
+## 자동 갱신과 주간 자동 메시지
+
+**사용량은 앱이 실행 중일 때 약 5분마다 갱신됩니다.** 창을 닫아 트레이에 둬도 계속 동작하며, 위젯도 공통 제어기의 최신 사용량을 반영합니다. 수동 새로고침도 사용할 수 있습니다. 앱을 완전히 종료하거나 PC가 절전 상태이면 정해진 시각의 실행을 보장하지 않습니다.
+
+사용량 카드의 **주간 자동 메시지 설정**에서 계정별 자동 전송을 켭니다. **기본값은 모든 계정에서 꺼짐**입니다.
+
+- macOS 앱과 같은 방식으로 주간 한도가 초기화된 뒤 아직 사용하지 않은 계정에 짧은 확인 메시지를 한 번 보냅니다. **5시간 한도 초기화는 대상이 아닙니다.**
+- 처음 켤 때도 주간 잔여량이 99.5% 이상이면 전송할 수 있습니다. 이미 사용을 시작한 계정에는 추가로 보내지 않습니다.
+- 초기화 시각 변경은 두 차례 확인한 뒤 처리합니다. 실패하면 30분 이후 재시도하며 실행 기록은 재시작 후에도 유지됩니다.
+- **지금 메시지 보내기**로 수동 실행하고 결과를 확인할 수 있습니다. 자동·수동 전송은 해당 계정의 Codex 사용량을 소비합니다.
+
+전송 모델은 `gpt-5.6-luna`, 추론 수준은 `low`입니다. 메시지는 `Codex SyncBar 주간 주기 시작 확인입니다. 도구를 사용하지 말고 ‘확인’만 답해주세요.`입니다.
+
+## 데이터 보관과 문제 해결
+
+보관용 계정 인증과 SSH 비밀은 현재 Windows 사용자의 **DPAPI**로 암호화합니다. Codex가 직접 읽는 활성 인증 파일에는 사용자 전용 ACL을 적용합니다. SSH·WSL에는 refresh token을 제외한 인증을 전달하며 위젯에는 인증정보를 전달하지 않습니다.
+
+| 데이터 | 위치 |
+| --- | --- |
+| 설정·암호화된 계정·복구 기록 | `%LOCALAPPDATA%\CodexSyncBar` — MSIX에서는 앱별 가상화 경로일 수 있음 |
+| Codex 활성 인증 | `%USERPROFILE%\.codex\auth.json` 또는 설정한 `CODEX_HOME` |
+| Chrome 세션·앱 관리 CLI·임시 실행 파일 | `%USERPROFILE%\.codex-syncbar` |
+
+| 증상 | 확인할 항목 |
+| --- | --- |
+| 재로그인이 필요하다고 표시됨 | 해당 계정을 선택하고 **재로그인** 실행 |
+| SSH 활성화 실패 | **연결 테스트**로 네트워크·호스트 키·인증부터 확인한 후 **설치 및 활성화** 재시도. 복구 안내가 있으면 먼저 복구 완료 |
+| CLI 업데이트 후 재연결 대기 | 해당 기기의 Codex 연결을 다시 열고 표시된 버전 확인 |
+| 위젯 추가 목록에 앱이 없음 | Windows Web Experience Pack과 로컬 개발 환경 요구 사항 확인. [위젯 안내](docs/windows/README.md#사용법) 참고 |
+| 사용량이 오래된 상태로 남음 | 표시된 갱신 시각과 인증·연결 오류 확인 후 새로고침. 오류 시 마지막 정상 값을 유지 |
+
+## 개발
+
+.NET 10 SDK를 설치한 Windows의 저장소 루트에서 실행합니다. 스크립트는 Core 테스트 후 앱·위젯·SSH 비밀번호 도우미를 빌드합니다.
+
+```powershell
+./Scripts/Windows/build.ps1 -Architecture x64 -Package
+./Scripts/Windows/build.ps1 -Architecture ARM64 -Package
 ```
 
-기본 출력 위치는 이 저장소 기준 `../../outputs`입니다. 다른 위치를 사용하려면 첫 번째 인자로 경로를 전달하세요.
+출력은 `dist/windows`이며 위 명령의 기본 패키지는 서명되지 않습니다. 배포용 서명, WSL 개발, 안전한 데모 실행과 데이터 복구는 [Windows 개발 안내](docs/windows/README.md)에 정리했습니다. 실제 수행한 검사와 남은 검증 범위는 [QA 보고서](docs/windows/QA.md)에서 확인할 수 있습니다.
 
-```bash
-./build-app.sh "$PWD/release-assets"
-```
-
-빌드에는 앱과 동일한 `gpt-switch`, Keychain askpass bridge, 사용량 집계 helper가 포함됩니다. 앱 실행 시 다음 위치에 원자적으로 설치합니다.
-
-- `~/.local/bin/gpt-switch`
-- `~/.local/lib/gpt-switch/codex-syncbar-askpass`
-- `~/.local/lib/gpt-switch/usage-summary.mjs`
-
-`v*` 태그 릴리즈는 다음 GitHub Actions secret이 모두 있어야 실행됩니다. P12와 App Store Connect API 개인 키는 각각 base64로 저장합니다.
-
-- `APPLE_DEVELOPER_ID_P12_BASE64`
-- `APPLE_DEVELOPER_ID_P12_PASSWORD`
-- `APPLE_NOTARY_KEY_BASE64`
-- `APPLE_NOTARY_KEY_ID`
-- `APPLE_NOTARY_ISSUER_ID`
-
-## 데이터 위치와 삭제
-
-주요 데이터는 다음 위치에 있습니다.
-
-- 설정과 계정 인증: `~/.local/share/gpt-switch`
-- 앱 전용 Chrome 세션: `~/Library/Application Support/Codex SyncBar`
-- SSH 비밀번호·키 암호: macOS Keychain 서비스 `com.sunggu.codexsyncbar.ssh`
-
-앱만 제거하려면 `/Applications/Codex SyncBar.app`을 휴지통으로 옮기면 됩니다. 계정·Chrome 세션·Keychain 항목까지 지우려면 먼저 설정에서 장치와 계정을 정리한 뒤 위 데이터 디렉터리를 삭제하세요. 원격 장치의 파일은 Mac 앱을 삭제하는 것만으로 자동 삭제되지 않습니다.
-
-## 개발 메모
-
-사용량 응답 처리는 `UsageService.swift`, 장치별 최근 30일 집계는 `TokenUsageService.swift`에 분리되어 있습니다. 로그인은 설치된 공식 Codex CLI의 app-server를 사용하며, 브라우저에는 `auth.openai.com`의 HTTPS 인증 URL만 전달합니다.
+macOS 설치·화면·Swift 빌드 안내는 [macOS README](docs/macos/README.md)를 참고하세요.

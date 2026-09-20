@@ -1,0 +1,72 @@
+{
+  "renderer": "AdaptiveCards JS 3.0.6",
+  "source": "WidgetTemplates.Render with synthetic state",
+  "actionAlignment": "stretch",
+  "size": "medium",
+  "scenario": "error",
+  "theme": "dark",
+  "defaultFontPx": 14,
+  "metricFontPx": 18,
+  "attributionPx": 48,
+  "paddingPx": 16,
+  "width": 300,
+  "height": 304,
+  "semanticColorSimulation": {
+    "background": "#202020",
+    "emphasis": "#2b3038",
+    "text": "#ffffff",
+    "subtle": "#bdbdbd",
+    "border": "#8a8a8a",
+    "control": "#333333",
+    "accent": "#60cdff",
+    "good": "#6ccb5f",
+    "warning": "#fce100",
+    "primaryText": "#001a24"
+  },
+  "transparentRoundedCorners": true,
+  "layout": {
+    "width": 300,
+    "height": 304,
+    "contentBottom": 300,
+    "contentLimit": 304,
+    "scrollWidth": 300,
+    "clientWidth": 300,
+    "controls": [
+      {
+        "type": "SELECT",
+        "text": "account choice",
+        "top": 212,
+        "bottom": 244,
+        "left": 16,
+        "right": 284,
+        "width": 268,
+        "scrollWidth": 266,
+        "clientWidth": 266
+      },
+      {
+        "type": "BUTTON",
+        "text": "모두 적용",
+        "top": 252,
+        "bottom": 284,
+        "left": 16,
+        "right": 148,
+        "width": 132,
+        "scrollWidth": 130,
+        "clientWidth": 130
+      },
+      {
+        "type": "BUTTON",
+        "text": "새로고침",
+        "top": 252,
+        "bottom": 284,
+        "left": 152,
+        "right": 284,
+        "width": 132,
+        "scrollWidth": 130,
+        "clientWidth": 130
+      }
+    ],
+    "imageCount": 0
+  },
+  "boardQa": false
+}

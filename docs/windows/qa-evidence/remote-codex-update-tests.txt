@@ -1,0 +1,1 @@
+Remote Codex update tests passed (install, failure isolation, validation, restart, pending, unsupported path, SSH batch).

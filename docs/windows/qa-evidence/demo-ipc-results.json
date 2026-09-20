@@ -1,0 +1,42 @@
+﻿[
+    {
+        "name":  "Background startup serves synthetic accounts before UI Loaded",
+        "passed":  true
+    },
+    {
+        "name":  "Second demo launch redirects to the existing instance",
+        "passed":  true
+    },
+    {
+        "name":  "Refresh returns a safe usage snapshot",
+        "passed":  true
+    },
+    {
+        "name":  "Stale widget configuration rejected",
+        "passed":  true
+    },
+    {
+        "name":  "Account selection starts one shared operation",
+        "passed":  true
+    },
+    {
+        "name":  "Repeated widget request is idempotent",
+        "passed":  true
+    },
+    {
+        "name":  "Concurrent account switch is rejected while busy",
+        "passed":  true
+    },
+    {
+        "name":  "Switch reaches verified completion",
+        "passed":  true
+    },
+    {
+        "name":  "Windows WSL SSH presentation uses the same applied account",
+        "passed":  true
+    },
+    {
+        "name":  "OpenSettings dispatches successfully",
+        "passed":  true
+    }
+]

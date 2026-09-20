@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-09-19T05:36:12.8064557+00:00",
+  "checks": {
+    "official_cli_login_and_account_validation": true,
+    "profile_is_dpapi_protected": true,
+    "no_active_auth_written": true,
+    "access_only_export_omits_refresh_token": true,
+    "usage_api_responded": true,
+    "usage_has_at_least_one_limit": true
+  }
+}

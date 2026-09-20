@@ -1,0 +1,45 @@
+{
+    "Package":  "14769529-7449-442E-89BB-30402D814A1D_1.0.0.12_x64__rz4mdry80vfem",
+    "Status":  "Ok",
+    "Architecture":  "X64",
+    "PayloadVerified":  true,
+    "DeveloperModeEnabled":  true,
+    "DeveloperModeRegistryValue":  1,
+    "WidgetDefinition":  "CodexSyncBar.Usage",
+    "ComClass":  "D946A8F4-089F-4FD3-AF58-372F5033415D",
+    "OsAppExtensionDiscovered":  true,
+    "OsAppExtensionPropertiesVerified":  true,
+    "OsAppExtensionPublicFolderVerified":  true,
+    "WidgetImages":  [
+                         {
+                             "Kind":  "Icon",
+                             "Path":  "Assets\\StoreLogo.png",
+                             "Width":  50,
+                             "Height":  50,
+                             "TransparentCorners":  true,
+                             "PreviewGuidanceCompliant":  null
+                         },
+                         {
+                             "Kind":  "Icon",
+                             "Path":  "Assets\\StoreLogo.png",
+                             "Width":  50,
+                             "Height":  50,
+                             "TransparentCorners":  true,
+                             "PreviewGuidanceCompliant":  null
+                         },
+                         {
+                             "Kind":  "Screenshot",
+                             "Path":  "Assets\\WidgetPreview.png",
+                             "Width":  300,
+                             "Height":  304,
+                             "TransparentCorners":  true,
+                             "PreviewGuidanceCompliant":  true
+                         }
+                     ],
+    "PreviewGuidanceCompliant":  true,
+    "PreviewGuidanceNote":  "Checks 300 x 304 dimensions and transparent corner pixels; medium-card content and rounded shape require visual review.",
+    "StartupTask":  "CodexSyncBar.Startup",
+    "ProviderClassFactoryActivated":  false,
+    "ProviderInstanceConstructed":  false,
+    "WidgetsBoardVisualQa":  "Not exercised by this script"
+}

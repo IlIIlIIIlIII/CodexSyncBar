@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-19",
+  "baselineReproduced": true,
+  "baselineError": "-32602: sandboxCwd is not a local file URI",
+  "officialWindowsNodeReplThroughAdapter": "passed",
+  "probe": "nodeRepl.write of a fixed marker; no desktop action or credential access",
+  "samePermissionProfileBeforeAndAfter": true,
+  "unitTestsPassed": 12,
+  "noArgumentEntryPointVerified": true,
+  "configurationChange": "desktop CODEX_NODE_REPL_PATH override generates managed node_repl command using the installed WSL bridge; args remain empty",
+  "officialMcpIdentityAndHooksPreserved": true,
+  "desktopStartupPreflight": "adapter and desktop executable exist",
+  "firstUserRelaunch": "actual tool still failed; override absent in new desktop process; app selected bundled runtime",
+  "launcherFollowupFix": "temporary user-profile override during startup, normal de-elevation preserved, final process and MCP command verified, original user value restored",
+  "launcherFollowupValidation": "PowerShell parse, Windows child environment, live child key probe and UNC path comparison passed",
+  "filteredWslEnvironmentSmokeTest": "official node_repl marker execution passed without WSL_DISTRO_NAME",
+  "currentExistingToolConnection": "passed: actual mcp__node_repl__js imported official @oai/sky and listed Windows windows in this same WSL task",
+  "widgetBoardQa": "not performed",
+  "secondUserRelaunch": "failed: explicit process environment also lost during native de-elevation; startup-verification recorded false",
+  "rootCause": "Chromium RunDeElevated uses CreateProcessWithTokenW with null environment, rebuilding environment from the user profile",
+  "freshUserEnvironmentProbe": "passed with no parent override; original user setting restored",
+  "exactNullEnvironmentNativeLaunch": "blocked with Win32 error 1314 under ordinary permissions; no process launched; user setting restored",
+  "finalUserRelaunch": {
+    "startedAt": "2026-09-19T06:47:36.4261300Z",
+    "desktopProcessId": 42056,
+    "environmentVerified": true,
+    "configurationVerified": true,
+    "userEnvironmentRestored": true,
+    "evidence": "wsl-computer-use-successful-relaunch.json"
+  },
+  "actualComputerUseConnection": {
+    "tool": "mcp__node_repl__js",
+    "library": "@oai/sky",
+    "operation": "list_windows",
+    "result": "passed",
+    "windowCount": 6,
+    "codexSyncBarWindowPresent": true,
+    "sameWslTask": true,
+    "widgetBoardInteractionVerified": false
+  }
+}

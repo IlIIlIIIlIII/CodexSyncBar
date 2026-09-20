@@ -1,0 +1,68 @@
+name: Windows and portable contracts
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test and package app with widget provider
+        shell: pwsh
+        run: ./Scripts/Windows/build.ps1 -Architecture '${{ matrix.architecture }}' -Package
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.architecture }}
+          path: |
+            dist/windows/**/*.msix
+            dist/windows/**/*.trx
+            dist/windows/*.binlog
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet test Windows/CodexSyncBar.Windows.Core.Tests/CodexSyncBar.Windows.Core.Tests.csproj
+      - run: bash Tests/helper-contract-tests.sh
+      - run: node Tests/usage-summary-tests.mjs
+      - run: bash Tests/remote-codex-update-tests.sh
+      - run: python3 Tests/node-repl-wsl-bridge-tests.py
+      - name: Prepare isolated SSH integration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server jq
+      - name: Exercise the real helper over isolated loopback SSH
+        env:
+          CODEX_SYNCBAR_SSH_QA_REPORT: ssh-loopback-smoke.json
+        run: bash Tests/ssh-loopback-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: portable-ssh-qa
+          path: ssh-loopback-smoke.json
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: swift test
+      - run: bash Tests/helper-contract-tests.sh

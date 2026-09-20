@@ -1,0 +1,348 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "lang": "ko",
+  "body": [
+    {
+      "type": "ColumnSet",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "stretch",
+          "verticalContentAlignment": "Center",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "현재 · 개인 계정",
+              "size": "Default",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "p***@example.com",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": "80px",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "ActionSet",
+              "actions": [
+                {
+                  "type": "Action.Execute",
+                  "title": "앱 열기",
+                  "verb": "settings",
+                  "tooltip": "앱 열기",
+                  "style": "default",
+                  "associatedInputs": "none",
+                  "data": {
+                    "configurationRevision": "demo-v1",
+                    "requestId": "b7bd339ad3494fcf8c5e7d647c34e829"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "spacing": "Small",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "spacing": "Small",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "spacing": "Small",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "5시간 남음",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "72%",
+                  "size": "ExtraLarge",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Good",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "2시간 59분 후 초기화",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "Small",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "09.20 (일) 00:53",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "spacing": "Small",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "주간 남음",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "58%",
+                  "size": "ExtraLarge",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Accent",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "3일 23시간 후 초기화",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "Small",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "09.23 (수) 21:53",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "09/19 21:53 갱신 · 최신 사용량",
+      "size": "Small",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": true,
+      "spacing": "Small",
+      "color": "Default",
+      "maxLines": 1
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "verticalContentAlignment": "Center",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "초기화권",
+                  "size": "Default",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "auto",
+              "spacing": "Small",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "3개",
+                  "size": "Large",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Good",
+                  "maxLines": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "TextBlock",
+          "text": "3개 · 7일 3시간 13분 남음",
+          "size": "Default",
+          "wrap": true,
+          "weight": "Bolder",
+          "isSubtle": false,
+          "spacing": "Small",
+          "color": "Default",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "2026.09.27 (일요일) 01:07",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "None",
+          "color": "Default",
+          "maxLines": 1
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "separator": false,
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "장치 적용 · 3/3 적용됨",
+          "size": "Default",
+          "wrap": true,
+          "weight": "Bolder",
+          "isSubtle": false,
+          "spacing": "None",
+          "color": "Good",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "Windows PC 1대 · WSL 1대 · SSH 1대",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "Small",
+          "color": "Default",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "모든 장치 연결됨",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "None",
+          "color": "Default",
+          "maxLines": 1
+        }
+      ]
+    },
+    {
+      "type": "Input.ChoiceSet",
+      "id": "profileId",
+      "label": "적용할 계정",
+      "style": "compact",
+      "isMultiSelect": false,
+      "choices": [
+        {
+          "title": "개인 계정",
+          "value": "1"
+        },
+        {
+          "title": "작업용 계정 · 긴 별칭 표시를 확인하는 데모",
+          "value": "2"
+        }
+      ],
+      "value": "1",
+      "spacing": "Small",
+      "separator": true
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "모두 적용",
+      "verb": "apply",
+      "tooltip": "선택한 계정을 모든 장치에 적용",
+      "style": "positive",
+      "associatedInputs": "auto",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "0a527f224f2445e1a86cdb8bc4b3e272"
+      }
+    },
+    {
+      "type": "Action.Execute",
+      "title": "새로고침",
+      "verb": "refresh",
+      "tooltip": "새로고침",
+      "style": "default",
+      "associatedInputs": "none",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "2ffe33558c7449cdbcc93712afd8ef7d"
+      }
+    }
+  ]
+}

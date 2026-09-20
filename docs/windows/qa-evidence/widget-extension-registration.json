@@ -1,0 +1,68 @@
+{
+  "recordedAtUtc": "2026-09-19T07:22:12Z",
+  "scope": "Read-only installed package and Windows AppExtensionCatalog audit before widget service restart",
+  "packageVersion": "1.0.0.5",
+  "packageStatus": "Ok",
+  "developerModeEnabled": true,
+  "osExtensionCatalog": {
+    "api": "Windows.ApplicationModel.AppExtensions.AppExtensionCatalog.Open(com.microsoft.windows.widgets).FindAllAsync",
+    "extensionCount": 14,
+    "codexExtensionFound": true,
+    "extensionId": "CodexSyncBar.Widgets",
+    "packageStatusVerifyIsOk": true,
+    "extensionPropertiesReadable": true,
+    "definitionId": "CodexSyncBar.Usage",
+    "definitionDisplayName": "Codex 사용량 및 계정",
+    "activationClassId": "D946A8F4-089F-4FD3-AF58-372F5033415D",
+    "activationMatchesRegisteredComClass": true,
+    "publicFolderReadable": true,
+    "declaredIconExists": true,
+    "declaredScreenshotExists": true,
+    "providerExecutableExists": true
+  },
+  "widgetsBoardPicker": {
+    "observedVia": "Official computer-use screenshot observed by the root QA agent",
+    "pickerVisible": true,
+    "codexEntryVisible": false,
+    "widgetAdded": false,
+    "widgetRenderingVerified": false,
+    "widgetActionsVerified": false,
+    "interpretation": "OS app-extension discovery succeeded; the Widgets Board picker did not show Codex. These are separate checks."
+  },
+  "providerLog": {
+    "lastEntryUtc": "2026-09-19T07:07:33.0415574Z",
+    "lastOperation": "restore-infos-null",
+    "restoredWidgetInstanceCount": 0,
+    "interpretation": "GetWidgetInfos describes existing instances and does not prove widget definition catalog acceptance."
+  },
+  "hostVersions": {
+    "widgetsPlatformRuntime": "1.6.19.0",
+    "webExperience": "526.21100.40.0"
+  },
+  "previewAssetReview": {
+    "actualWidth": 844,
+    "actualHeight": 874,
+    "actualCardSize": "large",
+    "documentedWidth": 300,
+    "documentedHeight": 304,
+    "documentedCardSize": "medium",
+    "sizeGuidanceMet": false,
+    "pickerOmissionCauseProven": false,
+    "source": "https://learn.microsoft.com/en-us/windows/apps/design/widgets/widgets-picker-integration",
+    "sourceCorrectionEvidence": "widget-preview-render.json"
+  },
+  "limitations": [
+    "No missing OS app-extension registration or obvious manifest hierarchy mismatch was found.",
+    "Host-specific catalog filtering or stale state remains unproven.",
+    "No UI action, process restart, account access or authentication write was performed by this audit."
+  ],
+  "manifestReference": "https://learn.microsoft.com/en-us/windows/apps/develop/widgets/widget-provider-manifest",
+  "afterHostRestart": {
+    "samePackageVersion": "1.0.0.5",
+    "codexPickerEntryVisible": true,
+    "mediumWidgetVisible": true,
+    "evidence": "widgets-board-ui-qa.json",
+    "previewSizeMismatchCausedOriginalPickerOmission": false,
+    "actionsVerified": false
+  }
+}

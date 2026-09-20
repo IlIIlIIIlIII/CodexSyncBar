@@ -1,0 +1,381 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "lang": "ko",
+  "body": [
+    {
+      "type": "ColumnSet",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "stretch",
+          "verticalContentAlignment": "Center",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "현재 · 장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장",
+              "size": "Default",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "p***@example.com",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": "80px",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "ActionSet",
+              "actions": [
+                {
+                  "type": "Action.Execute",
+                  "title": "앱 열기",
+                  "verb": "settings",
+                  "tooltip": "앱 열기",
+                  "style": "default",
+                  "associatedInputs": "none",
+                  "data": {
+                    "configurationRevision": "demo-v1",
+                    "requestId": "2cba84e71fbb498cb439ef7f62ba9c72"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "spacing": "Small",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "spacing": "Small",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "spacing": "Small",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "5시간 남음",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "8%",
+                  "size": "ExtraLarge",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Warning",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "59분 후 초기화",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "Small",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "09.19 (토) 22:53",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "spacing": "Small",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "주간 남음",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "58%",
+                  "size": "ExtraLarge",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Accent",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "3일 23시간 후 초기화",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "Small",
+                  "color": "Default",
+                  "maxLines": 1
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "09.23 (수) 21:53",
+                  "size": "Small",
+                  "wrap": true,
+                  "weight": "Default",
+                  "isSubtle": true,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "09/19 21:53 갱신 · 연결 확인 필요",
+      "size": "Small",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": false,
+      "spacing": "Small",
+      "color": "Warning",
+      "maxLines": 1
+    },
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "verticalContentAlignment": "Center",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "초기화권",
+                  "size": "Default",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Default",
+                  "maxLines": 1
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "auto",
+              "spacing": "Small",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "4개",
+                  "size": "Large",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "isSubtle": false,
+                  "spacing": "None",
+                  "color": "Good",
+                  "maxLines": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "TextBlock",
+          "text": "1개 · 3시간 19분 남음",
+          "size": "Default",
+          "wrap": true,
+          "weight": "Bolder",
+          "isSubtle": false,
+          "spacing": "Small",
+          "color": "Warning",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "2026.09.20 (일요일) 01:13",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "None",
+          "color": "Default",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "2개 · 7일 3시간 13분 남음",
+          "size": "Default",
+          "wrap": true,
+          "weight": "Bolder",
+          "isSubtle": false,
+          "spacing": "Small",
+          "color": "Default",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "2026.09.27 (일요일) 01:07",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "None",
+          "color": "Default",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "외 1개 만료 일정 · 앱에서 전체 보기",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "Small",
+          "color": "Default",
+          "maxLines": 1
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "separator": false,
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "장치 적용 · 6/20 적용됨",
+          "size": "Default",
+          "wrap": true,
+          "weight": "Bolder",
+          "isSubtle": false,
+          "spacing": "None",
+          "color": "Warning",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "WSL 20대",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "Small",
+          "color": "Default",
+          "maxLines": 1
+        },
+        {
+          "type": "TextBlock",
+          "text": "오프라인 7 · 다른 계정 7",
+          "size": "Small",
+          "wrap": true,
+          "weight": "Default",
+          "isSubtle": true,
+          "spacing": "None",
+          "color": "Default",
+          "maxLines": 1
+        }
+      ]
+    },
+    {
+      "type": "Input.ChoiceSet",
+      "id": "profileId",
+      "label": "적용할 계정",
+      "style": "compact",
+      "isMultiSelect": false,
+      "choices": [
+        {
+          "title": "장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장",
+          "value": "1"
+        },
+        {
+          "title": "장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장",
+          "value": "2"
+        }
+      ],
+      "value": "1",
+      "spacing": "Small",
+      "separator": true
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "모두 적용",
+      "verb": "apply",
+      "tooltip": "선택한 계정을 모든 장치에 적용",
+      "style": "positive",
+      "associatedInputs": "auto",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "720e763eba0b4520b21c27441da61a97"
+      }
+    },
+    {
+      "type": "Action.Execute",
+      "title": "새로고침",
+      "verb": "refresh",
+      "tooltip": "새로고침",
+      "style": "default",
+      "associatedInputs": "none",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "0b4dff41eecb4a47a0beace4b01d2be2"
+      }
+    }
+  ]
+}

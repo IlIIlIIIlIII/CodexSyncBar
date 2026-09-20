@@ -1,0 +1,12 @@
+﻿{
+    "StartedAt":  "2026-09-19T06:47:36.4261300Z",
+    "ExplicitEnvironmentBlock":  true,
+    "UseShellExecute":  false,
+    "OverrideScope":  "Temporary user environment during startup; restored afterward",
+    "ExpectedOverride":  "\\\\wsl.localhost\\Ubuntu-26.04\\home\\sunggu\\.local\\lib\\codex-wsl-node-repl\\bridge.py",
+    "EnvironmentVerified":  true,
+    "ConfigurationVerified":  true,
+    "UserEnvironmentRestored":  true,
+    "LaunchedProcessId":  54556,
+    "DesktopProcessId":  42056
+}

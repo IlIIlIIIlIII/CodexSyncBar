@@ -1,0 +1,2418 @@
+{
+  "date": "2026-09-19",
+  "sourceTargetVersion": "1.0.0.8",
+  "passed": 36,
+  "failed": 0,
+  "widgetContractTests": {
+    "passed": 31,
+    "failed": 0
+  },
+  "exporterBuild": {
+    "warnings": 0,
+    "errors": 0
+  },
+  "productionDataUsed": false,
+  "actualWidgetsBoardQa": false,
+  "catalogAssetSha256": "01b5f24270c68a690f179d6e258362676ba4c7cf3a70c8b087036c3eb0d85e7a",
+  "maxContentBottom": {
+    "medium": 293,
+    "large": 604
+  },
+  "supportedElements": [
+    "TextBlock",
+    "ColumnSet",
+    "Column",
+    "Container",
+    "Input.ChoiceSet",
+    "Action.Execute"
+  ],
+  "themeInProduction": "Host-managed Good/Accent/Warning foregrounds and emphasis container; no literal RGB colors",
+  "previewContrastChecks": [
+    {
+      "theme": "light",
+      "minimumSimulatedTextContrast": 5.47,
+      "simulatedControlBorderContrast": 3.45,
+      "actualHostQa": false
+    },
+    {
+      "theme": "dark",
+      "minimumSimulatedTextContrast": 6.54,
+      "simulatedControlBorderContrast": 4.72,
+      "actualHostQa": false
+    }
+  ],
+  "features": [
+    "Absent five-hour API window hides the whole column and weekly fills the width.",
+    "Large reset-credit section groups identical expiry instants, shows count, days/hours/minutes remaining and local full-Korean-weekday date/time.",
+    "Two expiry groups are visible; additional groups have a full-app-details hint.",
+    "Expired, sub-minute, zero-credit and unknown-count states are distinct; no missing expiry is fabricated.",
+    "Medium reserves height for stable choice/apply/refresh controls; credit details are available in large and the app."
+  ],
+  "references": [
+    "https://learn.microsoft.com/en-us/windows/apps/design/widgets/widgets-design-fundamentals",
+    "https://learn.microsoft.com/en-us/windows/apps/design/widgets/widgets-interaction-design",
+    "https://learn.microsoft.com/en-us/windows/apps/design/widgets/widgets-picker-integration",
+    "https://adaptivecards.microsoft.com/?topic=TextBlock",
+    "https://adaptivecards.microsoft.com/?topic=Container"
+  ],
+  "results": [
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "busy",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 520,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 상태 확인",
+            "top": 472,
+            "bottom": 504,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-busy-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "busy",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 520,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 상태 확인",
+            "top": 472,
+            "bottom": 504,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-busy-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "credits-multiple",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 562,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 474,
+            "bottom": 506,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 514,
+            "bottom": 546,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 514,
+            "bottom": 546,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 514,
+            "bottom": 546,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-credits-multiple-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "credits-multiple",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 562,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 474,
+            "bottom": 506,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 514,
+            "bottom": 546,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 514,
+            "bottom": 546,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 514,
+            "bottom": 546,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-credits-multiple-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "credits-unknown",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 476,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 388,
+            "bottom": 420,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 428,
+            "bottom": 460,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 428,
+            "bottom": 460,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 428,
+            "bottom": 460,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-credits-unknown-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "credits-unknown",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 476,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 388,
+            "bottom": 420,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 428,
+            "bottom": 460,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 428,
+            "bottom": 460,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 428,
+            "bottom": 460,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-credits-unknown-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "credits-zero",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 484,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 396,
+            "bottom": 428,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 436,
+            "bottom": 468,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 436,
+            "bottom": 468,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 436,
+            "bottom": 468,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-credits-zero-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "credits-zero",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 484,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 396,
+            "bottom": 428,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 436,
+            "bottom": 468,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 436,
+            "bottom": 468,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 436,
+            "bottom": 468,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-credits-zero-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "error",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 518,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 430,
+            "bottom": 462,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 470,
+            "bottom": 502,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 470,
+            "bottom": 502,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 470,
+            "bottom": 502,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-error-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "error",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 518,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 430,
+            "bottom": 462,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 470,
+            "bottom": 502,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 470,
+            "bottom": 502,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 470,
+            "bottom": 502,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-error-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "noaccount",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 278,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 로그인",
+            "top": 230,
+            "bottom": 262,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-noaccount-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "noaccount",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 278,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 로그인",
+            "top": 230,
+            "bottom": 262,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-noaccount-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "normal",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 503,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 415,
+            "bottom": 447,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 455,
+            "bottom": 487,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 455,
+            "bottom": 487,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 455,
+            "bottom": 487,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-normal-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "normal",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 503,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 415,
+            "bottom": 447,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 455,
+            "bottom": 487,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 455,
+            "bottom": 487,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 455,
+            "bottom": 487,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-normal-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "stress",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 604,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 516,
+            "bottom": 548,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 556,
+            "bottom": 588,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 556,
+            "bottom": 588,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 556,
+            "bottom": 588,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-stress-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "stress",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 604,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 516,
+            "bottom": 548,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 556,
+            "bottom": 588,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 556,
+            "bottom": 588,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 556,
+            "bottom": 588,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-stress-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "weekly",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 484,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 396,
+            "bottom": 428,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 436,
+            "bottom": 468,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 436,
+            "bottom": 468,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 436,
+            "bottom": 468,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-weekly-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "large",
+      "scenario": "weekly",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 620,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 620,
+        "contentBottom": 484,
+        "contentLimit": 620,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 396,
+            "bottom": 428,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 436,
+            "bottom": 468,
+            "width": 123.671875,
+            "scrollWidth": 122,
+            "clientWidth": 122
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 436,
+            "bottom": 468,
+            "width": 74,
+            "scrollWidth": 72,
+            "clientWidth": 72
+          },
+          {
+            "type": "BUTTON",
+            "text": "앱 열기",
+            "top": 436,
+            "bottom": 468,
+            "width": 63.84375,
+            "scrollWidth": 62,
+            "clientWidth": 62
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "large-weekly-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "busy",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 287,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 상태 확인",
+            "top": 239,
+            "bottom": 271,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-busy-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "busy",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 287,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 상태 확인",
+            "top": 239,
+            "bottom": 271,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-busy-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "credits-multiple",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-credits-multiple-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "credits-multiple",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-credits-multiple-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "credits-unknown",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-credits-unknown-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "credits-unknown",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-credits-unknown-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "credits-zero",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-credits-zero-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "credits-zero",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-credits-zero-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "error",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-error-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "error",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-error-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "noaccount",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 258,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 로그인",
+            "top": 210,
+            "bottom": 242,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-noaccount-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "noaccount",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 258,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "BUTTON",
+            "text": "앱에서 로그인",
+            "top": 210,
+            "bottom": 242,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-noaccount-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "normal",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-normal-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "normal",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-normal-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "stress",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-stress-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "stress",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-stress-light.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "weekly",
+      "theme": "dark",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#202020",
+        "emphasis": "#2b3038",
+        "text": "#ffffff",
+        "subtle": "#bdbdbd",
+        "border": "#8a8a8a",
+        "control": "#333333",
+        "accent": "#60cdff",
+        "good": "#6ccb5f",
+        "warning": "#fce100",
+        "primaryText": "#001a24"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-weekly-dark.png"
+    },
+    {
+      "renderer": "AdaptiveCards JS 3.0.6",
+      "source": "WidgetTemplates.Render with synthetic state",
+      "size": "medium",
+      "scenario": "weekly",
+      "theme": "light",
+      "defaultFontPx": 14,
+      "metricFontPx": 28,
+      "attributionPx": 48,
+      "paddingPx": 16,
+      "width": 300,
+      "height": 304,
+      "semanticColorSimulation": {
+        "background": "#ffffff",
+        "emphasis": "#f3f5f7",
+        "text": "#1a1a1a",
+        "subtle": "#606060",
+        "border": "#8a8a8a",
+        "control": "#ffffff",
+        "accent": "#005fb8",
+        "good": "#0f6b3a",
+        "warning": "#825d00",
+        "primaryText": "#ffffff"
+      },
+      "transparentRoundedCorners": true,
+      "layout": {
+        "width": 300,
+        "height": 304,
+        "contentBottom": 293,
+        "contentLimit": 304,
+        "scrollWidth": 300,
+        "clientWidth": 300,
+        "controls": [
+          {
+            "type": "SELECT",
+            "text": "account choice",
+            "top": 205,
+            "bottom": 237,
+            "width": 268,
+            "scrollWidth": 266,
+            "clientWidth": 266
+          },
+          {
+            "type": "BUTTON",
+            "text": "모든 장치에 적용",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          },
+          {
+            "type": "BUTTON",
+            "text": "새로고침",
+            "top": 245,
+            "bottom": 277,
+            "width": 132,
+            "scrollWidth": 130,
+            "clientWidth": 130
+          }
+        ],
+        "imageCount": 0
+      },
+      "boardQa": false,
+      "screenshot": "medium-weekly-light.png"
+    }
+  ]
+}

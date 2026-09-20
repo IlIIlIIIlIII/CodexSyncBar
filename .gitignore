@@ -5,3 +5,15 @@ dist/
 tmp/
 .DS_Store
 *.zip
+
+# Windows build and local signing artifacts
+**/bin/
+**/obj/
+**/AppPackages/
+*.pfx
+*.cer
+*.msix
+*.msixbundle
+*.binlog
+**/TestResults/
+**/__pycache__/

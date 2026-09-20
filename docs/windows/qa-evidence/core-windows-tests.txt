@@ -1,0 +1,148 @@
+Native Windows VSTest result summary (derived from the recorded TRX)
+Source: youns_SUNGGULAPTOP_2026-09-19_15_59_40_net10.0.trx
+Total=144, passed=142, failed=0, executed=142, skipped=2 (UnitTestResult outcome=NotExecuted)
+
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.CancellationAfterApplyRollsBackWithIndependentCancellation
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.CommittedJournalNeverRollsBackOnRestart
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.CrashJournalRecoversAttemptedWriteAndRejectsChangedEndpoint
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.DisconnectAfterRemoteWriteRestoresAttemptedTargetsInReverseOrder
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.FailedRollbackPersistsForNextProcessAndBlocksNewSwitch
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.FailuresDoNotLeakHelperOutputIntoWidgetOrJournal
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.PreflightFailureNeverMutatesAnyTarget
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.PreflightsEveryTargetThenAppliesRemoteBeforeWindowsAndVerifiesAll
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.RevisionChangesWithTargetConfigurationAndMasksWidgetEmails
+Passed CodexSyncBar.Windows.Core.Tests.AccountSwitchTests.VerificationFailureRestoresWindowsThenRemoteTargets
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.ConcurrentCanonicalRotationIsNeverOverwrittenByOlderTemporaryGeneration
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.FailureBeforeRotationKeepsOriginalProfileAndRemovesDisposableCopy
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.MismatchedAccountCannotReplaceCanonicalOrActiveCredentials
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.RotationSurvivesFailureAfterServerHasAlreadyIssuedNewRefreshToken
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.StartupFinishesActiveAuthWriteAfterCanonicalRotationWasAlreadyCommitted
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.StartupRecoversRotatedCredentialsLeftByHardProcessExit
+Passed CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.SuccessfulValidatedRotationCommitsProfileAndActiveAuthTogether
+Passed CodexSyncBar.Windows.Core.Tests.AuthVaultTests.ChangedWeeklyAnchorConfigurationBypassesBackoffOnlyOnce
+Passed CodexSyncBar.Windows.Core.Tests.AuthVaultTests.ExplicitTestHomeCannotBeRedirectedByParentCodexEnvironment
+Passed CodexSyncBar.Windows.Core.Tests.AuthVaultTests.ImportMaterializesCompatibleActiveAndAccessOnlyCredentials
+Passed CodexSyncBar.Windows.Core.Tests.AuthVaultTests.LoginChildFilesInheritPrivateDirectoryPermissions
+Passed CodexSyncBar.Windows.Core.Tests.AuthVaultTests.PricingMatchesMainLongContextAndUnknownModelRules
+Passed CodexSyncBar.Windows.Core.Tests.AuthVaultTests.RollbackCopiesCanBeReadButStayProtectedOnWindows
+Passed CodexSyncBar.Windows.Core.Tests.CodexCliLocatorTests.CustomPathNpmShimKeepsPriority
+Passed CodexSyncBar.Windows.Core.Tests.CodexCliLocatorTests.ExistingGlobalNpmShimKeepsPriority
+Passed CodexSyncBar.Windows.Core.Tests.CodexCliLocatorTests.OtherPathExecutableRemainsFallbackWhenStandaloneIsAbsent
+Passed CodexSyncBar.Windows.Core.Tests.CodexCliLocatorTests.StandaloneCliIsPreferredToDesktopPackageExecutable
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.AnotherHomeOrLookalikePrefixIsNeverConfirmed(commandLine: "codex.exe app-server proxy --sock C:\\Users\\Alice"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.AnotherHomeOrLookalikePrefixIsNeverConfirmed(commandLine: "codex.exe app-server proxy --sock C:\\Users\\Alice"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.AnotherHomeOrLookalikePrefixIsNeverConfirmed(commandLine: "codex.exe app-server proxy --sock C:\\Users\\Alice"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.DefaultProxyOrAmbiguousPathRequiresReconnectionWithoutTermination(commandLine: "codex.exe app-server --listen unix://127.0.0.1")
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.DefaultProxyOrAmbiguousPathRequiresReconnectionWithoutTermination(commandLine: "codex.exe app-server proxy --sock %CODEX_HOME%/soc"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.DefaultProxyOrAmbiguousPathRequiresReconnectionWithoutTermination(commandLine: "codex.exe app-server proxy --sock C:\\Users\\Alice"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.DefaultProxyOrAmbiguousPathRequiresReconnectionWithoutTermination(commandLine: "codex.exe app-server proxy --sock relative/socket")
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.DefaultProxyOrAmbiguousPathRequiresReconnectionWithoutTermination(commandLine: "codex.exe app-server proxy")
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.ExplicitSocketWithinConfiguredHomeIsConfirmed(processName: "codex.exe", commandLine: "codex.exe app-server --listen unix:///C:/Users/Ali"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.ExplicitSocketWithinConfiguredHomeIsConfirmed(processName: "codex.exe", commandLine: "codex.exe app-server --listen=unix://C:/Users/Alic"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.ExplicitSocketWithinConfiguredHomeIsConfirmed(processName: "codex.exe", commandLine: "codex.exe app-server proxy --sock C:\\Users\\Alice"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.ExplicitSocketWithinConfiguredHomeIsConfirmed(processName: "codex.exe", commandLine: "codex.exe app-server proxy --sock=c:/users/alice/."···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.ExplicitSocketWithinConfiguredHomeIsConfirmed(processName: "node.exe", commandLine: "node.exe C:\\Tools\\codex.js app-server proxy --so"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.GeneralCliAndReadOnlyHelpAreNeverTargets(commandLine: "codex.exe -c \"text=app-server proxy --sock C:\\Us"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.GeneralCliAndReadOnlyHelpAreNeverTargets(commandLine: "codex.exe app-server --stdio")
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.GeneralCliAndReadOnlyHelpAreNeverTargets(commandLine: "codex.exe app-server proxy --sock C:\\Users\\Alice"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.GeneralCliAndReadOnlyHelpAreNeverTargets(commandLine: "codex.exe exec --model gpt-5")
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.GeneralCliAndReadOnlyHelpAreNeverTargets(commandLine: "codex.exe exec \"explain app-server proxy --sock C"···)
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.QuotedExecutableAndHomeWithSpacesUseTheActualArgumentBoundary
+Passed CodexSyncBar.Windows.Core.Tests.CodexProcessScopeTests.ShellWrapperCannotProveItsEntireProcessBelongsToOneAuthHome
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.CompletedLogoutConfigurationIsAcknowledgedBeforeLaterRelogin
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.DeviceResponseStartedBeforeSwitchCannotBecomeFreshAfterSwitchCompletes
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.FirstFailureReportsUnknownUsageAndOldWidgetConfigurationCannotSwitch
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.LegacyCompletedLogoutDoesNotReplayOverNewCredentials
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.NetworkFailurePreservesLastUsageAndNeverCopiesResponseBodyToWidget
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.OlderDeviceRequestCannotOverwriteANewerCompletedRequest
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.ResponseFromOldCredentialGenerationCannotOverwriteLatestState
+Passed CodexSyncBar.Windows.Core.Tests.ControllerUsageTests.RestartedAppCanDisplayThePersistedLastUsageWhileOffline
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.CodexCliLocatorPrefersTheWindowsCommandShim
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptArgumentsSurviveCmdEscaping
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptEnvironmentOverrideReachesTheChildProcess
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.CommandScriptStandardInputRoundTripsThroughNativeLaunch
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.ConfigurationStorePersistsTheMacCompatibleSchema
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.DeviceActivationIntentRollsBackAnEnabledConfiguration
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.DisabledDeviceCannotBeEnabledWithoutActivationFlow
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.DiscoverExistingAccountsRepairsEmailAfterInterruptedReplacement
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.DisplayOnlyDeviceEditsReuseCredentialNamespace
+NotExecuted CodexSyncBar.Windows.Core.Tests.CoreContractTests.ElevatedAdministratorOwnerIsAcceptedForPrivateFiles
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.EndpointChangeCannotSilentlyReuseStoredKeyPassphrase
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.InstalledCodexCommandAcceptsTheLoginHomeEnvironment
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.LoggedOutAccountRemainsAvailableForReauthentication
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.LoginImportReplacesTheActiveProfileAndLeavesNoTransaction
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.LoginSessionsAvoidPackagedLocalAppDataVirtualization
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.MenuTitlePreservesStatusSignalsAndLowQuotaWarning
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.MissingReservedProfileDoesNotBlockActiveProfileDiscovery
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.OnlyCodexAppServerCommandLinesAreRestartable
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.RemoteBootstrapJournalBindsArchiveToOneEndpoint
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.SelectedProfilePreferenceRoundTrips
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.UsageFormattingMatchesResetAndCreditExpiryContracts
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.UsagePayloadKeepsFiveHourAndWeeklyWindowsSeparated
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.WeeklyAnchorDecisionHonorsRetryAndFutureReset
+Passed CodexSyncBar.Windows.Core.Tests.CoreContractTests.WeeklyAnchorDecisionMatchesMacRetryAndDriftRules
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.BackgroundAndForegroundSettingsAreMutuallyExclusive
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.BackgroundLaunchDoesNotEnableDemoOrOpenSettings
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.DemoBackgroundUsesOnlyIsolatedQaRuntime
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.DemoCannotStartRealAccountLogin
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.DemoThemeCannotAffectProductionLaunch
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.DuplicatePreviewArgumentsAreRejected
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.InvalidLaunchArgumentIsRejected(argument: "--login-profile=-3")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.InvalidLaunchArgumentIsRejected(argument: "--login-profile=0")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.InvalidLaunchArgumentIsRejected(argument: "--login-profile=not-an-int")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.InvalidLaunchArgumentIsRejected(argument: "--readme-demo=popover")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.InvalidLaunchArgumentIsRejected(argument: "--readme-demo=unknown")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.InvalidLaunchArgumentIsRejected(argument: "--readme-output=/tmp/demo.png")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.LoginProfileRequiresAndPreservesPositiveId
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.LoginProfileTakesPriorityOverPreviewWindow
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.PreviewWindowUsesTheQaLaunchPath
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.ReadmeCaptureRequiresOneScreenAndAValidatedPngPath
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.ReadmeOutputRejectsMissingParentAndDirectoryCollision
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.ReadmeOutputRejectsRelativeAndNonPngPaths
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.ReadmeSettingsScreenIsSupported
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.SettingsActivationIsRecognized(argument: "--settings")
+Passed CodexSyncBar.Windows.Core.Tests.LaunchOptionTests.SettingsActivationIsRecognized(argument: "codexsyncbar://settings")
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.CancellationArrivingWithFinalReplyNeverImportsAuth
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.DuplicateAccountLoginPreservesExistingSlotAndDoesNotCreateNewSlot
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.MatchingFailureTerminatesAndDoesNotEchoServerError
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.MissingCompletionIdAndUnsolicitedValidationRepliesCannotImportCredentials
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.StaleOrMalformedCompletionCannotCompleteOrFailCurrentLogin(notification: "{\"loginId\":123,\"success\":true}")
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.StaleOrMalformedCompletionCannotCompleteOrFailCurrentLogin(notification: "{\"loginId\":\"old\",\"success\":false,\"error\":\"···)
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.StaleOrMalformedCompletionCannotCompleteOrFailCurrentLogin(notification: "{\"loginId\":\"old\",\"success\":true}")
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.StaleOrMalformedCompletionCannotCompleteOrFailCurrentLogin(notification: "{\"loginId\":null,\"success\":false}")
+Passed CodexSyncBar.Windows.Core.Tests.LoginProtocolTests.StaleOrMalformedCompletionCannotCompleteOrFailCurrentLogin(notification: "{\"success\":true}")
+Passed CodexSyncBar.Windows.Core.Tests.PrivateFileAclTests.NormalInheritedSystemAndAdministratorsReadersAreAccepted
+Passed CodexSyncBar.Windows.Core.Tests.PrivateFileAclTests.UnrelatedNonBroadPrincipalCannotReadPrivateAuth
+Passed CodexSyncBar.Windows.Core.Tests.TokenUsageTests.LocalHelperRebuildsThenAtomicallyUpdatesCacheOutsideVirtualizedAppData
+Passed CodexSyncBar.Windows.Core.Tests.TokenUsageTests.TokenSummaryAndPricingMatchSwiftContract
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ApplyActionRoundTripsRevisionAndSelection
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.BusyCardRemovesAccountMutationControls
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.BusyOrLoggedOutAccountsDoNotReachMutation(busy: False, login: True, code: "account_unavailable")
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.BusyOrLoggedOutAccountsDoNotReachMutation(busy: True, login: False, code: "busy")
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.CardHasExplicitApplyAndRefreshAndSafeData(large: False)
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.CardHasExplicitApplyAndRefreshAndSafeData(large: True)
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ClientDisconnectDoesNotCancelAnAcceptedMutation
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ConcurrentDuplicateRequestInvokesSwitchOnlyOnce
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.EmptyCardOpensLoginAndEmailAliasIsMasked
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.LargeCardShowsAllQuotasResetCreditsAndDevices
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.MalformedClientDoesNotStopPipeServer
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.MalformedWidgetActionsCannotTriggerSwitch(verb: "apply", data: "[]")
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.MalformedWidgetActionsCannotTriggerSwitch(verb: "apply", data: "{\"requestId\":\"aabbccddeeff00112233445566778899\"···)
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.MalformedWidgetActionsCannotTriggerSwitch(verb: "apply", data: "{}")
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.MalformedWidgetActionsCannotTriggerSwitch(verb: "executeShell", data: "{}")
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.PipeRoundTripsAndRejectsStaleConfiguration
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ProtocolRejectsLengthBeforeAllocatingPayload(size: -1)
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ProtocolRejectsLengthBeforeAllocatingPayload(size: 0)
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ProtocolRejectsLengthBeforeAllocatingPayload(size: 262145)
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ProtocolRejectsUnknownInputFields
+Passed CodexSyncBar.Windows.Core.Tests.WidgetContractTests.ServerErrorDoesNotExposeRawExceptionOrCredentials
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.BackgroundStatusNeverStartsStoppedDistro
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.CredentialFingerprintsMatchTheTwelveCharacterHelperProtocol
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.DiscoveryNormalizesWslOutputAndExcludesDocker
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.ExplicitApplyPreflightMayStartEnabledDistroUsingSeparateArguments
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.InvalidDistributionIsRejected(name: "--exec")
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.InvalidDistributionIsRejected(name: "Ubuntu\nexec")
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.InvalidDistributionIsRejected(name: "docker-desktop")
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.UninstalledDistributionCannotBeEnabled
+Passed CodexSyncBar.Windows.Core.Tests.WslDeviceTests.WslConfigurationIsSeparateFromSharedAccountConfiguration
+NotExecuted CodexSyncBar.Windows.Core.Tests.WslHelperIntegrationTests.RealHelperBootstrapsAccessOnlyAuthSwitchesAndRestoresWithoutTouchingHost

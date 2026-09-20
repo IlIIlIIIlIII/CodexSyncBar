@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-19",
+  "packageVersion": "1.0.0.5",
+  "environment": "Windows 11 x64, dark theme; WSL task using official computer-use plugin",
+  "captureMethod": "Actual Widgets Board visible in the screenshot returned for an Explorer window; Board itself was not returned as a targetable window",
+  "operator": "User opened the Board and pressed Add; agent inspected the official tool screenshots",
+  "catalog": {
+    "initialPickerEntryPresent": false,
+    "osAppExtensionPresent": true,
+    "widgetServiceAndBoardRestarted": true,
+    "packageChangedBetweenObservations": false,
+    "pickerEntryPresentAfterRestart": true,
+    "inference": "The running widget hosts retained earlier catalog state. Individual host responsibility was not isolated."
+  },
+  "mediumWidget": {
+    "added": true,
+    "actualBoardCardVisible": true,
+    "productionUsageVisible": true,
+    "accountEmailMasked": true,
+    "weeklyUsedPercentObserved": 56,
+    "sessionWindowReportedAsUnknown": true,
+    "updatedTimeVisible": true,
+    "resetTimeVisible": true,
+    "accountChoiceVisible": true,
+    "applyAndRefreshButtonsVisible": true,
+    "visibleControlsClipped": false
+  },
+  "notYetVerified": [
+    "Widget refresh action and large-size change",
+    "Switching between two real accounts through the widget",
+    "Actual user Windows, WSL and SSH mixed-target switch and recovery",
+    "Widget persistence and reconnect after the next package update",
+    "High contrast, screen reader, keyboard and 100/150/200 percent scale matrix"
+  ],
+  "privacy": "No account identifiers, authentication data or desktop screenshots are stored in this evidence file."
+}

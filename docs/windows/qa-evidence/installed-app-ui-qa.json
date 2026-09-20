@@ -1,0 +1,64 @@
+{
+  "recordedUtc": "2026-09-19T07:10:51.968344+00:00",
+  "packageVersion": "1.0.0.5",
+  "environment": "Windows 11 x64, official computer-use from the current WSL task",
+  "observations": [
+    {
+      "check": "installed app normal launch",
+      "result": "passed",
+      "evidence": "sky.launch_app returned a unique Codex SyncBar window; captured the actual installed app"
+    },
+    {
+      "check": "default window sizing",
+      "result": "passed on current display",
+      "evidence": "default capture changed from about841x594 logical pixels to1267x894; wide account/details layout visible"
+    },
+    {
+      "check": "horizontal clipping",
+      "result": "passed on current display",
+      "evidence": "v4 profile action and usage values clipped on right; v5 details start beside account list and card/right-hand values fit"
+    },
+    {
+      "check": "production usage refresh button",
+      "result": "passed",
+      "evidence": "actual click changed usage timestamp and Korean completion banner; read-only IPC shows fresh weekly usage and no login/error state"
+    },
+    {
+      "check": "production token aggregation cache",
+      "result": "passed",
+      "evidence": "v3 EXDEV shown in token card; v5 shows successful aggregation, nonzero tokens and requests,1of1 device reachable; cache file created outside virtualized AppData"
+    },
+    {
+      "check": "WSL management dialog",
+      "result": "passed read-only",
+      "evidence": "actual UI lists Ubuntu-26.04, running and not included; Escape closes dialog; installation/activation not requested"
+    },
+    {
+      "check": "close management window keeps runtime",
+      "result": "passed",
+      "evidence": "after close, sky.list_windows returns no SyncBar window; GetSnapshot still succeeds"
+    },
+    {
+      "check": "reopen existing background instance",
+      "result": "passed",
+      "evidence": "sky.launch_app restores same returned window id with account/usage intact"
+    },
+    {
+      "check": "WinUI accessibility tree",
+      "result": "not verified",
+      "evidence": "include_text:true returns null for SyncBar even though screenshot actions work; do not infer screen-reader support from source names"
+    },
+    {
+      "check": "Windows Widgets Board",
+      "result": "blocked in current automation",
+      "evidence": "WidgetBoard.exe is running and user reports visible Board, but sky.list_windows/list_apps do not return a targetable Board; taskbar coordinate attempts do not establish open Board"
+    },
+    {
+      "check": "real Windows/WSL/SSH account switch",
+      "result": "not run",
+      "evidence": "one real account, WSL/SSH targets not activated; only synthetic/isolated switch tests have run"
+    }
+  ],
+  "screenshots": "Official get_window_state captures displayed in the task conversation; no account identifiers copied into this evidence file.",
+  "scope": "Does not claim complete DPI/theme/keyboard/high-contrast/Explorer/suspend/Widgets Board QA."
+}

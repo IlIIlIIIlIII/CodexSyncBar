@@ -1,0 +1,14 @@
+[
+    {
+        "Architecture":  "x64",
+        "Status":  "Valid",
+        "Sha256":  "c6239ca38be2a0ee9939d570e2fb59b4f6c6a8dab3c307446e05e0b0bb7c341f",
+        "SignerThumbprint":  "F6196E3D681794C3AD758C09B6931F6A1F177CF3"
+    },
+    {
+        "Architecture":  "arm64",
+        "Status":  "Valid",
+        "Sha256":  "bf3b08847385dad8adbf048ac4fe6b9bb6c09acc57f27766022aeaa273cefd52",
+        "SignerThumbprint":  "F6196E3D681794C3AD758C09B6931F6A1F177CF3"
+    }
+]

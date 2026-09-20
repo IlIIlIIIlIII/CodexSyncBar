@@ -1,0 +1,144 @@
+{
+  "master": "Resources/WindowsIcon/SyncBarIcon.png",
+  "generation": "built-in image_gen",
+  "icoSizes": [
+    [
+      16,
+      16
+    ],
+    [
+      20,
+      20
+    ],
+    [
+      24,
+      24
+    ],
+    [
+      32,
+      32
+    ],
+    [
+      40,
+      40
+    ],
+    [
+      48,
+      48
+    ],
+    [
+      64,
+      64
+    ],
+    [
+      128,
+      128
+    ],
+    [
+      256,
+      256
+    ]
+  ],
+  "pngAssets": [
+    {
+      "file": "LockScreenLogo.scale-200.png",
+      "size": [
+        48,
+        48
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "SplashScreen.scale-200.png",
+      "size": [
+        1240,
+        600
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "Square150x150Logo.scale-200.png",
+      "size": [
+        300,
+        300
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "Square44x44Logo.scale-200.png",
+      "size": [
+        88,
+        88
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "Square44x44Logo.targetsize-24_altform-unplated.png",
+      "size": [
+        24,
+        24
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "Square44x44Logo.targetsize-48_altform-lightunplated.png",
+      "size": [
+        48,
+        48
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "StoreLogo.png",
+      "size": [
+        50,
+        50
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "SyncBarIcon.png",
+      "size": [
+        64,
+        64
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    },
+    {
+      "file": "Wide310x150Logo.scale-200.png",
+      "size": [
+        620,
+        300
+      ],
+      "alphaExtrema": [
+        0,
+        255
+      ]
+    }
+  ],
+  "resamplingOnly": true
+}

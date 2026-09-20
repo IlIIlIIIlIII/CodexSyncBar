@@ -1,0 +1,11 @@
+{
+  "StartedAt": "2026-09-19T06:36:01.2990187Z",
+  "ExplicitEnvironmentBlock": true,
+  "UseShellExecute": false,
+  "OverrideScope": "New app process only",
+  "ExpectedOverride": "\\\\wsl.localhost\\Ubuntu-26.04\\home\\sunggu\\.local\\lib\\codex-wsl-node-repl\\bridge.py",
+  "EnvironmentVerified": false,
+  "ConfigurationVerified": false,
+  "LaunchedProcessId": 33860,
+  "DesktopProcessId": 49104
+}

@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-19",
+  "installedVersion": "1.0.0.10",
+  "method": "Official computer-use @oai/sky with installed app",
+  "windowPolicy": {
+    "maximumOuterSizeDip": [
+      920,
+      940
+    ],
+    "minimumOuterSizeDip": [
+      740,
+      600
+    ],
+    "clippedToMonitorWorkArea": true,
+    "maximizable": false,
+    "resizable": true
+  },
+  "observed": {
+    "initialCaptureLogicalSize": [
+      908,
+      934
+    ],
+    "afterTitleBarDoubleClickLogicalSize": [
+      908,
+      934
+    ],
+    "systemMenuMaximizeDisabled": true,
+    "afterResizeBelowMinimumWidthLogicalSize": [
+      728,
+      934
+    ],
+    "leftAccountPaneAtBothWidths": true,
+    "longAliasAndEmailSingleLineEllipsis": true,
+    "toolbarEditRefreshSettingsEqualSizeAndAligned": true,
+    "nativeRoundedButtonStyle": true,
+    "applyButtonReflowsOnlyWithinDetailPane": true,
+    "aliasDialogOpenedAtMinimumWidth": true,
+    "aliasDialogCancelledWithoutSaving": true,
+    "appExitAndRelaunchVerified": true,
+    "relaunchCaptureLogicalSize": [
+      908,
+      934
+    ],
+    "accountAndUsagePreservedOnRelaunch": true,
+    "leftOpenAtDefaultBoundedSize": true,
+    "captureSizeNote": "Computer-use captures omit parts of native window borders; these are reported logical screenshot sizes, not physical outer window dimensions."
+  },
+  "privacy": {
+    "authenticationFilesModifiedByQa": false,
+    "aliasOrDeviceSettingsChangedByQa": false,
+    "productionScreenshotsSavedToRepository": false
+  },
+  "remaining": [
+    "Minimum-height drag limit was not completed; minimum-width limit was observed.",
+    "Dragging beyond the maximum size and transitions between monitors with different DPI were not exercised.",
+    "Full high-contrast, screen-reader and OS-scale matrix remain outside this focused layout QA.",
+    "No new actual Widgets Board interaction QA; widget implementation unchanged from v8."
+  ]
+}

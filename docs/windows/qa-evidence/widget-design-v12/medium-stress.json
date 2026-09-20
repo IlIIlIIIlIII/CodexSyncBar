@@ -1,0 +1,184 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "lang": "ko",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "현재 · 장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장",
+      "size": "Default",
+      "wrap": true,
+      "weight": "Bolder",
+      "isSubtle": false,
+      "spacing": "None",
+      "color": "Default",
+      "maxLines": 1
+    },
+    {
+      "type": "ColumnSet",
+      "spacing": "Small",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "stretch",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "5시간 남음",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "8%",
+              "size": "Medium",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Warning",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "59분 후 초기화",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "Small",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "09.19 (토) 22:53",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": "stretch",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "주간 남음",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "58%",
+              "size": "Medium",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Accent",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "3일 23시간 후 초기화",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "Small",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "09.23 (수) 21:53",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "09/19 21:53 갱신 · 연결 확인 필요",
+      "size": "Small",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": false,
+      "spacing": "Small",
+      "color": "Warning",
+      "maxLines": 1
+    },
+    {
+      "type": "Input.ChoiceSet",
+      "id": "profileId",
+      "label": "적용할 계정",
+      "style": "compact",
+      "isMultiSelect": false,
+      "choices": [
+        {
+          "title": "장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장",
+          "value": "1"
+        },
+        {
+          "title": "장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장장",
+          "value": "2"
+        }
+      ],
+      "value": "1",
+      "spacing": "Small",
+      "separator": false
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "모두 적용",
+      "verb": "apply",
+      "tooltip": "선택한 계정을 모든 장치에 적용",
+      "style": "positive",
+      "associatedInputs": "auto",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "0d8e0ecef3f342568bd22a284709f699"
+      }
+    },
+    {
+      "type": "Action.Execute",
+      "title": "새로고침",
+      "verb": "refresh",
+      "tooltip": "새로고침",
+      "style": "default",
+      "associatedInputs": "none",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "99646f0f12ea44c6b4516a1ea20b1988"
+      }
+    }
+  ]
+}

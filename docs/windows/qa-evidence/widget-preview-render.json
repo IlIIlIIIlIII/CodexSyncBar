@@ -1,0 +1,43 @@
+{
+  "source": "WidgetTemplates.Render(DemoDashboardRuntime, large:false)",
+  "renderer": "AdaptiveCards JS 3.0.6 with a fresh headless Chromium page",
+  "width": 300,
+  "height": 304,
+  "cornerAlpha": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "centerAlpha": 255,
+  "sha256": "52058df47f9c6dc87597466f46985cbde0732e50061969c9c84331c2cb1f7984",
+  "layout": {
+    "contentBottom": 261.25,
+    "contentLimit": 291,
+    "scrollWidth": 298,
+    "clientWidth": 298,
+    "overflow": false
+  },
+  "syntheticFixture": true,
+  "productionAuthRead": false,
+  "widgetsBoardScreenshot": false,
+  "sourceAssetUpdated": true,
+  "installedPackageAtCapture": "1.0.0.5 (previous preview asset)",
+  "reference": "https://learn.microsoft.com/en-us/windows/apps/design/widgets/widgets-picker-integration",
+  "hostFontDefaultPixels": 14,
+  "hostSpacingSmallPixels": 8,
+  "hostSpacingDefaultPixels": 12,
+  "stressCase": {
+    "aliasLength": 70,
+    "aliasCharacterSet": "Korean",
+    "offlineStatusLength": 180,
+    "beforeFixContentBottom": 529.625,
+    "afterFixContentBottom": 280.625,
+    "contentLimit": 291,
+    "overflow": false,
+    "applyRefreshAndAppActionsVisible": true,
+    "boardDpiVerification": false
+  },
+  "historicalDesign": "Version 1.0.0.6 preview and layout validation",
+  "supersededBy": "widget-design-v7/results.json"
+}

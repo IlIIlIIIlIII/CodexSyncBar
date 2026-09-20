@@ -1,0 +1,133 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "lang": "ko",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "현재 · 개인 계정",
+      "size": "Default",
+      "wrap": true,
+      "weight": "Bolder",
+      "isSubtle": false,
+      "spacing": "None",
+      "color": "Default",
+      "maxLines": 1
+    },
+    {
+      "type": "ColumnSet",
+      "spacing": "Small",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "stretch",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "주간 남음",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "58%",
+              "size": "Medium",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Accent",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "3일 23시간 후 초기화",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "Small",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "09.23 (수) 21:53",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "09/19 21:53 갱신 · 최신 사용량",
+      "size": "Small",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": true,
+      "spacing": "Small",
+      "color": "Default",
+      "maxLines": 1
+    },
+    {
+      "type": "Input.ChoiceSet",
+      "id": "profileId",
+      "label": "적용할 계정",
+      "style": "compact",
+      "isMultiSelect": false,
+      "choices": [
+        {
+          "title": "개인 계정",
+          "value": "1"
+        },
+        {
+          "title": "작업용 계정 · 긴 별칭 표시를 확인하는 데모",
+          "value": "2"
+        }
+      ],
+      "value": "1",
+      "spacing": "Small",
+      "separator": false
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "모두 적용",
+      "verb": "apply",
+      "tooltip": "선택한 계정을 모든 장치에 적용",
+      "style": "positive",
+      "associatedInputs": "auto",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "4697b8596abe4d228fe20ee0eb11a859"
+      }
+    },
+    {
+      "type": "Action.Execute",
+      "title": "새로고침",
+      "verb": "refresh",
+      "tooltip": "새로고침",
+      "style": "default",
+      "associatedInputs": "none",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "f8450eaa66a840a1ab9a4c5f7a896c99"
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "publisher": "CN=CodexSyncBar",
+  "certificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+  "artifacts": [
+    {
+      "file": "CodexSyncBar-1.0.0.5-x64.msix",
+      "version": "1.0.0.5",
+      "architecture": "x64",
+      "demoWidgetProvider": false,
+      "bytes": 224298191,
+      "sha256": "498f3001504b3be7b0738041fffe957357611884d2c3741d5f3c3d67f10242e0",
+      "zipCrcVerified": true,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0x8664",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0x8664",
+        "Runtime/node.exe": "0x8664"
+      },
+      "authenticodeSignature": "Valid"
+    },
+    {
+      "file": "CodexSyncBar-1.0.0.5-arm64.msix",
+      "version": "1.0.0.5",
+      "architecture": "arm64",
+      "demoWidgetProvider": false,
+      "bytes": 214559509,
+      "sha256": "e69cf04adf633f0915b9293f17a09a94ce8e19ad2e596c878d35e2ca0e3632ec",
+      "zipCrcVerified": true,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0xaa64",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0xaa64",
+        "Runtime/node.exe": "0xaa64"
+      },
+      "authenticodeSignature": "Valid"
+    },
+    {
+      "file": "CodexSyncBar.Development.cer",
+      "bytes": 784,
+      "sha256": "33e4e5fccef18ee648f06fa63f050991c364f984713f5e586aa8e5254acd146a",
+      "publicCertificateOnly": true
+    }
+  ],
+  "coreTests": {
+    "passed": 142,
+    "skipped": 2,
+    "failed": 0,
+    "total": 144
+  },
+  "packagingWarning": "mspdbcmf.exe is absent; optional separate symbols package was not generated. MSIX generation/signing succeeded.",
+  "arm64RuntimeQa": "Build and PE architecture verified only; this PC is x64."
+}

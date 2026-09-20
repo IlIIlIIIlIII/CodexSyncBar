@@ -1,0 +1,50 @@
+{
+  "version": "1.0.0.7",
+  "date": "2026-09-19",
+  "platform": "Windows 11 x64",
+  "automation": "Official computer-use @oai/sky from the WSL task",
+  "installedMainWindow": {
+    "launched": true,
+    "systemDarkThemeObserved": true,
+    "accountSidebarVisible": true,
+    "selectedAndAppliedAccountLabelsDistinct": true,
+    "weeklyRemainingPercentAndBarVisible": true,
+    "missingSessionQuotaExplicit": true,
+    "sparkQuotaAbsent": true,
+    "settingsOpenedAndClosed": true,
+    "settingsShowOnlySessionAndWeeklyQuota": true,
+    "f5RefreshUpdatedTimeAndUsage": true,
+    "existingAccountPreserved": true,
+    "compactLayoutVerified": false,
+    "compactLayoutNote": "An attempted border drag did not resize the window; no compact-layout pass is claimed."
+  },
+  "trayFixture": {
+    "source": "Installed v7 application with isolated in-memory demo and RenderTargetBitmap",
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "files": [
+      "tray-light.png",
+      "tray-dark.png"
+    ],
+    "productionAuthReadOrWritten": false,
+    "fixedApplyFooterVisible": true,
+    "note": "Layout/theme evidence; progress bars can be captured during their initial value animation. Not an Explorer/edge-placement test."
+  },
+  "widgets": {
+    "actualBoardV7Verified": false,
+    "reason": "The board is not a targetable window returned by computer-use; current passive Explorer capture did not contain it.",
+    "cardRendererMatrix": "../widget-design-v7/results.json",
+    "actualBoardPreviousVersion": "../widgets-board-ui-qa.json"
+  },
+  "notVerified": [
+    "Full high-contrast and screen-reader matrix",
+    "100/150/200 percent OS DPI matrix",
+    "Mixed-monitor tray movement",
+    "Actual v7 widget board resize and account apply",
+    "Real Windows/WSL/SSH mixed account switch",
+    "ARM64 hardware execution"
+  ],
+  "screenshotsOfProductionAccountSaved": false
+}

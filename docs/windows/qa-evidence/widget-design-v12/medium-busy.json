@@ -1,0 +1,174 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "lang": "ko",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "현재 · 개인 계정",
+      "size": "Default",
+      "wrap": true,
+      "weight": "Bolder",
+      "isSubtle": false,
+      "spacing": "None",
+      "color": "Default",
+      "maxLines": 1
+    },
+    {
+      "type": "ColumnSet",
+      "spacing": "Small",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "stretch",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "5시간 남음",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "72%",
+              "size": "Medium",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Good",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "2시간 59분 후 초기화",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "Small",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "09.20 (일) 00:53",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        },
+        {
+          "type": "Column",
+          "width": "stretch",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "주간 남음",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "58%",
+              "size": "Medium",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Accent",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "3일 23시간 후 초기화",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "Small",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "09.23 (수) 21:53",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "09/19 21:53 갱신 · 계정 적용 중",
+      "size": "Small",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": false,
+      "spacing": "Small",
+      "color": "Accent",
+      "maxLines": 1
+    },
+    {
+      "type": "TextBlock",
+      "text": "모든 장치에 적용하고 있어요",
+      "size": "Default",
+      "wrap": true,
+      "weight": "Bolder",
+      "isSubtle": false,
+      "spacing": "Medium",
+      "color": "Default",
+      "maxLines": 1
+    },
+    {
+      "type": "TextBlock",
+      "text": "완료 상태를 확인할 때까지 잠시 기다려 주세요.",
+      "size": "Small",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": true,
+      "spacing": "Small",
+      "color": "Default",
+      "maxLines": 2
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "앱에서 상태 확인",
+      "verb": "settings",
+      "tooltip": "앱에서 상태 확인",
+      "style": "default",
+      "associatedInputs": "none",
+      "data": {
+        "configurationRevision": "demo-v1",
+        "requestId": "2578909ad5054f31a61d7f77c219c18c"
+      }
+    }
+  ]
+}

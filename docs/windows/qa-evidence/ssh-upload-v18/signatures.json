@@ -1,0 +1,10 @@
+[
+  {
+    "Package": "CodexSyncBar.Windows_1.0.0.18_x64.msix",
+    "Status": "Valid"
+  },
+  {
+    "Package": "CodexSyncBar.Windows_1.0.0.18_arm64.msix",
+    "Status": "Valid"
+  }
+]

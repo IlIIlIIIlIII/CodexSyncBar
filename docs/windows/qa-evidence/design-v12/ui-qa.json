@@ -1,0 +1,7 @@
+{
+  "actualUiQa": false,
+  "tool": "mcp__node_repl__js",
+  "error": "codex/sandbox-state-meta: sandboxCwd is not a local file URI: file:///home/sunggu/Projects/Personal/CodexSyncBar",
+  "syntheticWidgetRenders": 72,
+  "actualUserV11ScreenshotsUsedForDiagnosis": true
+}

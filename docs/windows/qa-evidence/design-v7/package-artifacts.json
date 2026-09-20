@@ -1,0 +1,120 @@
+{
+  "verifiedAtUtc": "2026-09-19T08:28:13.494638+00:00",
+  "version": "1.0.0.7",
+  "publisher": "CN=CodexSyncBar",
+  "certificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+  "artifacts": [
+    {
+      "file": "CodexSyncBar-1.0.0.7-x64.msix",
+      "version": "1.0.0.7",
+      "architecture": "x64",
+      "bytes": 224239842,
+      "sha256": "832f1fb7f9477f448b710470f9705f1aa7122d78f061ceaa866fb97dacd5453c",
+      "zipCrcVerified": true,
+      "zipEntriesVerified": 1060,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0x8664",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0x8664",
+        "Runtime/node.exe": "0x8664"
+      },
+      "manifestRegistration": {
+        "widgetAppExtension": "CodexSyncBar.Widgets",
+        "widgetDefinition": "CodexSyncBar.Usage",
+        "comClass": "D946A8F4-089F-4FD3-AF58-372F5033415D",
+        "sizes": [
+          "large",
+          "medium"
+        ],
+        "startupTaskPresent": true
+      },
+      "packagedPreview": {
+        "width": 300,
+        "height": 304,
+        "sha256": "93cc04d20af908f739d5b3a633c579e0a466930e94938c96985852461edeba48",
+        "matchesSource": true
+      },
+      "sharedCorePayloadIdentical": true,
+      "authenticodeSignature": "Valid",
+      "signatureVerificationMethod": "Windows PowerShell Get-AuthenticodeSignature on source MSIX; SHA-256 equality verified after copying",
+      "signerCertificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "copiedArtifactSha256Verified": true
+    },
+    {
+      "file": "CodexSyncBar-1.0.0.7-arm64.msix",
+      "version": "1.0.0.7",
+      "architecture": "arm64",
+      "bytes": 214501056,
+      "sha256": "9aa92ae8b6d902d0ed90c20ae35944a0f5626bda29b0d52ed56d19eea0026620",
+      "zipCrcVerified": true,
+      "zipEntriesVerified": 1052,
+      "requiredPayloadVerified": true,
+      "executableMachines": {
+        "CodexSyncBar.Windows.exe": "0xaa64",
+        "Widgets/CodexSyncBar.Windows.Widgets.exe": "0xaa64",
+        "Runtime/node.exe": "0xaa64"
+      },
+      "manifestRegistration": {
+        "widgetAppExtension": "CodexSyncBar.Widgets",
+        "widgetDefinition": "CodexSyncBar.Usage",
+        "comClass": "D946A8F4-089F-4FD3-AF58-372F5033415D",
+        "sizes": [
+          "large",
+          "medium"
+        ],
+        "startupTaskPresent": true
+      },
+      "packagedPreview": {
+        "width": 300,
+        "height": 304,
+        "sha256": "93cc04d20af908f739d5b3a633c579e0a466930e94938c96985852461edeba48",
+        "matchesSource": true
+      },
+      "sharedCorePayloadIdentical": true,
+      "authenticodeSignature": "Valid",
+      "signatureVerificationMethod": "Windows PowerShell Get-AuthenticodeSignature on source MSIX; SHA-256 equality verified after copying",
+      "signerCertificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "copiedArtifactSha256Verified": true
+    },
+    {
+      "file": "CodexSyncBar.Development.cer",
+      "bytes": 784,
+      "sha256": "33e4e5fccef18ee648f06fa63f050991c364f984713f5e586aa8e5254acd146a",
+      "certificateThumbprint": "F6196E3D681794C3AD758C09B6931F6A1F177CF3",
+      "publicCertificateOnly": true,
+      "existingCertificatePreserved": true,
+      "matchesBothPackageSigners": true
+    }
+  ],
+  "requiredPayloadPaths": [
+    "AppxManifest.xml",
+    "AppxSignature.p7x",
+    "AppxBlockMap.xml",
+    "[Content_Types].xml",
+    "CodexSyncBar.Windows.exe",
+    "CodexSyncBar.Windows.dll",
+    "CodexSyncBar.Windows.Core.dll",
+    "CodexSyncBar.Windows.runtimeconfig.json",
+    "CodexSyncBar.Windows.deps.json",
+    "Widgets/CodexSyncBar.Windows.Widgets.exe",
+    "Widgets/CodexSyncBar.Windows.Widgets.dll",
+    "Widgets/CodexSyncBar.Windows.Core.dll",
+    "Widgets/CodexSyncBar.Windows.Widgets.runtimeconfig.json",
+    "Widgets/CodexSyncBar.Windows.Widgets.deps.json",
+    "Runtime/node.exe",
+    "Runtime/gpt-switch",
+    "Runtime/usage-summary.mjs",
+    "Runtime/codex-syncbar-askpass",
+    "Public/README.txt",
+    "Assets/WidgetPreview.png",
+    "Assets/StoreLogo.png",
+    "Assets/AppIcon.ico"
+  ],
+  "result": "passed",
+  "privateKeyAccessed": false,
+  "scope": "Read package contents and public certificate; validate CRC, manifest, payload, native PE architecture and Windows Authenticode; copy identical MSIX files into dist/windows.",
+  "limits": [
+    "Package validation does not establish actual app or Widgets Board UI behavior.",
+    "ARM64 runtime QA was not performed on this x64 PC."
+  ]
+}

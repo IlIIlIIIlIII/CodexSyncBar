@@ -41,6 +41,10 @@ codex_app_servers_run_version() { [ "${TEST_RECONNECTED:-0}" = 1 ]; }
 sleep() { :; }
 
 fixture
+info=$(node_codex_info)
+[[ "$(printf '%s' "$info" | jq -r .manager)" == npm ]]
+[[ "$(printf '%s' "$info" | jq -r .version)" == 1.0.0 ]]
+[ ! -s "$TEST_EVENTS" ]
 output=$(node_update_codex)
 [[ "$output" == *'before=1.0.0 after=2.0.0 manager=npm restart=not-running'* ]]
 [[ "$(tail -1 "$TEST_EVENTS")" == stop ]]

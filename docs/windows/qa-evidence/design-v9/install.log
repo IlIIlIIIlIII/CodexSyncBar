@@ -1,0 +1,13 @@
+Add-AppxPackage : 배포에 실패했습니다. HRESULT: 0x80073CFB, 제공된 패키지가 이미 설치되어 있으므로 패키지 다시 설치가
+차단되었습니다. 자세한 내용은 AppXDeployment-Server 이벤트 로그를 확인하십시오.
+14769529-7449-442E-89BB-30402D814A1D_1.0.0.9_x64__rz4mdry80vfem 패키지의 배포가 차단되었습니다. 제공된 패키지와 이미 설
+치된 패키지가 ID는 같지만 내용이 다르기 때문입니다. 설치할 패키지의 버전 번호를 높이거나, 시스템에서 모든 사용자에 대해
+ 이전 패키지를 제거한 후 이 패키지를 설치하십시오.
+참고: 추가 정보에 대해서는 이벤트 로그에서 [ActivityId] 5f584d71-47af-0017-e9f8-fe5faf47dd01을(를) 찾아보거나 명령줄 Ge
+t-AppPackageLog -ActivityID 5f584d71-47af-0017-e9f8-fe5faf47dd01을(를) 사용하십시오.
+위치 C:\Users\youns\AppData\Local\CodexSyncBarBuild\package-check\Scripts\Windows\install.ps1:25 문자:1
++ Add-AppxPackage -Path $PackagePath -ForceUpdateFromAnyVersion:$ForceU ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ResourceExists: (C:\Users\youns\....0.0.9_x64.msix:String) [Add-AppxPackage], PSInvalidO
+   perationException
+    + FullyQualifiedErrorId : DeploymentError,Microsoft.Windows.Appx.PackageManager.Commands.AddAppxPackageCommand

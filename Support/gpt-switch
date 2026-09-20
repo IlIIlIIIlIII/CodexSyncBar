@@ -1820,6 +1820,27 @@ codex_app_servers_run_version() {
   [ "$count" -gt 0 ]
 }
 
+node_codex_info() {
+  local cli="" resolved="" manager=unknown version=""
+  export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"
+  if ! command -v codex >/dev/null 2>&1 && [ -s "$HOME/.nvm/nvm.sh" ]; then
+    set +u; . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; set -u
+  fi
+  cli=$(command -v codex) || true
+  if [ -n "$cli" ]; then
+    resolved=$(codex_real_path "$cli") || true
+    version=$(codex_cli_version "$cli") || true
+    case "$resolved" in
+      */lib/node_modules/@openai/codex/*) manager=npm ;;
+      */Caskroom/codex/*) manager=brew-cask ;;
+      */Cellar/codex/*) manager=brew-formula ;;
+      "$CODEX_DIR"/packages/standalone/*) manager=standalone ;;
+    esac
+  fi
+  jq -n --arg version "$version" --arg path "$cli" --arg manager "$manager" \
+    '{version:$version,path:$path,manager:$manager,canUpdate:($manager != "unknown"),notice:(if $path == "" then "Codex CLI가 설치되지 않았습니다. 원격 장치에서 먼저 설치해 주세요." elif $manager == "unknown" then "설치 방식을 확인할 수 없습니다. 기존 설치 도구로 업데이트해 주세요." else "" end)}'
+}
+
 node_update_codex() {
   local cli resolved npm_bin npm_root standalone_root manager before after stopped attempts
   local installer="" restart="not-running"
@@ -4260,6 +4281,7 @@ node_main() {
     verify) [ "$#" -eq 1 ] || die "node verify requires a profile"; node_verify "$1" ;;
     status) [ "$#" -eq 0 ] || die "node status takes no arguments"; node_status ;;
     stop-clients) [ "$#" -eq 0 ] || die "node stop-clients takes no arguments"; node_stop_clients ;;
+    codex-info) [ "$#" -eq 0 ] || die "node codex-info takes no arguments"; node_codex_info ;;
     update-codex) [ "$#" -eq 0 ] || die "node update-codex takes no arguments"; node_update_codex ;;
     profile-map) [ "$#" -eq 0 ] || die "node profile-map takes no arguments"; node_profile_map ;;
     swap-profiles) [ "$#" -eq 0 ] || die "node swap-profiles takes no arguments"; node_swap_profiles ;;

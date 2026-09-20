@@ -1,0 +1,14 @@
+{
+  "Scenario": "Chromium Explorer token / NULL environment",
+  "ParentKeyAbsent": true,
+  "UserEnvironmentRestored": true,
+  "NoPrivilegesEnabled": true,
+  "Launch": {
+    "Stage": "CreateProcessWithTokenW",
+    "Started": false,
+    "Win32Error": 1314,
+    "SameUser": true,
+    "ProcessId": 0,
+    "Exited": false
+  }
+}

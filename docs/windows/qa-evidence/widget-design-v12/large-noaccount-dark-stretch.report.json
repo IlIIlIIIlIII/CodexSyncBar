@@ -1,0 +1,50 @@
+{
+  "renderer": "AdaptiveCards JS 3.0.6",
+  "source": "WidgetTemplates.Render with synthetic state",
+  "actionAlignment": "stretch",
+  "size": "large",
+  "scenario": "noaccount",
+  "theme": "dark",
+  "defaultFontPx": 14,
+  "metricFontPx": 28,
+  "attributionPx": 48,
+  "paddingPx": 16,
+  "width": 300,
+  "height": 620,
+  "semanticColorSimulation": {
+    "background": "#202020",
+    "emphasis": "#2b3038",
+    "text": "#ffffff",
+    "subtle": "#bdbdbd",
+    "border": "#8a8a8a",
+    "control": "#333333",
+    "accent": "#60cdff",
+    "good": "#6ccb5f",
+    "warning": "#fce100",
+    "primaryText": "#001a24"
+  },
+  "transparentRoundedCorners": true,
+  "layout": {
+    "width": 300,
+    "height": 620,
+    "contentBottom": 278,
+    "contentLimit": 620,
+    "scrollWidth": 300,
+    "clientWidth": 300,
+    "controls": [
+      {
+        "type": "BUTTON",
+        "text": "앱에서 로그인",
+        "top": 230,
+        "bottom": 262,
+        "left": 16,
+        "right": 284,
+        "width": 268,
+        "scrollWidth": 266,
+        "clientWidth": 266
+      }
+    ],
+    "imageCount": 0
+  },
+  "boardQa": false
+}

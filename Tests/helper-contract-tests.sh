@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+file_mode() {
+  case "$(uname -s)" in
+    Darwin) stat -f '%Lp' "$1" ;;
+    *) stat -c '%a' "$1" ;;
+  esac
+}
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 HELPER_REPOSITORY_SOURCE="$ROOT/Support/gpt-switch"
 ASKPASS_REPOSITORY_SOURCE="$ROOT/Support/codex-syncbar-askpass"
@@ -617,8 +624,8 @@ printf '%s\n' "$bootstrap_output" | grep -F 'device=staging-node result=ok activ
 cmp -s "$HELPER" "$BOOTSTRAP_REMOTE_HOME/.local/bin/gpt-switch"
 cmp -s "$FAKE_ASKPASS" "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/codex-syncbar-askpass"
 cmp -s "$USAGE_SOURCE" "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/usage-summary.mjs"
-[ "$(stat -f '%Lp' "$BOOTSTRAP_REMOTE_HOME/.local/bin/gpt-switch")" = 755 ]
-[ "$(stat -f '%Lp' "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/codex-syncbar-askpass")" = 700 ]
+[ "$(file_mode "$BOOTSTRAP_REMOTE_HOME/.local/bin/gpt-switch")" = 755 ]
+[ "$(file_mode "$BOOTSTRAP_REMOTE_HOME/.local/lib/gpt-switch/codex-syncbar-askpass")" = 700 ]
 [ "$(cat "$BOOTSTRAP_REMOTE_HOME/.local/share/gpt-switch/current")" = 3 ]
 for profile in 1 2 3; do
   jq -e '.tokens.refresh_token == ""' \
@@ -634,7 +641,7 @@ bootstrap_tree_manifest() {
       .local/share/gpt-switch .codex/auth.json -type f -exec shasum -a 256 {} + 2>/dev/null | sort
     find .local/bin/gpt-switch .local/lib/gpt-switch/codex-syncbar-askpass .local/lib/gpt-switch/usage-summary.mjs \
       .local/share/gpt-switch .codex/auth.json \( -type f -o -type d \) \
-      -exec stat -f '%N %Lp' {} + 2>/dev/null | sort
+      -exec bash -c 'for f do case "$(uname -s)" in Darwin) stat -f "%N %Lp" "$f";; *) stat -c "%n %a" "$f";; esac; done' _ {} + 2>/dev/null | sort
   )
 }
 bootstrap_before_failure=$(bootstrap_tree_manifest)
@@ -670,7 +677,7 @@ fi
 bootstrap_after_corrupt_restore=$(bootstrap_tree_manifest)
 [ "$bootstrap_after_corrupt_restore" = "$bootstrap_before_corrupt_restore" ]
 [ -f "$staging_recovery" ]
-[ "$(stat -f '%Lp' "$staging_recovery")" = 600 ]
+[ "$(file_mode "$staging_recovery")" = 600 ]
 rm -f "$staging_recovery"
 
 # A preserved recovery archive must never be uploaded after the same device
@@ -754,7 +761,7 @@ while [ ! -f "$STATE/.controller-lock" ] && [ "$attempt" -lt 100 ]; do
 done
 [ -f "$STATE/.controller-lock" ]
 [ ! -L "$STATE/.controller-lock" ]
-[ "$(stat -f '%Lp' "$STATE/.controller-lock")" = 600 ]
+[ "$(file_mode "$STATE/.controller-lock")" = 600 ]
 first_lock_token=$(sed -n 's/^token=//p' "$STATE/.controller-lock")
 [ -n "$first_lock_token" ]
 if env "${common_env[@]}" "$HELPER" status-json >"$TMP/concurrent-lock.out" 2>&1; then
@@ -767,7 +774,7 @@ wait "$lock_holder_pid"
 [ ! -e "$STATE/.controller-lock" ]
 [ -f "$STATE/.controller-gate" ]
 [ ! -L "$STATE/.controller-gate" ]
-[ "$(stat -f '%Lp' "$STATE/.controller-gate")" = 600 ]
+[ "$(file_mode "$STATE/.controller-gate")" = 600 ]
 
 env "${common_env[@]}" PATH="$FAKE_PROCESS_BIN:$PATH" GPT_SWITCH_TEST_MV_SLEEP=0.15 \
   "$HELPER" __node switch 3 >"$TMP/node-lock-holder.out" 2>&1 &
@@ -789,7 +796,7 @@ wait "$node_lock_holder_pid"
 [ ! -e "$STATE/.lock" ]
 [ -f "$STATE/.lock-gate" ]
 [ ! -L "$STATE/.lock-gate" ]
-[ "$(stat -f '%Lp' "$STATE/.lock-gate")" = 600 ]
+[ "$(file_mode "$STATE/.lock-gate")" = 600 ]
 
 printf 'pid=999991\ntoken=dead-file\n' >"$STATE/.controller-lock"
 chmod 600 "$STATE/.controller-lock"
@@ -1022,7 +1029,7 @@ if env "${common_env[@]}" "$HELPER" swap-profiles >"$TMP/public-swap.out" 2>&1; 
 fi
 grep -F 'unknown command: swap-profiles' "$TMP/public-swap.out" >/dev/null
 
-case "$(stat -f '%Lp' "$ASKPASS_SOURCE" 2>/dev/null || stat -c '%a' "$ASKPASS_SOURCE")" in
+case "$(file_mode "$ASKPASS_SOURCE" 2>/dev/null || stat -c '%a' "$ASKPASS_SOURCE")" in
   700) ;;
   *) printf 'source askpass helper must have mode 0700\n' >&2; exit 1 ;;
 esac

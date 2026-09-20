@@ -1,0 +1,90 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "lang": "ko",
+  "body": [
+    {
+      "type": "TextBlock",
+      "text": "계정을 연결하세요",
+      "size": "Large",
+      "wrap": true,
+      "weight": "Bolder",
+      "isSubtle": false,
+      "spacing": "None",
+      "color": "Default",
+      "maxLines": 2
+    },
+    {
+      "type": "TextBlock",
+      "text": "로그인하면 남은 사용량과 계정을 여기서 확인할 수 있어요.",
+      "size": "Default",
+      "wrap": true,
+      "weight": "Default",
+      "isSubtle": true,
+      "spacing": "Medium",
+      "color": "Default",
+      "maxLines": 3
+    },
+    {
+      "type": "ColumnSet",
+      "spacing": "Small",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "stretch",
+          "spacing": "Small",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "주간 남음",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "—",
+              "size": "Medium",
+              "wrap": true,
+              "weight": "Bolder",
+              "isSubtle": false,
+              "spacing": "None",
+              "color": "Default",
+              "maxLines": 1
+            },
+            {
+              "type": "TextBlock",
+              "text": "초기화 시각 미확인",
+              "size": "Small",
+              "wrap": true,
+              "weight": "Default",
+              "isSubtle": true,
+              "spacing": "Small",
+              "color": "Default",
+              "maxLines": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "앱에서 로그인",
+      "verb": "settings",
+      "tooltip": "앱에서 로그인",
+      "style": "default",
+      "associatedInputs": "none",
+      "data": {
+        "configurationRevision": "",
+        "requestId": "ae6eeb27a2e04b3caf7a116eaf84a0db"
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "date": "2026-09-19",
+  "installedVersion": "1.0.0.8",
+  "method": "Official computer-use @oai/sky interaction with the installed Windows app",
+  "mainWindow": {
+    "themeObserved": "dark",
+    "normalCapturePixels": [1268, 894],
+    "maximizedCapturePixels": [2560, 1392],
+    "compactCapturePixels": [844, 894],
+    "maximizedUsageAndCreditsTwoColumns": true,
+    "maximizedDevicesAndTokensTwoColumns": true,
+    "normalCardsSingleColumn": true,
+    "compactAccountsMoveAboveDetails": true,
+    "compactVisibleHorizontalClipping": false,
+    "resizeMethod": "Native maximize/restore and system menu Size using Alt+Space, S, Right, then pointer placement",
+    "missingSessionQuotaHidden": true,
+    "weeklyQuotaUsesAvailableWidth": true,
+    "aliasPencilOpenedDialog": true,
+    "aliasDialogEditorSaveCancelVisible": true,
+    "aliasDialogCancelled": true,
+    "productionAliasChanged": false,
+    "dedicatedResetCreditCardZeroState": true,
+    "productionPositiveResetCreditExpiryAvailable": false,
+    "leftOpenMaximizedAfterQa": true
+  },
+  "tray": {
+    "method": "Installed executable with isolated in-memory demo data and native rendering",
+    "themes": ["light", "dark"],
+    "progressAnimationSettledBeforeCapture": true,
+    "dedicatedCreditSection": true,
+    "remainingDurationAndFullKoreanWeekdayDateTime": true,
+    "fixedApplyFooterVisible": true,
+    "evidence": ["tray-light.png", "tray-dark.png"]
+  },
+  "widgets": {
+    "actualV8WidgetsBoardVerified": false,
+    "syntheticRenderMatrix": "../widget-design-v8/results.json",
+    "syntheticRenderCasesPassed": 36,
+    "syntheticRenderCasesFailed": 0
+  },
+  "privacy": {
+    "productionAuthenticationFilesReadByUiQa": false,
+    "productionAuthenticationFilesWrittenByUiQa": false,
+    "productionAliasOrDeviceConfigurationChanged": false,
+    "productionEmailScreenshotsSavedToRepository": false
+  },
+  "remaining": [
+    "Actual v8 Widgets Board display, resizing, actions and reconnect after update",
+    "Positive reset-credit expiry data in the real management window; synthetic formatter, tray and widget coverage exists",
+    "Actual alias save round trip; the editor was opened and cancelled",
+    "Full OS DPI, high contrast, screen reader, keyboard and monitor-edge QA",
+    "Actual multi-account Windows/WSL/SSH switching and recovery",
+    "ARM64 hardware runtime QA"
+  ]
+}

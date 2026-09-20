@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-19",
+  "version": "1.0.0.11",
+  "actualTrayClickQa": false,
+  "actualUpdatedMainLayoutQa": false,
+  "actualInstalledIconUiQa": false,
+  "tool": "mcp__node_repl__js / official @oai/sky",
+  "error": "-32602: codex/sandbox-state-meta: sandboxCwd is not a local file URI: file:///home/sunggu/Projects/Personal/CodexSyncBar",
+  "retry": "js_reset succeeded; next js call failed with same metadata error before JavaScript execution",
+  "priorVersionUiPassCarriedForward": false,
+  "sourceChecks": [
+    "Tray left click and context Open route to ShowManagementWindow, not ToggleQuickView",
+    "ShowManagementWindow restores minimized presenter before show/activate",
+    "Sidebar width 336 DIP, compact 256 DIP; compact action menu reflows below440 DIP",
+    "Generated PNG/ICO assets and executable icon configured"
+  ],
+  "sourceAndBuildChecksDoNotEstablishActualUiBehavior": true,
+  "productionAuthOrAliasModifiedByQa": false
+}

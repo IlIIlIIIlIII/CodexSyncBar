@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="CodexSyncBar_Windows.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:core="using:CodexSyncBar.Windows.Core"
+    xmlns:local="using:CodexSyncBar_Windows">
+    <Page.Resources>
+        <Style x:Key="CardBorder" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="24" />
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource SubtitleTextBlockStyle}" />
+        <Style x:Key="MutedText" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Style>
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="Padding" Value="14,7" />
+        </Style>
+        <Style x:Key="HeaderIconButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </Page.Resources>
+
+    <Grid>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState x:Name="CompactLayout">
+                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="0" /></VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="AccountColumn.Width" Value="256" />
+                        <Setter Target="WorkspaceGrid.Padding" Value="16,16,16,16" />
+                        <Setter Target="WorkspaceGrid.ColumnSpacing" Value="16" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="WideLayout">
+                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="880" /></VisualState.StateTriggers>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="WorkspaceGrid" Padding="24,16,24,16" ColumnSpacing="24">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="AccountColumn" Width="336" />
+                <ColumnDefinition x:Name="DetailColumn" Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="AccountRow" Height="*" />
+                <RowDefinition x:Name="DetailRow" Height="0" />
+            </Grid.RowDefinitions>
+
+            <Border Style="{StaticResource CardBorder}" Padding="12">
+                <Grid RowSpacing="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="8,4,8,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="계정" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock x:Name="AccountCountText" Grid.Column="1" Style="{StaticResource MutedText}" VerticalAlignment="Center" />
+                    </Grid>
+                    <ListView x:Name="AccountsList" Grid.Row="1" SelectionMode="Single" SelectionChanged="AccountsList_SelectionChanged"
+                              AutomationProperties.AutomationId="AccountsList" AutomationProperties.Name="전환할 계정 선택"
+                              AutomationProperties.HelpText="계정을 선택한 뒤 모든 장치에 적용 버튼을 누릅니다."
+                              Background="Transparent" BorderThickness="0">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="8,10" />
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Alias}" />
+                                <Setter Property="AutomationProperties.HelpText" Value="{Binding StateLabel}" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="core:AccountProfile">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Border Width="32" Height="32" CornerRadius="16" Background="{ThemeResource ControlAltFillColorSecondaryBrush}" VerticalAlignment="Top">
+                                        <FontIcon Glyph="&#xE77B;" FontSize="16" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="{x:Bind Alias}" ToolTipService.ToolTip="{x:Bind Alias}" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind Email}" ToolTipService.ToolTip="{x:Bind Email}" Style="{StaticResource MutedText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{x:Bind StateLabel}" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <StackPanel Grid.Row="2" Spacing="8">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <Button x:Name="AddAccountButton" Content="계정 추가" AutomationProperties.AutomationId="AddAccountButton" HorizontalAlignment="Stretch" Click="AddAccountButton_Click" />
+                            <Button Grid.Column="1" Width="36" AutomationProperties.Name="계정 목록 관리" ToolTipService.ToolTip="계정 목록 관리">
+                                <FontIcon Glyph="&#xE712;" FontSize="16" />
+                                <Button.Flyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem x:Name="ImportAuthButton" Text="인증 파일 가져오기" AutomationProperties.AutomationId="ImportAuthButton" Click="ImportAuthButton_Click" />
+                                        <MenuFlyoutSeparator />
+                                        <MenuFlyoutItem x:Name="MoveAccountUpButton" Text="선택 계정을 위로" Tag="up" Click="MoveAccountButton_Click" />
+                                        <MenuFlyoutItem x:Name="MoveAccountDownButton" Text="선택 계정을 아래로" Tag="down" Click="MoveAccountButton_Click" />
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                            </Button>
+                        </Grid>
+                        <TextBlock x:Name="BrowserCleanupText" Style="{StaticResource MutedText}" TextWrapping="Wrap" Visibility="Collapsed" />
+                        <Button x:Name="RetryBrowserCleanupButton" Content="Chrome 정리 재시도" Click="RetryBrowserCleanupButton_Click" Visibility="Collapsed" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer x:Name="DetailScroll" Grid.Column="1" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" IsTabStop="True"
+                          AutomationProperties.Name="선택 계정의 사용량과 장치">
+                <StackPanel x:Name="DetailContent" Width="{Binding ViewportWidth, ElementName=DetailScroll}" HorizontalAlignment="Stretch" Spacing="24" SizeChanged="DetailContent_SizeChanged">
+                    <StackPanel Spacing="8">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="선택한 계정" Style="{StaticResource MutedText}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button x:Name="EditAliasButton" Style="{StaticResource HeaderIconButton}" AutomationProperties.AutomationId="EditAliasButton" AutomationProperties.Name="선택 계정 별칭 편집" ToolTipService.ToolTip="별칭 편집" Click="EditAliasButton_Click">
+                                    <FontIcon Glyph="&#xE70F;" FontSize="16" />
+                                </Button>
+                                <Button x:Name="RefreshButton" Style="{StaticResource HeaderIconButton}" AutomationProperties.AutomationId="RefreshButton" AutomationProperties.Name="모든 사용량과 장치 새로고침" ToolTipService.ToolTip="새로고침 (F5)" Click="RefreshButton_Click">
+                                    <FontIcon Glyph="&#xE72C;" FontSize="16" />
+                                    <Button.KeyboardAccelerators><KeyboardAccelerator Key="F5" /></Button.KeyboardAccelerators>
+                                </Button>
+                                <Button Style="{StaticResource HeaderIconButton}" AutomationProperties.Name="설정 열기" ToolTipService.ToolTip="설정" Click="SettingsButton_Click"><FontIcon Glyph="&#xE713;" FontSize="16" /></Button>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock x:Name="SelectedAliasText" Text="계정을 추가해 주세요" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="SelectedEmailText" Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="SelectedPlanText" Text="Codex" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Name="AuthStatusText" Grid.Column="1" Text="로그인하면 사용량을 확인할 수 있어요" Style="{StaticResource MutedText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </Grid>
+                    </StackPanel>
+
+                    <Border Style="{StaticResource CardBorder}" Padding="20">
+                        <StackPanel Spacing="16">
+                            <Grid RowSpacing="16">
+
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <StackPanel Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock x:Name="CurrentAccountText" Text="현재 적용된 계정 없음" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="ActiveBadgeText" Text="계정 선택만으로는 변경되지 않아요" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button x:Name="SyncButton" Grid.Row="1" HorizontalAlignment="Stretch" MinHeight="36" Content="모든 장치에 적용" Style="{StaticResource AccentButtonStyle}"
+                                        AutomationProperties.AutomationId="SyncButton" AutomationProperties.Name="선택 계정을 모든 장치에 적용" Click="SyncButton_Click" VerticalAlignment="Center" />
+                            </Grid>
+                            <Grid ColumnSpacing="8" RowSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <Button x:Name="LoginButton" Content="로그인" MinHeight="36" HorizontalAlignment="Left" AutomationProperties.AutomationId="LoginButton" Click="LoginButton_Click" />
+                                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="CancelLoginButton" Content="로그인 취소" Click="CancelLoginButton_Click" Visibility="Collapsed" />
+                                    <Button x:Name="RetryLoginButton" Content="다시 시도" Click="RetryLoginButton_Click" Visibility="Collapsed" />
+                                    <Button x:Name="ReopenLoginButton" Content="브라우저 열기" Click="ReopenLoginButton_Click" Visibility="Collapsed" />
+                                </StackPanel>
+                                <DropDownButton x:Name="AccountMenuButton" Grid.Column="1" MinHeight="36" HorizontalAlignment="Right" Content="계정 관리">
+                                    <DropDownButton.Flyout>
+                                        <MenuFlyout>
+                                            <MenuFlyoutItem x:Name="FreshLoginButton" Text="다른 계정으로 로그인" Click="FreshLoginButton_Click" Visibility="Collapsed" />
+                                            <MenuFlyoutSeparator />
+                                            <MenuFlyoutItem Text="Codex 열기" Click="OpenCodexButton_Click" />
+                                            <MenuFlyoutItem Text="Codex 폴더 열기" Click="OpenCodexFolderButton_Click" />
+                                            <MenuFlyoutItem Text="인증 파일 폴더 열기" Click="OpenAuthFolderButton_Click" />
+                                            <MenuFlyoutSeparator />
+                                            <MenuFlyoutItem x:Name="LogoutAccountButton" Text="로그아웃" Click="LogoutAccountButton_Click" />
+                                            <MenuFlyoutItem x:Name="DeleteAccountButton" Text="계정 제거" Click="DeleteAccountButton_Click" />
+                                        </MenuFlyout>
+                                    </DropDownButton.Flyout>
+                                </DropDownButton>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid x:Name="OverviewCards" ColumnSpacing="0" RowSpacing="24">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="OverviewSecondaryColumn" Width="0" /></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Border x:Name="UsageCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="20">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="사용량" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock x:Name="UsageUpdatedText" Style="{StaticResource MutedText}" />
+                                    <HyperlinkButton x:Name="WeeklyMessagesButton" Content="주간 자동 메시지 설정" Click="SettingsButton_Click" Padding="0,4,0,0" />
+                                </StackPanel>
+                                <Button x:Name="RefreshSelectedButton" Grid.Column="1" AutomationProperties.Name="선택 계정 사용량 새로고침" ToolTipService.ToolTip="사용량 새로고침" Click="RefreshSelectedButton_Click" VerticalAlignment="Top"><FontIcon Glyph="&#xE72C;" FontSize="16" /></Button>
+                            </Grid>
+                            <Grid x:Name="UsageMetrics" ColumnSpacing="0" SizeChanged="UsageMetrics_SizeChanged">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="WeeklyMetricColumn" Width="0" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <StackPanel x:Name="FiveHourRow" Spacing="12" Visibility="Collapsed">
+                                    <TextBlock Text="5시간" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock x:Name="FiveHourValue" Text="—" Style="{StaticResource TitleTextBlockStyle}" />
+                                    <ProgressBar x:Name="FiveHourBar" Maximum="100" Visibility="Collapsed" AutomationProperties.Name="Codex 5시간 잔여 사용량" />
+                                    <TextBlock x:Name="FiveHourResetText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel x:Name="CodexWeeklyRow" Spacing="12">
+                                    <TextBlock Text="주간" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock x:Name="WeeklyValue" Text="—" Style="{StaticResource TitleTextBlockStyle}" />
+                                    <ProgressBar x:Name="WeeklyBar" Maximum="100" Visibility="Collapsed" AutomationProperties.Name="Codex 주간 잔여 사용량" />
+                                    <TextBlock x:Name="WeeklyResetText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                            <StackPanel Spacing="4">
+                                <TextBlock x:Name="UsageStatusText" Text="로그인 후 사용량을 확인할 수 있어요." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="CreditsText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="ResetCreditsCard" Grid.Row="1" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="20">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="초기화권" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="보유 수량과 만료 일정" Style="{StaticResource MutedText}" />
+                            </StackPanel>
+                            <TextBlock x:Name="ResetCreditsCountText" Text="—" Style="{StaticResource TitleTextBlockStyle}" AutomationProperties.LiveSetting="Polite" />
+                            <TextBlock x:Name="ResetCreditsStatusText" Text="초기화권 정보를 확인하기 전입니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                            <ItemsControl x:Name="ResetCreditGroups" AutomationProperties.Name="초기화권 만료 일정">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="core:ResetCreditExpiryGroup">
+                                        <Grid Padding="0,8" ColumnSpacing="16">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{x:Bind RemainingText}" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                                                <TextBlock Text="{x:Bind ExpiresAtText}" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Top"><Run Text="{x:Bind Count}" /><Run Text="개" /></TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                    </Grid>
+
+                    <Grid x:Name="DeviceAndTokenCards" ColumnSpacing="0" RowSpacing="24">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="DeviceSecondaryColumn" Width="0" /></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Border x:Name="DevicesCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="16">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="연결된 장치" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock Text="활성화한 장치에 선택한 계정을 함께 적용합니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <DropDownButton Grid.Column="1" Content="장치 추가" VerticalAlignment="Top">
+                                    <DropDownButton.Flyout><MenuFlyout>
+                                        <MenuFlyoutItem x:Name="WslSettingsButton" Text="WSL 배포판 관리" AutomationProperties.AutomationId="ManageWsl" Click="WslSettingsButton_Click" />
+                                        <MenuFlyoutItem Text="SSH 장치 추가" Click="AddDeviceButton_Click" />
+                                    </MenuFlyout></DropDownButton.Flyout>
+                                </DropDownButton>
+                            </Grid>
+                            <ListView x:Name="DevicesList" SelectionMode="Single" SelectionChanged="DevicesList_SelectionChanged" IsItemClickEnabled="False" Background="Transparent" BorderThickness="0"
+                                      AutomationProperties.AutomationId="DevicesList" AutomationProperties.Name="장치 상태와 관리 대상 선택">
+                                <ListView.ItemContainerStyle><Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="8,12" />
+                                    <Setter Property="AutomationProperties.Name" Value="{Binding DisplayName}" /><Setter Property="AutomationProperties.HelpText" Value="{Binding Detail}" />
+                                </Style></ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate><DataTemplate x:DataType="local:DeviceRow">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <Border Width="32" Height="32" CornerRadius="8" Background="{ThemeResource ControlAltFillColorSecondaryBrush}"><TextBlock Text="{x:Bind StateGlyph}" Foreground="{x:Bind StateBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                                        <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="{x:Bind DisplayName}" Style="{StaticResource BodyStrongTextBlockStyle}" /><TextBlock Text="{x:Bind Detail}" Style="{StaticResource MutedText}" TextWrapping="Wrap" /></StackPanel>
+                                        <TextBlock Grid.Column="2" Text="{x:Bind StateText}" Foreground="{x:Bind StateBrush}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate></ListView.ItemTemplate>
+                            </ListView>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="상태 새로고침" Click="RefreshDevicesButton_Click" />
+                                <DropDownButton Content="선택 장치 관리"><DropDownButton.Flyout><MenuFlyout>
+                                    <MenuFlyoutItem x:Name="EditDeviceButton" Text="연결 설정 편집" Click="EditDeviceButton_Click" />
+                                    <MenuFlyoutItem x:Name="ActivateDeviceButton" Text="설치 및 활성화" Click="ActivateDeviceButton_Click" />
+                                    <MenuFlyoutItem x:Name="TestDeviceButton" Text="연결 테스트" Click="TestDeviceButton_Click" />
+                                    <MenuFlyoutSeparator /><MenuFlyoutItem x:Name="RemoveDeviceButton" Text="장치 제거" Click="RemoveDeviceButton_Click" />
+                                </MenuFlyout></DropDownButton.Flyout></DropDownButton>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="ManageCliButton" Content="Codex CLI 관리" Click="ManageCliButton_Click" />
+                                <Button x:Name="UpdateAllCliButton" Content="모든 기기 CLI 업데이트" Click="UpdateAllCliButton_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="TokensCard" Grid.Row="1" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="16">
+                            <Grid ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="최근 30일 토큰 사용량" Style="{StaticResource SectionTitle}" />
+                                <Button Grid.Column="1" AutomationProperties.Name="최근 30일 토큰 집계 새로고침" ToolTipService.ToolTip="토큰 집계 새로고침" Click="RefreshTokenUsageButton_Click"><FontIcon Glyph="&#xE72C;" FontSize="16" /></Button>
+                            </Grid>
+                            <StackPanel Spacing="8">
+                                <TextBlock x:Name="TokenUsageCountText" Text="토큰 —" Style="{StaticResource TitleTextBlockStyle}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="TokenUsageCostText" Text="예상 비용 —" Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock x:Name="TokenUsageDevicesText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="TokenUsageUpdatedText" Style="{StaticResource MutedText}" />
+                            </StackPanel>
+                            <Expander Header="장치별 집계 보기" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                <StackPanel Spacing="12">
+                                    <TextBlock x:Name="TokenUsageStatusText" Text="Codex 세션에서 최근 30일 사용량을 집계합니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                    <ListView x:Name="TokenUsageDevicesList" MaxHeight="240" SelectionMode="None" Background="Transparent" BorderThickness="0" AutomationProperties.Name="장치별 최근 30일 토큰 사용량">
+                                        <ListView.ItemTemplate><DataTemplate x:DataType="local:TokenUsageRow">
+                                            <Grid Padding="0,8" ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel Spacing="4"><TextBlock Text="{x:Bind DisplayName}" Style="{StaticResource BodyStrongTextBlockStyle}" /><TextBlock Text="{x:Bind AccountText}" Foreground="{x:Bind AccountBrush}" Style="{StaticResource CaptionTextBlockStyle}" /></StackPanel>
+                                                <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="{x:Bind UsageText}" HorizontalAlignment="Right" /><TextBlock Text="{x:Bind CostText}" Style="{StaticResource MutedText}" HorizontalAlignment="Right" /></StackPanel>
+                                            </Grid>
+                                        </DataTemplate></ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </Border>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <Border Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="24,12">
+            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <ProgressRing x:Name="LoadingRing" Width="16" Height="16" IsActive="False" AutomationProperties.Name="처리 중" />
+                <TextBlock x:Name="BannerText" Grid.Column="1" Text="준비 중…" Style="{StaticResource MutedText}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="RetryRecoveryButton" Content="복구 재시도" Click="RetryRecoveryButton_Click" Visibility="Collapsed" />
+                    <Button AutomationProperties.Name="앱 메뉴" ToolTipService.ToolTip="앱 메뉴"><FontIcon Glyph="&#xE712;" FontSize="16" /><Button.Flyout><MenuFlyout><MenuFlyoutItem Text="앱 종료" Click="QuitButton_Click" /></MenuFlyout></Button.Flyout></Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

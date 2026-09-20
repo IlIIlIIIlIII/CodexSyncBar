@@ -1,0 +1,17 @@
+{
+  "Source": "production",
+  "Method": "GetSnapshot",
+  "AccountCount": 6,
+  "AccountsNeedingLogin": 0,
+  "AccountsWithUsage": 6,
+  "UsageUpdatedWithinFiveMinutes": 6,
+  "SessionQuotaCount": 0,
+  "WeeklyQuotaCount": 6,
+  "DeviceCount": 3,
+  "ReachableDeviceCount": 3,
+  "HasAppliedAccount": true,
+  "IsBusy": false,
+  "HasDashboardError": false,
+  "OperationState": "completed",
+  "ReadOnly": true
+}
