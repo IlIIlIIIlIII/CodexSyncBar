@@ -130,13 +130,15 @@ public sealed class ControllerUsageTests
         using var fixture = new Fixture();
         fixture.AddDevice();
         var response = new TaskCompletionSource<IReadOnlyList<DashboardDevice>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
         using var controller = new SyncBarController(fixture.Paths, null, _ => [new SyntheticTarget()],
-            (_, _) => ++calls == 1 ? response.Task : Task.FromResult<IReadOnlyList<DashboardDevice>>([Device(1)]));
+            (_, _) => { started.TrySetResult(); return ++calls == 1 ? response.Task : Task.FromResult<IReadOnlyList<DashboardDevice>>([Device(1)]); });
         var staleRead = controller.RefreshDevicesAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var before = await controller.GetSnapshotAsync();
         var operation = await controller.SwitchAccountAsync(1, before.ConfigurationRevision);
-        Assert.Equal("completed", (await controller.GetOperationStatusAsync(operation.Id))!.State);
+        Assert.Equal("completed", (await WaitForOperationAsync(controller, operation.Id)).State);
         Assert.False((await controller.GetSnapshotAsync()).IsBusy);
 
         response.SetResult([Device(2)]);
@@ -153,29 +155,136 @@ public sealed class ControllerUsageTests
         using var fixture = new Fixture();
         fixture.AddDevice();
         var first = new TaskCompletionSource<IReadOnlyList<DashboardDevice>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
         using var controller = new SyncBarController(fixture.Paths, null, null,
-            (_, _) => ++calls == 1 ? first.Task : Task.FromResult<IReadOnlyList<DashboardDevice>>([Device(3)]));
+            (_, _) => { started.TrySetResult(); return ++calls == 1 ? first.Task : Task.FromResult<IReadOnlyList<DashboardDevice>>([Device(3)]); });
         var older = controller.RefreshDevicesAsync();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await controller.RefreshDevicesAsync();
         first.SetResult([Device(2)]);
         await older;
         Assert.Equal(3, (await controller.GetSnapshotAsync()).Devices.Single(device => device.Id == "wsl:Ubuntu").ProfileId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SingleSshSwitchOnlyTouchesSelectedDeviceIncludingRollback(bool failVerification)
+    {
+        using var fixture = new Fixture();
+        var store = new ConfigurationStore(fixture.Paths);
+        var configuration = store.LoadOrCreate();
+        configuration.Devices.Add(new() { Id = "chosen", DisplayName = "Chosen SSH", Host = "chosen.test", Username = "test", Enabled = true });
+        configuration.Devices.Add(new() { Id = "other", DisplayName = "Other SSH", Host = "other.test", Username = "test", Enabled = true });
+        store.Save(configuration);
+        var chosen = new SyntheticTarget { Id = "ssh:chosen", FailVerification = failVerification };
+        var others = new[] { new SyntheticTarget { Id = "ssh:other" }, new SyntheticTarget(), new SyntheticTarget { Id = "windows", IsLocal = true } };
+        using var controller = new SyncBarController(fixture.Paths, null, _ => [chosen, .. others], null);
+        var snapshot = await controller.GetSnapshotAsync();
+        var operation = await controller.SwitchSshDeviceAccountAsync(1, "chosen", snapshot.ConfigurationRevision);
+        var result = await WaitForOperationAsync(controller, operation.Id);
+
+        Assert.Equal(failVerification ? "failed" : "completed", result.State);
+        Assert.Equal("ssh:chosen", Assert.Single(result.Targets).Id);
+        Assert.Contains("apply", chosen.Calls);
+        Assert.Contains("verify", chosen.Calls);
+        Assert.Equal(failVerification, chosen.Calls.Contains("restore"));
+        Assert.All(others, target => Assert.Empty(target.Calls));
+        Assert.Null(new AuthStore(fixture.Paths).ReadActiveAccountId());
+    }
+
+    [Theory]
+    [InlineData("missing", true, false)]
+    [InlineData("chosen", false, false)]
+    [InlineData("chosen", true, true)]
+    [InlineData("windows", true, false)]
+    public async Task SingleSshSwitchRejectsInvalidDeviceOrStaleConfiguration(string deviceId, bool enabled, bool stale)
+    {
+        using var fixture = new Fixture();
+        var store = new ConfigurationStore(fixture.Paths);
+        var configuration = store.LoadOrCreate();
+        configuration.Devices.Add(new() { Id = "chosen", DisplayName = "Chosen SSH", Host = "chosen.test", Username = "test", Enabled = enabled });
+        store.Save(configuration);
+        var target = new SyntheticTarget { Id = "ssh:chosen" };
+        using var controller = new SyncBarController(fixture.Paths, null, _ => [target], null);
+        var snapshot = await controller.GetSnapshotAsync();
+        await Assert.ThrowsAsync<CodexSyncBarException>(() => controller.SwitchSshDeviceAccountAsync(1, deviceId,
+            stale ? "stale-revision" : snapshot.ConfigurationRevision));
+        Assert.Empty(target.Calls);
+        Assert.False((await controller.GetSnapshotAsync()).IsBusy);
+    }
+
     private static DashboardDevice Device(int profileId) => new("wsl:Ubuntu", "Ubuntu", "wsl", profileId, true);
+
+    private static async Task<SwitchOperation> WaitForOperationAsync(SyncBarController controller, string id)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (true)
+        {
+            var operation = (await controller.GetOperationStatusAsync(id))!;
+            if (operation.IsComplete && !(await controller.GetSnapshotAsync()).IsBusy) return operation;
+            await Task.Delay(10, deadline.Token);
+        }
+    }
+
+    [Fact]
+    public async Task SlowSwitchPreparationDoesNotBlockQueueOrDashboardReads()
+    {
+        using var fixture = new Fixture();
+        using var release = new ManualResetEventSlim();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var controller = new SyncBarController(fixture.Paths, null, _ =>
+        {
+            Assert.Null(SynchronizationContext.Current);
+            started.TrySetResult();
+            if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException();
+            return [new SyntheticTarget()];
+        }, null);
+        var snapshot = await controller.GetSnapshotAsync();
+        try
+        {
+            var queued = await controller.SwitchAccountAsync(1, snapshot.ConfigurationRevision).WaitAsync(TimeSpan.FromSeconds(5));
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True((await controller.GetSnapshotAsync().WaitAsync(TimeSpan.FromSeconds(5))).IsBusy);
+            release.Set();
+            Assert.Equal("completed", (await WaitForOperationAsync(controller, queued.Id)).State);
+        }
+        finally { release.Set(); }
+    }
+
+    [Fact]
+    public async Task DeviceAndUsageQueriesDoNotRunOnCallerSynchronizationContext()
+    {
+        using var fixture = new Fixture();
+        var contexts = new List<SynchronizationContext?>();
+        using var controller = new SyncBarController(fixture.Paths,
+            new UsageService(new HttpClient(new Handler(() => { contexts.Add(SynchronizationContext.Current); return Success(); }))),
+            null, (_, _) => { contexts.Add(SynchronizationContext.Current); return Task.FromResult<IReadOnlyList<DashboardDevice>>([]); });
+        await controller.RefreshDevicesAsync();
+        await controller.RefreshUsageAsync();
+        Assert.Equal(2, contexts.Count);
+        Assert.All(contexts, context => Assert.Null(context));
+    }
 
     private sealed class SyntheticTarget : IAccountTarget
     {
-        public string Id => "wsl:Ubuntu";
+        public string Id { get; init; } = "wsl:Ubuntu";
         public string DisplayName => "Ubuntu";
         public string ConfigurationFingerprint => "synthetic-test-target";
-        public bool IsLocal => false;
-        public Task<string> PrepareAsync(int profileId, CancellationToken cancellationToken) => Task.FromResult("previous");
-        public Task ApplyAsync(int profileId, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task VerifyAsync(int profileId, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task RestoreAsync(string checkpoint, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task ReleaseAsync(string checkpoint, CancellationToken cancellationToken) => Task.CompletedTask;
+        public bool IsLocal { get; init; }
+        public bool FailVerification { get; init; }
+        public List<string> Calls { get; } = [];
+        public Task<string> PrepareAsync(int profileId, CancellationToken cancellationToken) { Calls.Add("prepare"); return Task.FromResult("previous"); }
+        public Task ApplyAsync(int profileId, CancellationToken cancellationToken) { Calls.Add("apply"); return Task.CompletedTask; }
+        public Task VerifyAsync(int profileId, CancellationToken cancellationToken)
+        {
+            Calls.Add("verify");
+            if (FailVerification) throw new CodexSyncBarException("Synthetic verification failure");
+            return Task.CompletedTask;
+        }
+        public Task RestoreAsync(string checkpoint, CancellationToken cancellationToken) { Calls.Add("restore"); return Task.CompletedTask; }
+        public Task ReleaseAsync(string checkpoint, CancellationToken cancellationToken) { Calls.Add("release"); return Task.CompletedTask; }
     }
 
     private static HttpResponseMessage Success() => new(HttpStatusCode.OK)

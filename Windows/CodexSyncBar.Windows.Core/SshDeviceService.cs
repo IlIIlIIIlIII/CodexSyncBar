@@ -47,6 +47,7 @@ public sealed class SshDeviceService
         AppConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var pending = new List<string>();
         foreach (var transaction in _bootstrapTransactions.LoadAll())
         {
@@ -349,6 +350,7 @@ public sealed class SshDeviceService
         SshDeviceConfiguration device,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var secret = ResolveSecret(device);
         var result = await RunSshAsync(
             device,
@@ -374,6 +376,7 @@ public sealed class SshDeviceService
         SshDeviceConfiguration device,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var secret = ResolveSecret(device);
         var result = await RunSshAsync(
             device,
@@ -396,6 +399,7 @@ public sealed class SshDeviceService
         int? activeProfileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var statuses = new List<DeviceStatus>
         {
             new(
@@ -509,12 +513,14 @@ public sealed class SshDeviceService
 
     public async Task<string> UpdateCodexCliAsync(SshDeviceConfiguration device, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var result = await RunCodexHelperAsync(device, true, cancellationToken);
         return CliUpdateResult.Parse(result).DisplayText;
     }
 
     public async Task<ProcessResult> RunCodexHelperAsync(SshDeviceConfiguration device, bool update, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var secret = ResolveSecret(device);
         var arguments = BuildCommonOptions(device, false, secret is not null);
         arguments.AddRange([$"{device.Username}@{device.Host}", "bash -l -s -- __node " + (update ? "update-codex" : "codex-info")]);
@@ -578,6 +584,7 @@ public sealed class SshDeviceService
         int profileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var secret = ResolveSecret(device);
         var accessOnly = _authStore.CreateAccessOnlyCopy(profileId);
         await InstallRemoteHelpersAsync(device, secret, cancellationToken);
@@ -602,6 +609,7 @@ public sealed class SshDeviceService
         int profileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var failures = await SyncProfileAsync(configuration, profileId, cancellationToken);
         if (failures.Count > 0)
         {
@@ -621,6 +629,7 @@ public sealed class SshDeviceService
         int profileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         if (_localSwitchService is null)
         {
             throw new CodexSyncBarException("로컬 계정 전환 서비스가 연결되지 않았습니다.");
@@ -793,6 +802,7 @@ public sealed class SshDeviceService
         int profileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var failures = new List<string>();
         foreach (var device in configuration.Devices.Where(item => item.Enabled))
         {
@@ -817,6 +827,7 @@ public sealed class SshDeviceService
         AppConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var profiles = configuration.Accounts
             .Where(account => !account.IsPending
                 && !account.NeedsLogin
@@ -878,6 +889,7 @@ public sealed class SshDeviceService
         int? activeProfileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var profiles = configuration.Accounts
             .Where(account => !account.IsPending
                 && !account.NeedsLogin
@@ -974,6 +986,7 @@ public sealed class SshDeviceService
         int fallbackProfileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         if (profileId == fallbackProfileId)
         {
             throw new CodexSyncBarException("로그아웃 fallback 계정은 다른 계정이어야 합니다.");
@@ -1116,6 +1129,7 @@ public sealed class SshDeviceService
         AppConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var pending = new List<string>();
         var completedProfiles = new List<int>();
         foreach (var manifest in _logoutTransactions.LoadAll())
@@ -2042,6 +2056,7 @@ public sealed class SshDeviceService
         SshDeviceConfiguration device,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var secret = ResolveSecret(device);
         await EnsureRemoteHelpersAsync(device, secret, cancellationToken);
         var result = await RunSshAsync(
@@ -2201,20 +2216,29 @@ public sealed class SshDeviceService
         var source = _paths.BundledWindowsAskPass;
         if (!File.Exists(source))
             throw new CodexSyncBarException("SSH 비밀번호 도우미가 없습니다. 앱을 최신 패키지로 설치해 주세요.");
+        return _preparedAskPass = MaterializeAskPassExecutable(_paths, source);
+    }
+
+    internal static string MaterializeAskPassExecutable(WindowsPaths paths, string source)
+    {
         // An unpackaged ssh.exe cannot execute a helper inside WindowsApps.
         // Materialize the signed package payload outside MSIX virtualization,
         // in a private, content-addressed location. Never invoke a shell.
-        WindowsPathSafety.EnsurePrivateDirectory(_paths.ExternalRuntimeDirectory, "SSH 도우미 디렉터리");
+        WindowsPathSafety.EnsurePrivateDirectory(paths.ExternalRuntimeDirectory, "SSH 도우미 디렉터리");
+        if (new FileInfo(source).Length > 128 * 1024 * 1024)
+            throw new CodexSyncBarException("SSH 비밀번호 도우미 크기가 안전 한도를 초과했습니다.");
         string digest;
         using (var stream = File.OpenRead(source)) digest = Convert.ToHexStringLower(SHA256.HashData(stream));
-        var destination = Path.Combine(_paths.ExternalRuntimeDirectory, "ssh-askpass-" + digest[..16] + ".exe");
+        var destination = Path.Combine(paths.ExternalRuntimeDirectory, "ssh-askpass-" + digest[..16] + ".exe");
         WindowsPathSafety.EnsureFile(destination, "SSH 비밀번호 도우미");
         if (!File.Exists(destination))
         {
-            var temporary = Path.Combine(_paths.ExternalRuntimeDirectory, ".askpass-" + Guid.NewGuid().ToString("N"));
+            var temporary = Path.Combine(paths.ExternalRuntimeDirectory, ".askpass-" + Guid.NewGuid().ToString("N"));
             try
             {
-                File.Copy(source, temporary);
+                // Copy payload bytes only: CopyFile also carries MSIX encryption
+                // metadata and can fail when creating a file outside the package.
+                WindowsPathSafety.WritePrivateBytes(temporary, File.ReadAllBytes(source));
                 WindowsPathSafety.EnsurePrivateFile(temporary, "SSH 비밀번호 도우미", 128 * 1024 * 1024);
                 try { File.Move(temporary, destination); }
                 catch (IOException) when (File.Exists(destination)) { }
@@ -2225,7 +2249,7 @@ public sealed class SshDeviceService
         using (var stream = File.OpenRead(destination))
             if (Convert.ToHexStringLower(SHA256.HashData(stream)) != digest)
                 throw new CodexSyncBarException("SSH 비밀번호 도우미 무결성 확인에 실패했습니다.");
-        return _preparedAskPass = destination;
+        return destination;
     }
     private static string FindExecutable(params string[] names)
     {

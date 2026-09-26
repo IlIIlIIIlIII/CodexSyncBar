@@ -15,6 +15,7 @@ public sealed class LocalSwitchService
 
     private readonly AuthStore _authStore;
     private readonly WindowsPaths _paths;
+    private readonly Func<ICodexDesktopSession> _captureDesktop;
     private volatile bool _reconnectionRequired;
 
     public string? ReconnectionDetail => _reconnectionRequired
@@ -24,9 +25,13 @@ public sealed class LocalSwitchService
     public void RefreshClientStatus() => _ = GetConfirmedAppServerProcesses();
 
     public LocalSwitchService(AuthStore authStore, WindowsPaths paths)
+        : this(authStore, paths, () => CodexDesktopLifecycle.Capture(paths)) { }
+
+    internal LocalSwitchService(AuthStore authStore, WindowsPaths paths, Func<ICodexDesktopSession> captureDesktop)
     {
         _authStore = authStore;
         _paths = paths;
+        _captureDesktop = captureDesktop;
     }
 
     public int? GetActiveProfileId(IEnumerable<AccountProfile> accounts)
@@ -80,29 +85,54 @@ public sealed class LocalSwitchService
         int profileId,
         CancellationToken cancellationToken)
     {
-        var previous = _authStore.ReadActiveAuth();
-        _authStore.SwitchActive(profileId);
-        try
-        {
-            await StopCodexClientsAsync(cancellationToken);
-        }
-        catch
-        {
-            _authStore.RestoreActive(previous);
-            throw;
-        }
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        _ = _authStore.ReadCredentials(profileId);
+        await ChangeActiveAuthAsync(() => _authStore.SwitchActive(profileId), cancellationToken);
     }
 
     public async Task RestoreAsync(CodexAuthFile? previous, CancellationToken cancellationToken = default)
     {
-        _authStore.RestoreActive(previous);
-        await StopCodexClientsAsync(cancellationToken);
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        await ChangeActiveAuthAsync(() => _authStore.RestoreActive(previous), cancellationToken);
         if (_authStore.ReadActiveAccountId() != previous?.Tokens.AccountId)
             throw new CodexSyncBarException("Windows 계정 복구를 확인하지 못했습니다.");
     }
 
+    private async Task ChangeActiveAuthAsync(Action changeAuth, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var previous = _authStore.ReadActiveAuth();
+        using var desktop = _captureDesktop();
+        try
+        {
+            await desktop.StopAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            changeAuth();
+            await StopCodexClientsAsync(cancellationToken);
+            await desktop.StartAsync(cancellationToken);
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                // Recovery must finish even when the original request was cancelled.
+                await desktop.StopAsync(CancellationToken.None);
+                _authStore.RestoreActive(previous);
+                await StopCodexClientsAsync(CancellationToken.None);
+                await desktop.StartAsync(CancellationToken.None);
+            }
+            catch (Exception recoveryError)
+            {
+                throw new CodexSyncBarException("계정 전환 실패 후 Codex 앱과 기존 계정을 복구하지 못했습니다.",
+                    new AggregateException(error, recoveryError));
+            }
+            throw;
+        }
+    }
+
     public async Task<string> ReconnectAfterCliUpdateAsync(string expectedVersion, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var hadClients = GetConfirmedAppServerProcesses().Count > 0;
         await StopCodexClientsAsync(cancellationToken);
         if (!hadClients) return _reconnectionRequired ? "reconnect-pending" : "not-running";

@@ -43,27 +43,34 @@ public static class ProcessRunner
         TimeSpan? timeout = null,
         IReadOnlyDictionary<string, string?>? environment = null)
     {
+        // Native process creation and anonymous pipe writes can block. Never
+        // execute them on the caller's UI synchronization context.
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        cancellationToken.ThrowIfCancellationRequested();
         using var process = StartInteractive(
             fileName,
             arguments,
             redirectStandardInput: standardInput is not null,
             environment: environment);
 
-        if (standardInput is not null)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            process.StandardInput.Write(standardInput);
-            process.StandardInput.Flush();
-            process.StandardInput.Close();
-        }
-
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linkedCancellation.CancelAfter(timeout ?? TimeSpan.FromSeconds(30));
+        Task inputTask = Task.CompletedTask;
         try
         {
+            // Drain both output pipes before feeding stdin: a child may write
+            // more than the pipe capacity before it starts reading its input.
             var outputTask = process.StandardOutput.ReadToEndAsync(linkedCancellation.Token);
             var errorTask = process.StandardError.ReadToEndAsync(linkedCancellation.Token);
-            await process.WaitForExitAsync(linkedCancellation.Token);
+            if (standardInput is not null)
+                inputTask = Task.Run(() =>
+                {
+                    process.StandardInput.Write(standardInput);
+                    process.StandardInput.Flush();
+                    process.StandardInput.Close();
+                });
+            await Task.WhenAll(inputTask, process.WaitForExitAsync(linkedCancellation.Token), outputTask, errorTask)
+                .WaitAsync(linkedCancellation.Token).ConfigureAwait(false);
             return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
         }
         catch
@@ -79,6 +86,10 @@ public static class ProcessRunner
             {
                 // Preserve the original timeout/cancellation exception.
             }
+
+            // Killing the child releases a blocked native stdin write before
+            // the streams are disposed. Observe its exception as well.
+            try { await inputTask.ConfigureAwait(false); } catch { }
 
             throw;
         }

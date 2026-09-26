@@ -13,7 +13,7 @@
   <Identity
     Name="14769529-7449-442E-89BB-30402D814A1D"
     Publisher="CN=CodexSyncBar"
-    Version="1.0.0.20" />
+    Version="1.0.0.28" />
 
   <mp:PhoneIdentity PhoneProductId="14769529-7449-442E-89BB-30402D814A1D" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

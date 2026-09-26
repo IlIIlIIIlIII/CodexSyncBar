@@ -53,7 +53,7 @@
             <CheckBox x:Name="ClearPasswordBox" Content="저장된 SSH 비밀번호 삭제" />
             </StackPanel>
             <CheckBox x:Name="EnabledBox" Content="저장 후 동기화 대상에 포함" IsChecked="False" />
-            <TextBlock Text="새 장치나 연결 정보가 바뀐 장치는 저장 후 ‘설치 및 활성화’로 연결 검증을 해야 동기화됩니다." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+            <TextBlock x:Name="ActivationHelp" Text="기기를 추가하면 설치와 활성화가 자동으로 진행됩니다. 연결 검증이 완료되면 동기화됩니다." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
             <TextBlock x:Name="ErrorText" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
         </StackPanel>
     </ScrollViewer>

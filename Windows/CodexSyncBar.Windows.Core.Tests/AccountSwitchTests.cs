@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 using CodexSyncBar.Windows.Core;
 
 namespace CodexSyncBar.Windows.Core.Tests;
@@ -6,17 +7,32 @@ namespace CodexSyncBar.Windows.Core.Tests;
 public sealed class AccountSwitchTests
 {
     [Fact]
-    public async Task PreflightsEveryTargetThenAppliesRemoteBeforeWindowsAndVerifiesAll()
+    public async Task PreflightsEveryTargetThenAppliesAndVerifiesAllInParallel()
     {
         using var fixture = new Fixture();
         var windows = fixture.Target("windows", local: true);
         var ssh = fixture.Target("ssh");
         var wsl = fixture.Target("wsl");
+        var prepare = new PhaseBarrier(3);
+        var apply = new PhaseBarrier(3);
+        var verify = new PhaseBarrier(3);
+        foreach (var target in new[] { windows, ssh, wsl })
+        {
+            target.PrepareWait = prepare.ArriveAsync;
+            target.ApplyWait = apply.ArriveAsync;
+            target.VerifyWait = verify.ArriveAsync;
+        }
         var result = await fixture.Coordinator.SwitchAsync(2, [windows, ssh, wsl]);
         Assert.Equal("completed", result.State);
-        Assert.Equal(new[] { "ssh:prepare", "wsl:prepare", "windows:prepare", "ssh:apply", "wsl:apply", "windows:apply", "ssh:verify", "wsl:verify", "windows:verify" },
-            fixture.Events.Where(value => !value.EndsWith(":release")));
+        var events = fixture.Events.Where(value => !value.EndsWith(":release")).ToArray();
+        Assert.Equal(9, events.Length);
+        Assert.All(events.Take(3), value => Assert.EndsWith(":prepare", value));
+        Assert.All(events.Skip(3).Take(3), value => Assert.EndsWith(":apply", value));
+        Assert.All(events.Skip(6), value => Assert.EndsWith(":verify", value));
         Assert.All(result.Targets, target => Assert.Equal("verified", target.State));
+        var journal = JsonSerializer.Deserialize<SwitchJournal>(File.ReadAllText(fixture.Coordinator.JournalPath))!;
+        Assert.Equal(3, journal.Checkpoints.Count);
+        Assert.All(journal.Checkpoints, checkpoint => Assert.True(checkpoint.Attempted));
     }
 
     [Fact]
@@ -32,7 +48,7 @@ public sealed class AccountSwitchTests
     }
 
     [Fact]
-    public async Task DisconnectAfterRemoteWriteRestoresAttemptedTargetsInReverseOrder()
+    public async Task DisconnectAfterRemoteWriteRestoresEveryAttemptedTarget()
     {
         using var fixture = new Fixture();
         var ssh = fixture.Target("ssh");
@@ -40,10 +56,57 @@ public sealed class AccountSwitchTests
         wsl.FailAt = "apply";
         var result = await fixture.Coordinator.SwitchAsync(2, [ssh, wsl, fixture.Target("windows", local: true)]);
         Assert.Equal("failed", result.State);
-        Assert.Equal(new[] { "wsl:restore", "ssh:restore" }, fixture.Events.Where(value => value.EndsWith(":restore")));
+        Assert.Equal(new[] { "windows:restore", "wsl:restore", "ssh:restore" }, fixture.Events.Where(value => value.EndsWith(":restore")));
         Assert.Equal(1, ssh.Active);
         Assert.Equal(1, wsl.Active);
-        Assert.DoesNotContain("windows:apply", fixture.Events);
+        Assert.Contains("windows:apply", fixture.Events);
+    }
+
+    [Fact]
+    public async Task RollbackWaitsForLateWriterAfterAnotherDeviceFails()
+    {
+        using var fixture = new Fixture();
+        var releaseWriter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failureReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slow = fixture.Target("slow");
+        slow.ApplyWait = () => releaseWriter.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var failing = fixture.Target("failing");
+        failing.FailAt = "apply";
+        failing.AfterApply = () => failureReached.TrySetResult();
+        var operation = fixture.Coordinator.SwitchAsync(2, [slow, failing]);
+        try
+        {
+            await failureReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(operation.IsCompleted);
+            Assert.DoesNotContain(fixture.Events, value => value.EndsWith(":restore"));
+        }
+        finally { releaseWriter.TrySetResult(); }
+        var result = await operation;
+        Assert.Equal("failed", result.State);
+        Assert.Equal(1, slow.Active);
+        Assert.Equal(1, failing.Active);
+        Assert.All(result.Targets, target => Assert.Equal("restored", target.State));
+    }
+
+    [Fact]
+    public async Task FailedPreflightWaitsForAndReleasesLateCheckpointWithoutApplying()
+    {
+        using var fixture = new Fixture();
+        var releasePreparation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slow = fixture.Target("slow");
+        slow.PrepareWait = () => releasePreparation.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var failing = fixture.Target("failing");
+        failing.FailAt = "prepare";
+        var operation = fixture.Coordinator.SwitchAsync(2, [slow, failing]);
+        try
+        {
+            Assert.False(operation.IsCompleted);
+            Assert.DoesNotContain(fixture.Events, value => value.EndsWith(":apply"));
+        }
+        finally { releasePreparation.TrySetResult(); }
+        Assert.Equal("failed", (await operation).State);
+        Assert.Contains("slow:release", fixture.Events);
+        Assert.DoesNotContain(fixture.Events, value => value.EndsWith(":apply") || value.EndsWith(":restore"));
     }
 
     [Fact]
@@ -152,7 +215,7 @@ public sealed class AccountSwitchTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "syncbar-switch-tests-" + Guid.NewGuid().ToString("N"));
         public WindowsPaths Paths { get; }
         public AccountSwitchCoordinator Coordinator { get; }
-        public List<string> Events { get; } = [];
+        public ConcurrentQueue<string> Events { get; } = new();
         public Fixture()
         {
             Paths = new WindowsPaths(Path.Combine(_root, "home"), Path.Combine(_root, "local"));
@@ -162,7 +225,18 @@ public sealed class AccountSwitchTests
         public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
     }
 
-    private sealed class FakeTarget(string id, bool isLocal, List<string> events, string journalPath) : IAccountTarget
+    private sealed class PhaseBarrier(int participants)
+    {
+        private readonly TaskCompletionSource _allStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _remaining = participants;
+        public Task ArriveAsync()
+        {
+            if (Interlocked.Decrement(ref _remaining) == 0) _allStarted.TrySetResult();
+            return _allStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    private sealed class FakeTarget(string id, bool isLocal, ConcurrentQueue<string> events, string journalPath) : IAccountTarget
     {
         public string Id => id;
         public string DisplayName => id;
@@ -172,40 +246,47 @@ public sealed class AccountSwitchTests
         public string? FailAt { get; set; }
         public bool FailRestore { get; set; }
         public Action? AfterApply { get; set; }
-        public Task<string> PrepareAsync(int profileId, CancellationToken cancellationToken)
+        public Func<Task>? PrepareWait { get; set; }
+        public Func<Task>? ApplyWait { get; set; }
+        public Func<Task>? VerifyWait { get; set; }
+        public async Task<string> PrepareAsync(int profileId, CancellationToken cancellationToken)
         {
-            events.Add(id + ":prepare");
+            events.Enqueue(id + ":prepare");
+            if (PrepareWait is not null) await PrepareWait();
             if (FailAt == "prepare") throw new IOException("preflight failure");
-            return Task.FromResult(Active.ToString());
+            return Active.ToString();
         }
-        public Task ApplyAsync(int profileId, CancellationToken cancellationToken)
+        public async Task ApplyAsync(int profileId, CancellationToken cancellationToken)
         {
-            var journal = JsonSerializer.Deserialize<SwitchJournal>(File.ReadAllText(journalPath));
-            Assert.True(journal!.Checkpoints.Single(checkpoint => checkpoint.Id == id).Attempted);
-            events.Add(id + ":apply");
+            using (var stream = new FileStream(journalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                var journal = JsonSerializer.Deserialize<SwitchJournal>(stream);
+                Assert.True(journal!.Checkpoints.Single(checkpoint => checkpoint.Id == id).Attempted);
+            }
+            events.Enqueue(id + ":apply");
+            if (ApplyWait is not null) await ApplyWait();
             Active = profileId;
             AfterApply?.Invoke();
             if (FailAt == "apply") throw new IOException("connection lost after write: test-access-secret");
-            return Task.CompletedTask;
         }
-        public Task VerifyAsync(int profileId, CancellationToken cancellationToken)
+        public async Task VerifyAsync(int profileId, CancellationToken cancellationToken)
         {
-            events.Add(id + ":verify");
+            events.Enqueue(id + ":verify");
+            if (VerifyWait is not null) await VerifyWait();
             if (FailAt == "verify") throw new IOException("verification failure");
             Assert.Equal(profileId, Active);
-            return Task.CompletedTask;
         }
         public Task RestoreAsync(string checkpoint, CancellationToken cancellationToken)
         {
             Assert.False(cancellationToken.IsCancellationRequested);
-            events.Add(id + ":restore");
+            events.Enqueue(id + ":restore");
             if (FailRestore) throw new IOException("device offline: test-access-secret");
             Active = int.Parse(checkpoint);
             return Task.CompletedTask;
         }
         public Task ReleaseAsync(string checkpoint, CancellationToken cancellationToken)
         {
-            events.Add(id + ":release");
+            events.Enqueue(id + ":release");
             return Task.CompletedTask;
         }
     }

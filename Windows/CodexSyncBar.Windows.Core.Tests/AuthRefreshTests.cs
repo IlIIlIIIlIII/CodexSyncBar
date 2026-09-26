@@ -7,6 +7,47 @@ namespace CodexSyncBar.Windows.Core.Tests;
 public sealed class AuthRefreshTests
 {
     [Fact]
+    public void StartupCleansLogOnlyRemnantsOfCompletedRefresh()
+    {
+        using var fixture = new Fixture();
+        var runtime = Path.Combine(fixture.Paths.LoginSessionsDirectory, "refresh-profile-1-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtime);
+        File.WriteAllText(Path.Combine(runtime, "logs_2.sqlite"), "leftover log");
+        Assert.Empty(new AuthRefreshTransactionStore(fixture.Paths, fixture.Auth).Recover());
+        Assert.False(Directory.Exists(runtime));
+        Assert.Equal("refresh-original", fixture.Auth.ReadCredentials(1).RefreshToken);
+    }
+
+    [WindowsFact]
+    public void LockedLogRemnantDoesNotBlockRecoveryAndIsRemovedOnLaterRetry()
+    {
+        using var fixture = new Fixture();
+        var runtime = Path.Combine(fixture.Paths.LoginSessionsDirectory, "refresh-profile-1-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtime);
+        var transactions = new AuthRefreshTransactionStore(fixture.Paths, fixture.Auth);
+        using (var lockedLog = new FileStream(Path.Combine(runtime, "logs_2.sqlite-shm"),
+            FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            Assert.Empty(transactions.Recover());
+            Assert.True(Directory.Exists(runtime));
+        }
+        Assert.Empty(transactions.Recover());
+        Assert.False(Directory.Exists(runtime));
+    }
+
+    [Fact]
+    public void MissingJournalNeverDiscardsPotentiallyRotatedCredentials()
+    {
+        using var fixture = new Fixture();
+        var runtime = Path.Combine(fixture.Paths.LoginSessionsDirectory, "refresh-profile-1-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(runtime);
+        WriteAuth(Path.Combine(runtime, "auth.json"), AuthFile("uncommitted"));
+        Assert.Single(new AuthRefreshTransactionStore(fixture.Paths, fixture.Auth).Recover());
+        Assert.Equal("refresh-uncommitted", fixture.Auth.ReadAuthFile(Path.Combine(runtime, "auth.json")).Tokens.RefreshToken);
+        Assert.Equal("refresh-original", fixture.Auth.ReadCredentials(1).RefreshToken);
+    }
+
+    [Fact]
     public async Task RotationSurvivesFailureAfterServerHasAlreadyIssuedNewRefreshToken()
     {
         using var fixture = new Fixture();

@@ -261,7 +261,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="연결된 장치" Style="{StaticResource SectionTitle}" />
-                                    <TextBlock Text="활성화한 장치에 선택한 계정을 함께 적용합니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
+                                    <TextBlock Text="SSH 장치를 선택하면 해당 장치에만 선택한 계정을 적용할 수 있습니다." Style="{StaticResource MutedText}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <DropDownButton Grid.Column="1" Content="장치 추가" VerticalAlignment="Top">
                                     <DropDownButton.Flyout><MenuFlyout>
@@ -285,6 +285,9 @@
                                     </Grid>
                                 </DataTemplate></ListView.ItemTemplate>
                             </ListView>
+                                <Button x:Name="ApplySshDeviceButton" Content="선택 SSH 장치에만 적용" Click="ApplySshDeviceButton_Click"
+                                        AutomationProperties.AutomationId="ApplySshDeviceButton" AutomationProperties.Name="선택 계정을 선택한 SSH 장치에만 적용"
+                                        ToolTipService.ToolTip="왼쪽에서 선택한 계정을 선택한 SSH 장치에만 적용합니다. 이 PC와 다른 장치의 계정은 유지됩니다." />
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Content="상태 새로고침" Click="RefreshDevicesButton_Click" />
                                 <DropDownButton Content="선택 장치 관리"><DropDownButton.Flyout><MenuFlyout>

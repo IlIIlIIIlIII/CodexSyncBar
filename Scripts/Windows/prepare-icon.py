@@ -23,12 +23,16 @@ for name, size in {
     "SyncBarIcon.png": (64, 64),
     "StoreLogo.png": (50, 50),
     "Square44x44Logo.scale-200.png": (88, 88),
-    "Square44x44Logo.targetsize-24_altform-unplated.png": (24, 24),
-    "Square44x44Logo.targetsize-48_altform-lightunplated.png": (48, 48),
     "Square150x150Logo.scale-200.png": (300, 300),
     "LockScreenLogo.scale-200.png": (48, 48),
 }.items():
     save_png(name, size)
+# Start pins, search, and the taskbar request target-size assets in both themes.
+# Missing unplated variants make Windows shrink the logo onto a backplate.
+for target_size in (16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256):
+    for variant in ("", "_altform-unplated", "_altform-lightunplated"):
+        save_png(f"Square44x44Logo.targetsize-{target_size}{variant}.png",
+                 (target_size, target_size))
 save_png("Wide310x150Logo.scale-200.png", (620, 300), (240, 240))
 save_png("SplashScreen.scale-200.png", (1240, 600), (320, 320))
 master.save(assets / "AppIcon.ico", format="ICO",

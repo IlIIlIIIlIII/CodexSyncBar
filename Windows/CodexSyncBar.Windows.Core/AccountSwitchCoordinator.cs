@@ -38,6 +38,7 @@ public sealed class SwitchCheckpoint
 public sealed class AccountSwitchCoordinator(WindowsPaths paths)
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private readonly object _journalGate = new();
     public string JournalPath => Path.Combine(paths.StateRoot, "switch-operation.json");
     public event Action<SwitchOperation>? Progress;
 
@@ -72,35 +73,45 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
             Operation = new SwitchOperation
             {
                 Id = operationId ?? Guid.NewGuid().ToString("N"), ProfileId = profileId,
-                State = "preflight", Message = "모든 장치를 확인하고 있습니다.", StartedAt = DateTimeOffset.UtcNow,
+                State = "preflight", Message = "적용 대상 장치를 확인하고 있습니다.", StartedAt = DateTimeOffset.UtcNow,
                 Targets = ordered.Select(target => new SwitchTargetResult(target.Id, target.DisplayName, "pending")).ToArray(),
             },
         };
         Save(journal);
         try
         {
-            foreach (var target in ordered)
-            {
-                var checkpoint = await target.PrepareAsync(profileId, cancellationToken);
-                journal.Checkpoints.Add(new SwitchCheckpoint { Id = target.Id, Fingerprint = target.ConfigurationFingerprint, Value = checkpoint });
-                SetTarget(journal, target.Id, "ready");
-            }
-            SetState(journal, "applying", "선택한 계정을 적용하고 있습니다.");
-            foreach (var target in ordered)
+            await Task.WhenAll(ordered.Select(async target =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                journal.Checkpoints.Single(checkpoint => checkpoint.Id == target.Id).Attempted = true;
-                SetTarget(journal, target.Id, "applying"); // durable intent precedes the first write
+                var checkpoint = await target.PrepareAsync(profileId, cancellationToken);
+                lock (_journalGate)
+                {
+                    journal.Checkpoints.Add(new SwitchCheckpoint { Id = target.Id, Fingerprint = target.ConfigurationFingerprint, Value = checkpoint });
+                    SetTarget(journal, target.Id, "ready");
+                }
+            }));
+            SetState(journal, "applying", "선택한 계정을 적용하고 있습니다.");
+            // WhenAll settles every in-flight write before the catch block can roll back.
+            await Task.WhenAll(ordered.Select(async target =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (_journalGate)
+                {
+                    journal.Checkpoints.Single(checkpoint => checkpoint.Id == target.Id).Attempted = true;
+                    SetTarget(journal, target.Id, "applying"); // durable intent precedes the first write
+                }
                 await target.ApplyAsync(profileId, cancellationToken);
                 SetTarget(journal, target.Id, "applied");
-            }
-            SetState(journal, "verifying", "모든 장치의 적용 결과를 확인하고 있습니다.");
-            foreach (var target in ordered)
+            }));
+            SetState(journal, "verifying", "적용 대상 장치의 결과를 확인하고 있습니다.");
+            await Task.WhenAll(ordered.Select(async target =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 await target.VerifyAsync(profileId, cancellationToken);
                 SetTarget(journal, target.Id, "verified");
-            }
-            SetState(journal, "completed", "모든 장치에 적용했습니다.", finished: true);
+            }));
+            SetState(journal, "completed", ordered.Length == 1
+                ? $"{ordered[0].DisplayName}에 계정을 적용했습니다." : "모든 대상 장치에 적용했습니다.", finished: true);
             await ReleaseAsync(journal, targets);
             return journal.Operation;
         }
@@ -162,11 +173,14 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
 
     private void SetTarget(SwitchJournal journal, string id, string state, string? detail = null)
     {
-        journal.Operation = journal.Operation with
+        lock (_journalGate)
         {
-            Targets = journal.Operation.Targets.Select(target => target.Id == id ? target with { State = state, Detail = detail } : target).ToArray(),
-        };
-        Save(journal);
+            journal.Operation = journal.Operation with
+            {
+                Targets = journal.Operation.Targets.Select(target => target.Id == id ? target with { State = state, Detail = detail } : target).ToArray(),
+            };
+            Save(journal);
+        }
     }
 
     private void SetState(SwitchJournal journal, string state, string message, bool finished = false)
@@ -176,6 +190,11 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
     }
 
     private void Save(SwitchJournal journal)
+    {
+        lock (_journalGate) SaveCore(journal);
+    }
+
+    private void SaveCore(SwitchJournal journal)
     {
         paths.EnsureDirectories();
         WindowsPathSafety.EnsureFile(JournalPath, "계정 전환 복구 기록");
@@ -194,6 +213,11 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
     }
 
     private SwitchJournal? ReadJournal()
+    {
+        lock (_journalGate) return ReadJournalCore();
+    }
+
+    private SwitchJournal? ReadJournalCore()
     {
         WindowsPathSafety.EnsureFile(JournalPath, "계정 전환 복구 기록");
         if (!File.Exists(JournalPath)) return null;

@@ -28,7 +28,7 @@ internal static class WindowsPathSafety
 
     // Establish permissions on an empty new file before any credential bytes
     // are written. Never relax an existing file's security during replacement.
-    public static void WritePrivateBytes(string path, byte[] contents)
+    public static void WritePrivateBytes(string path, byte[] contents, SecurityIdentifier? additionalReader = null)
     {
         EnsureFile(path, "비공개 파일");
         EnsureSafeAncestors(path);
@@ -40,6 +40,8 @@ internal static class WindowsPathSafety
             security.SetOwner(user);
             security.SetAccessRuleProtection(true, false);
             security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl, AccessControlType.Allow));
+            if (additionalReader is not null)
+                security.AddAccessRule(new FileSystemAccessRule(additionalReader, FileSystemRights.ReadAndExecute, AccessControlType.Allow));
             using var stream = new FileInfo(path).Create(FileMode.CreateNew, FileSystemRights.FullControl,
                 FileShare.None, 4096, FileOptions.WriteThrough, security);
             stream.Write(contents);
@@ -69,9 +71,10 @@ internal static class WindowsPathSafety
     public static byte[] ReadPrivateFile(
         string path,
         string description,
-        long maximumBytes)
+        long maximumBytes,
+        SecurityIdentifier? additionalReader = null)
     {
-        EnsurePrivateFile(path, description, maximumBytes);
+        EnsurePrivateFile(path, description, maximumBytes, additionalReader);
         if (!File.Exists(path))
         {
             return [];
@@ -90,7 +93,8 @@ internal static class WindowsPathSafety
     public static void EnsurePrivateFile(
         string path,
         string description,
-        long maximumBytes)
+        long maximumBytes,
+        SecurityIdentifier? additionalReader = null)
     {
         EnsureFile(path, description);
         if (!File.Exists(path))
@@ -139,6 +143,15 @@ internal static class WindowsPathSafety
                 includeInherited: true,
                 targetType: typeof(SecurityIdentifier)))
             {
+                // The active CLI file may already be readable by Codex's local
+                // sandbox group. This exception must never grant it write access.
+                if (additionalReader is not null && rule.IdentityReference.Equals(additionalReader)
+                    && rule.AccessControlType == AccessControlType.Allow)
+                {
+                    if ((rule.FileSystemRights & ~(FileSystemRights.ReadAndExecute | FileSystemRights.Synchronize)) != 0)
+                        throw new CodexSyncBarException($"{description}에 Codex 샌드박스의 읽기 범위를 넘는 권한이 있습니다: {path}");
+                    continue;
+                }
                 if (rule.AccessControlType == AccessControlType.Allow
                     && rule.IdentityReference is SecurityIdentifier identity
                     && !allowedReaders.Contains(identity.Value)
@@ -200,13 +213,30 @@ internal static class WindowsPathSafety
         {
             using var identity = WindowsIdentity.GetCurrent();
             var user = identity.User ?? throw new CodexSyncBarException("Windows 사용자 SID를 확인하지 못했습니다.");
+            var directory = new DirectoryInfo(path);
+            var existing = directory.GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
+            var rules = existing.GetAccessRules(true, true, typeof(SecurityIdentifier));
+            // Reapplying an inheritable DACL propagates through the directory's
+            // children. Reads call this frequently; validate every time, but
+            // only write when the owner or exact private ACL actually differs.
+            if (user.Equals(existing.GetOwner(typeof(SecurityIdentifier)))
+                && existing.AreAccessRulesProtected
+                && rules.Count == 1
+                && rules[0] is FileSystemAccessRule rule
+                && !rule.IsInherited
+                && rule.IdentityReference.Equals(user)
+                && rule.AccessControlType == AccessControlType.Allow
+                && rule.FileSystemRights == FileSystemRights.FullControl
+                && rule.InheritanceFlags == (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit)
+                && rule.PropagationFlags == PropagationFlags.None)
+                return;
             var security = new DirectorySecurity();
             security.SetOwner(user);
             security.SetAccessRuleProtection(true, false);
             security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None, AccessControlType.Allow));
-            new DirectoryInfo(path).SetAccessControl(security);
+            directory.SetAccessControl(security);
         }
         else
         {

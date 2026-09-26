@@ -5,6 +5,21 @@ namespace CodexSyncBar.Windows.Core.Tests;
 public sealed class SshUploadFileTests
 {
     [Fact]
+    public void BundledRemoteScriptsUseUnixLineEndingsWhileArchivesKeepOriginalBytes()
+    {
+        var paths = new WindowsPaths(Path.GetTempPath(), Path.GetTempPath());
+        var script = System.Text.Encoding.UTF8.GetBytes("#!/usr/bin/env bash\r\nset -eu\r\necho ok\r\n");
+        foreach (var source in new[] { paths.BundledGptSwitch, paths.BundledAskPass, paths.BundledUsageSummary })
+        {
+            var result = SshUploadFile.PrepareContents(paths, source, script);
+            Assert.Equal("#!/usr/bin/env bash\nset -eu\necho ok\n", System.Text.Encoding.UTF8.GetString(result));
+            Assert.Equal(result, SshUploadFile.PrepareContents(paths, source, result));
+        }
+        byte[] archive = [0, 255, 13, 10, 128];
+        Assert.Equal(archive, SshUploadFile.PrepareContents(paths, Path.Combine(paths.StateRoot, "recovery.tar"), archive));
+    }
+
+    [Fact]
     public void PackageRootLinkIsAcceptedButRuntimeLinksAndEscapesAreRejected()
     {
         var root = Path.Combine(Path.GetTempPath(), "syncbar-package-link-" + Guid.NewGuid().ToString("N"));

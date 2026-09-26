@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace CodexSyncBar.Windows.Core;
 
@@ -50,6 +52,17 @@ public sealed class AuthStore
     }
 
     public string ProfileAuthFile(int profileId) => _paths.ProfileAuthFile(profileId);
+
+    private bool IsActivePath(string path) => Path.GetFullPath(path).Equals(
+        Path.GetFullPath(_paths.ActiveAuthFile), StringComparison.OrdinalIgnoreCase);
+
+    // Qualify with this machine: never accept a same-named domain principal.
+    private SecurityIdentifier? ActiveSandboxReader(string path)
+    {
+        if (!OperatingSystem.IsWindows() || !IsActivePath(path)) return null;
+        try { return (SecurityIdentifier)new NTAccount(Environment.MachineName, "CodexSandboxUsers").Translate(typeof(SecurityIdentifier)); }
+        catch (IdentityNotMappedException) { return null; }
+    }
 
     /// <summary>Call under the controller lock after transaction recovery.</summary>
     public void ProtectLegacyProfiles()
@@ -103,7 +116,7 @@ public sealed class AuthStore
 
         try
         {
-            var bytes = WindowsPathSafety.ReadPrivateFile(path, "Codex 인증 파일", 16 * 1024 * 1024);
+            var bytes = WindowsPathSafety.ReadPrivateFile(path, "Codex 인증 파일", 16 * 1024 * 1024, ActiveSandboxReader(path));
             using (var envelope = JsonDocument.Parse(bytes))
             {
                 if (envelope.RootElement.TryGetProperty("protectedAuth", out var protectedAuth))
@@ -163,7 +176,7 @@ public sealed class AuthStore
                 WindowsPathSafety.ReadPrivateFile(
                     _paths.ActiveAuthFile,
                     "활성 Codex 인증 파일",
-                    16 * 1024 * 1024),
+                    16 * 1024 * 1024, ActiveSandboxReader(_paths.ActiveAuthFile)),
                 JsonOptions);
             return auth?.Tokens?.AccountId;
         }
@@ -283,12 +296,19 @@ public sealed class AuthStore
     private void WriteJsonAtomically(string destination, CodexAuthFile auth)
     {
         EnsureSafeFile(destination);
+        var sandboxReader = ActiveSandboxReader(destination);
+        SecurityIdentifier? preservedReader = null;
         if (File.Exists(destination))
         {
             WindowsPathSafety.EnsurePrivateFile(
                 destination,
                 "Codex 인증 파일",
-                16 * 1024 * 1024);
+                16 * 1024 * 1024, sandboxReader);
+            if (OperatingSystem.IsWindows() && sandboxReader is not null
+                && new FileInfo(destination).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier))
+                    .OfType<FileSystemAccessRule>().Any(rule => OperatingSystem.IsWindows() && rule.AccessControlType == AccessControlType.Allow
+                        && rule.IdentityReference.Equals(sandboxReader) && (rule.FileSystemRights & FileSystemRights.ReadData) != 0))
+                preservedReader = sandboxReader;
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -310,14 +330,14 @@ public sealed class AuthStore
                 protectedAuth = Convert.ToBase64String(WindowsSecretStore.Protect(bytes, "codex-account-auth-v1")),
             });
         }
-        WindowsPathSafety.WritePrivateBytes(temporary, bytes);
+        WindowsPathSafety.WritePrivateBytes(temporary, bytes, preservedReader);
         try
         {
             File.Move(temporary, destination, overwrite: true);
             WindowsPathSafety.EnsurePrivateFile(
                 destination,
                 "Codex 인증 파일",
-                16 * 1024 * 1024);
+                16 * 1024 * 1024, sandboxReader);
         }
         finally
         {

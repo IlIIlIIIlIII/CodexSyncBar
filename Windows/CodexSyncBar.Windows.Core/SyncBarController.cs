@@ -105,6 +105,8 @@ public sealed class SyncBarController : IDisposable
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default, bool recoverStoppedWsl = false)
     {
+        // Recovery includes synchronous filesystem, credential and process work.
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         using (await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: cancellationToken))
         {
             var configuration = _configurationStore.LoadOrCreate();
@@ -137,7 +139,7 @@ public sealed class SyncBarController : IDisposable
             }
         }
         lock (_gate) { _deviceGeneration++; _lastDeviceRefresh = DateTimeOffset.MinValue; }
-        _background ??= RunBackgroundAsync(_lifetime.Token);
+        _background ??= Task.Run(() => RunBackgroundAsync(_lifetime.Token));
     }
 
     public async Task RetryRecoveryAsync(CancellationToken cancellationToken = default)
@@ -150,8 +152,9 @@ public sealed class SyncBarController : IDisposable
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public Task<DashboardSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+    public async Task<DashboardSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         cancellationToken.ThrowIfCancellationRequested();
         var configuration = _configurationStore.LoadOrCreate();
         var wsl = new WslConfigurationStore(_paths).Load();
@@ -169,17 +172,18 @@ public sealed class SyncBarController : IDisposable
             foreach (var device in wsl.Where(device => device.Enabled))
                 devices.Add(_devices.FirstOrDefault(status => status.Id == device.Id)
                     ?? new(device.Id, device.Distribution, "wsl", null, false, "상태 확인 전"));
-            return Task.FromResult(new DashboardSnapshot
+            return new DashboardSnapshot
             {
                 ConfigurationRevision = ComputeRevision(configuration, wsl), Accounts = accounts, Devices = devices,
                 ActiveProfileId = active, IsBusy = _switchRunning, Operation = _operation, Error = _error,
                 UpdatedAt = _lastUsageRefresh == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _lastUsageRefresh,
-            });
+            };
         }
     }
 
     public async Task<DashboardSnapshot> RefreshUsageAsync(CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         await _refreshGate.WaitAsync(cancellationToken);
         try
         {
@@ -243,14 +247,28 @@ public sealed class SyncBarController : IDisposable
         return await GetSnapshotAsync(cancellationToken);
     }
 
-    public async Task<SwitchOperation> SwitchAccountAsync(int profileId, string expectedConfigurationRevision,
+    public Task<SwitchOperation> SwitchAccountAsync(int profileId, string expectedConfigurationRevision,
+        CancellationToken cancellationToken = default) =>
+        QueueSwitchAsync(profileId, expectedConfigurationRevision, null, cancellationToken);
+
+    public Task<SwitchOperation> SwitchSshDeviceAccountAsync(int profileId, string deviceId, string expectedConfigurationRevision,
         CancellationToken cancellationToken = default)
     {
-        var snapshot = await GetSnapshotAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(deviceId))
+            throw new CodexSyncBarException("계정을 적용할 SSH 장치를 선택해 주세요.");
+        return QueueSwitchAsync(profileId, expectedConfigurationRevision, deviceId, cancellationToken);
+    }
+
+    private async Task<SwitchOperation> QueueSwitchAsync(int profileId, string expectedConfigurationRevision, string? sshDeviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
         if (snapshot.ConfigurationRevision != expectedConfigurationRevision)
             throw new CodexSyncBarException("계정 또는 장치 설정이 변경되었습니다. 새로고침한 후 다시 적용해 주세요.");
         if (!snapshot.Accounts.Any(account => account.ProfileId == profileId && !account.NeedsLogin))
             throw new CodexSyncBarException("이 계정은 삭제되었거나 로그인이 필요합니다.");
+        if (sshDeviceId is not null)
+            EnsureEnabledSshDevice(_configurationStore.LoadOrCreate(), sshDeviceId);
         SwitchOperation operation;
         lock (_gate)
         {
@@ -261,13 +279,14 @@ public sealed class SyncBarController : IDisposable
             operation = new SwitchOperation { Id = Guid.NewGuid().ToString("N"), ProfileId = profileId, State = "queued", Message = "계정 전환을 준비하고 있습니다." };
             _operation = operation;
         }
-        _ = ExecuteSwitchAsync(operation, expectedConfigurationRevision);
+        _ = Task.Run(() => ExecuteSwitchAsync(operation, expectedConfigurationRevision, sshDeviceId));
         Changed?.Invoke(this, EventArgs.Empty);
         return operation;
     }
 
     public async Task<SwitchOperation> LogoutAccountAsync(int profileId, int fallbackProfileId, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         if (profileId == fallbackProfileId) throw new CodexSyncBarException("다른 계정을 선택한 후 로그아웃해 주세요.");
         lock (_gate)
         {
@@ -307,7 +326,7 @@ public sealed class SyncBarController : IDisposable
         lock (_gate) return Task.FromResult(_operation?.Id == operationId ? _operation : null);
     }
 
-    private async Task ExecuteSwitchAsync(SwitchOperation operation, string revision)
+    private async Task ExecuteSwitchAsync(SwitchOperation operation, string revision, string? sshDeviceId)
     {
         try
         {
@@ -318,7 +337,14 @@ public sealed class SyncBarController : IDisposable
             if (ComputeRevision(configuration, new WslConfigurationStore(_paths).Load()) != revision)
                 throw new CodexSyncBarException("계정 또는 장치 설정이 변경되었습니다. 새로고침한 후 다시 적용해 주세요.");
             _ = _auth.ReadCredentials(operation.ProfileId);
-            await _coordinator.SwitchAsync(operation.ProfileId, CreateTargets(configuration), operation.Id, _lifetime.Token);
+            if (sshDeviceId is not null) EnsureEnabledSshDevice(configuration, sshDeviceId);
+            var targets = CreateTargets(configuration);
+            if (sshDeviceId is not null)
+            {
+                targets = targets.Where(target => target.Id == "ssh:" + sshDeviceId && !target.IsLocal).ToArray();
+                if (targets.Count != 1) throw new CodexSyncBarException("선택한 SSH 장치를 확인하지 못했습니다.");
+            }
+            await _coordinator.SwitchAsync(operation.ProfileId, targets, operation.Id, _lifetime.Token);
         }
         catch (Exception)
         {
@@ -335,6 +361,7 @@ public sealed class SyncBarController : IDisposable
 
     public async Task RefreshDevicesAsync(CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         long generation;
         long request;
         lock (_gate)
@@ -449,6 +476,12 @@ public sealed class SyncBarController : IDisposable
             Id = "refresh-recovery", State = "recoveryRequired", Message = "이전 인증 갱신의 복구를 완료해 주세요.",
         };
         throw new CodexSyncBarException("이전 인증 갱신의 복구를 먼저 완료해 주세요.");
+    }
+
+    private static void EnsureEnabledSshDevice(AppConfiguration configuration, string deviceId)
+    {
+        if (!configuration.Devices.Any(device => device.Id == deviceId && device.Enabled))
+            throw new CodexSyncBarException("설치 및 활성화가 완료된 SSH 장치를 선택해 주세요.");
     }
 
     private IReadOnlyList<IAccountTarget> CreateTargets(AppConfiguration configuration) =>

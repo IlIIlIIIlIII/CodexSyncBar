@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Security.AccessControl;
+using System.Security.Principal;
 using CodexSyncBar.Windows.Core;
 
 namespace CodexSyncBar.Windows.Core.Tests;
@@ -73,6 +74,53 @@ public sealed class AuthVaultTests : IDisposable
         }
         else
             Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(_paths.ActiveAuthFile));
+    }
+
+    [Fact]
+    public void ActiveAuthRejectsGeneralReaders()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        _store.ImportAuth(Source(), 1);
+        _store.SwitchActive(1);
+        var file = new FileInfo(_paths.ActiveAuthFile);
+        var acl = file.GetAccessControl();
+        acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.Read, AccessControlType.Allow));
+        file.SetAccessControl(acl);
+        Assert.Throws<CodexSyncBarException>(() => _store.ReadActiveAccountId());
+        Assert.Throws<CodexSyncBarException>(() => _store.SwitchActive(1));
+    }
+
+    [Fact]
+    public void CodexSandboxReadAccessIsAcceptedOnlyForActiveAuthAndPreservedOnSwitch()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        SecurityIdentifier sandbox;
+        try { sandbox = (SecurityIdentifier)new NTAccount(Environment.MachineName, "CodexSandboxUsers").Translate(typeof(SecurityIdentifier)); }
+        catch (IdentityNotMappedException) { return; } // Requires an installed Codex Windows sandbox.
+        _store.ImportAuth(Source(), 1);
+        _store.SwitchActive(1);
+        void GrantRead(string path)
+        {
+            var file = new FileInfo(path);
+            var acl = file.GetAccessControl();
+            acl.AddAccessRule(new FileSystemAccessRule(sandbox, FileSystemRights.ReadAndExecute, AccessControlType.Allow));
+            file.SetAccessControl(acl);
+        }
+        GrantRead(_paths.ActiveAuthFile);
+        Assert.Equal("test-account", _store.ReadActiveAccountId());
+        Assert.Equal("test-refresh", _store.ReadActiveAuth()!.Tokens.RefreshToken);
+        _store.SwitchActive(1);
+        Assert.Contains(new FileInfo(_paths.ActiveAuthFile).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier))
+            .OfType<FileSystemAccessRule>(), rule => OperatingSystem.IsWindows() && rule.IdentityReference.Equals(sandbox)
+                && rule.AccessControlType == AccessControlType.Allow && (rule.FileSystemRights & FileSystemRights.ReadData) != 0);
+        GrantRead(_paths.ProfileAuthFile(1));
+        Assert.Throws<CodexSyncBarException>(() => _store.ReadCredentials(1));
+        var active = new FileInfo(_paths.ActiveAuthFile);
+        var writable = active.GetAccessControl();
+        writable.AddAccessRule(new FileSystemAccessRule(sandbox, FileSystemRights.Read | FileSystemRights.Write, AccessControlType.Allow));
+        active.SetAccessControl(writable);
+        Assert.Throws<CodexSyncBarException>(() => _store.ReadActiveAccountId());
     }
 
     [Fact]

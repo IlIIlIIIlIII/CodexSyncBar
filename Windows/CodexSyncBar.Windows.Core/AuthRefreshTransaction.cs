@@ -20,14 +20,19 @@ public sealed class AuthRefreshTransactionStore(WindowsPaths paths, AuthStore au
     public bool TryComplete(string runtime)
     {
         var manifestPath = Path.Combine(runtime, "refresh-manifest.json");
-        if (!File.Exists(manifestPath)) return false;
+        var source = Path.Combine(runtime, "auth.json");
+        // Recursive cleanup can remove the credentials and journal before a
+        // locked CLI log/database stops it. Such leftovers need only cleanup.
+        // An auth file without its journal still needs recovery; never discard it.
+        WindowsPathSafety.EnsureFile(manifestPath, "인증 갱신 복구 기록");
+        WindowsPathSafety.EnsureFile(source, "인증 갱신 임시 파일");
+        if (!File.Exists(manifestPath)) return !File.Exists(source);
         var manifest = JsonSerializer.Deserialize<AuthRefreshManifest>(WindowsPathSafety.ReadPrivateFile(manifestPath, "인증 갱신 복구 기록", 8192))
             ?? throw new CodexSyncBarException("인증 갱신 복구 기록이 올바르지 않습니다.");
         if (manifest.ProfileId <= 0 || !Regex.IsMatch(manifest.AccountFingerprint, "^[a-f0-9]{64}$")
             || !Regex.IsMatch(manifest.OriginalGeneration, "^[a-f0-9]{64}$"))
             throw new CodexSyncBarException("인증 갱신 복구 기록이 올바르지 않습니다.");
 
-        var source = Path.Combine(runtime, "auth.json");
         var candidate = auth.ReadAuthFile(source);
         if (Fingerprint(candidate.Tokens.AccountId!) != manifest.AccountFingerprint) return false;
         // No rotation happened: even if another CLI has advanced the canonical credentials,
@@ -64,13 +69,22 @@ public sealed class AuthRefreshTransactionStore(WindowsPaths paths, AuthStore au
             try
             {
                 WindowsPathSafety.EnsureDirectory(runtime, "인증 갱신 복구 디렉터리");
-                if (TryComplete(runtime)) Directory.Delete(runtime, recursive: true);
+                if (TryComplete(runtime))
+                {
+                    try { Directory.Delete(runtime, recursive: true); }
+                    catch (IOException) when (HasOnlyCleanupRemaining(runtime)) { }
+                    catch (UnauthorizedAccessException) when (HasOnlyCleanupRemaining(runtime)) { }
+                }
                 else pending.Add(Path.GetFileName(runtime));
             }
             catch (Exception) { pending.Add(Path.GetFileName(runtime)); }
         }
         return pending;
     }
+
+    private static bool HasOnlyCleanupRemaining(string runtime) =>
+        !File.Exists(Path.Combine(runtime, "auth.json"))
+        && !File.Exists(Path.Combine(runtime, "refresh-manifest.json"));
 
     internal static string Generation(CodexAuthFile value) => Fingerprint(value.Tokens.AccessToken + "\0" + value.Tokens.RefreshToken);
     private static string Fingerprint(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));

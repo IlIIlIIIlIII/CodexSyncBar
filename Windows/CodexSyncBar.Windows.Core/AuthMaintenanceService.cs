@@ -106,6 +106,7 @@ public sealed class CodexAuthMaintenanceService
         TimeSpan threshold,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var credentials = _authStore.ReadCredentials(profileId);
         if (credentials.ExpiresAt is { } expiresAt
             && expiresAt - DateTimeOffset.UtcNow > threshold)
@@ -125,6 +126,7 @@ public sealed class CodexAuthMaintenanceService
         int profileId,
         CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         if (_refreshTransactions.Recover().Count > 0)
             throw new CodexSyncBarException("이전 인증 갱신의 복구를 먼저 완료해 주세요.");
         _authStore.ReconcileActiveCredentials(profileId);

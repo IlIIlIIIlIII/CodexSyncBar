@@ -43,6 +43,13 @@ public sealed partial class MainPage : Page
     private readonly TaskCompletionSource<bool> _ready =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int? _selectedProfileId;
+    private int? _activeProfileId;
+    private int _dashboardRefreshRequested;
+    private int _dashboardRefreshScheduled;
+    private Task? _usageRefreshTask;
+    private Task? _tokenRefreshTask;
+    private IReadOnlyList<DashboardDevice>? _renderedDevices;
+    private string? _renderedDeviceRevision;
     private string? _selectedDeviceId;
     private DispatcherTimer? _deviceTimer;
     private DispatcherTimer? _resetCreditsTimer;
@@ -132,7 +139,8 @@ public sealed partial class MainPage : Page
             _menuBarUsagePreferences = _usageDisplayStore.LoadMenuPreferences();
             _weeklyAnchorState = _weeklyAnchorStore.Load();
             _authMaintenanceState = _authMaintenanceStateStore.Load();
-            var activeProfileId = _localSwitchService.GetActiveProfileId(_configuration.Accounts);
+            var activeProfileId = (await Controller.GetSnapshotAsync()).ActiveProfileId;
+            _activeProfileId = activeProfileId;
             var persistedProfileId = _selectedProfileId ?? _selectedProfileStore.Load();
             var selectedId = persistedProfileId.HasValue
                 && _configuration.Accounts.Any(account => account.Id == persistedProfileId)
@@ -186,20 +194,13 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        Controller_Changed(this, EventArgs.Empty);
         await RefreshUsageIfStaleAsync();
     }
 
     internal TrayPopoverSnapshot CreateTrayPopoverSnapshot()
     {
-        int? activeProfileId;
-        try
-        {
-            activeProfileId = _localSwitchService.GetActiveProfileId(_configuration.Accounts);
-        }
-        catch
-        {
-            activeProfileId = null;
-        }
+        var activeProfileId = _activeProfileId;
 
         var selected = _configuration.Accounts.FirstOrDefault(account => account.Id == _selectedProfileId)
             ?? _configuration.Accounts.FirstOrDefault(account => account.Id == activeProfileId)
@@ -460,27 +461,44 @@ public sealed partial class MainPage : Page
         _resetCreditsTimer.Start();
     }
 
-    private void Controller_Changed(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(async () =>
+    private void Controller_Changed(object? sender, EventArgs e)
+    {
+        Interlocked.Exchange(ref _dashboardRefreshRequested, 1);
+        if (Interlocked.CompareExchange(ref _dashboardRefreshScheduled, 1, 0) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(UpdateDashboardAsync))
+            Interlocked.Exchange(ref _dashboardRefreshScheduled, 0);
+    }
+
+    private async void UpdateDashboardAsync()
     {
         try
         {
-            var dashboard = await Controller.GetSnapshotAsync();
-            _weeklyAnchorState = Controller.WeeklyAnchor.Load();
-            _controllerBusy = dashboard.IsBusy;
-            RetryRecoveryButton.Visibility = dashboard.Operation?.State == "recoveryRequired" ? Visibility.Visible : Visibility.Collapsed;
-            if (dashboard.Operation is { } operation)
-                SetBanner(operation.Message, operation.State is "failed" or "recoveryRequired");
-            RenderDashboardDevices(dashboard);
-            UpdateAppliedAccount(dashboard.ActiveProfileId, GetSelectedAccount());
-            foreach (var account in _configuration.Accounts)
+            do
             {
-                CopyCachedUsage(account.Id);
-
-            }
-            SetBusy(_isBusy);
+                Interlocked.Exchange(ref _dashboardRefreshRequested, 0);
+                var controller = Controller;
+                var dashboard = await controller.GetSnapshotAsync();
+                _weeklyAnchorState = await Task.Run(() => controller.WeeklyAnchor.Load());
+                _activeProfileId = dashboard.ActiveProfileId;
+                _controllerBusy = dashboard.IsBusy;
+                RetryRecoveryButton.Visibility = dashboard.Operation?.State == "recoveryRequired" ? Visibility.Visible : Visibility.Collapsed;
+                if (dashboard.Operation is { } operation)
+                    SetBanner(operation.Message, operation.State is "failed" or "recoveryRequired");
+                RenderDashboardDevices(dashboard);
+                UpdateAppliedAccount(dashboard.ActiveProfileId, GetSelectedAccount());
+                foreach (var account in _configuration.Accounts)
+                    CopyCachedUsage(account.Id);
+                SetBusy(_isBusy);
+            } while (Volatile.Read(ref _dashboardRefreshRequested) != 0);
         }
         catch (Exception error) { SetBanner(error.Message, true); }
-    });
+        finally
+        {
+            Interlocked.Exchange(ref _dashboardRefreshScheduled, 0);
+            if (Volatile.Read(ref _dashboardRefreshRequested) != 0)
+                Controller_Changed(this, EventArgs.Empty);
+        }
+    }
 
     private void CopyCachedUsage(int profileId)
     {
@@ -489,8 +507,11 @@ public sealed partial class MainPage : Page
         if (Controller.TryGetUsageSnapshot(profileId) is not { } usage) return;
         _usageSnapshots[profileId] = usage;
         if (profileId != _selectedProfileId) return;
-        _lastUsageSnapshot = usage;
-        RenderUsage(usage);
+        if (!ReferenceEquals(_lastUsageSnapshot, usage))
+        {
+            _lastUsageSnapshot = usage;
+            RenderUsage(usage);
+        }
         UsageStatusText.Text = _usageErrors.GetValueOrDefault(profileId) ?? "사용량을 확인했습니다.";
         AuthStatusText.Text = _usageErrors.ContainsKey(profileId) ? "확인 필요" : "인증 정상";
         SelectedPlanText.Text = usage.Plan;
@@ -643,7 +664,7 @@ public sealed partial class MainPage : Page
 
     private void UpdateSelectedAccount(AccountProfile? account)
     {
-        var activeProfileId = _localSwitchService.GetActiveProfileId(_configuration.Accounts);
+        var activeProfileId = _activeProfileId;
         var hasAccount = account is not null;
         SelectedAliasText.Text = account?.Alias ?? "계정을 선택해 주세요";
         SelectedEmailText.Text = account?.Email ?? string.Empty;
@@ -675,7 +696,9 @@ public sealed partial class MainPage : Page
         EditAliasButtonIsEnabled(hasAccount);
         UpdateAccountOrderActions();
         UpdateLoginActions(account);
+        UpdateDeviceActions();
         ResetUsageView();
+        SetBusy(_isBusy);
         NotifyTrayStateChanged();
     }
 
@@ -709,13 +732,16 @@ public sealed partial class MainPage : Page
             if (cached is null || DateTimeOffset.UtcNow - cached.UpdatedAt > TimeSpan.FromSeconds(30))
                 await RefreshAllUsageAsync();
             CopyCachedUsage(profileId);
-            if (Controller.GetUsageError(profileId) is { } error)
+            if (_selectedProfileId == profileId && Controller.GetUsageError(profileId) is { } error)
                 UsageStatusText.Text = error;
         }
         catch (Exception error) { SetBanner(error.Message, true); }
     }
 
-    private async Task RefreshAllUsageAsync()
+    private Task RefreshAllUsageAsync() =>
+        _usageRefreshTask is { IsCompleted: false } ? _usageRefreshTask : _usageRefreshTask = RefreshAllUsageCoreAsync();
+
+    private async Task RefreshAllUsageCoreAsync()
     {
         _activeUsageRefreshes++;
         UpdateTrayTitle();
@@ -731,14 +757,18 @@ public sealed partial class MainPage : Page
         finally { _activeUsageRefreshes--; UpdateTrayTitle(); }
     }
 
-    private async Task RefreshTokenUsageAsync()
+    private Task RefreshTokenUsageAsync() =>
+        _tokenRefreshTask is { IsCompleted: false } ? _tokenRefreshTask : _tokenRefreshTask = RefreshTokenUsageCoreAsync();
+
+    private async Task RefreshTokenUsageCoreAsync()
     {
         TokenUsageStatusText.Text = "최근 30일 세션 로그를 집계하는 중…";
         try
         {
-            var snapshot = await _tokenUsageService.FetchAsync(
-                _configuration,
-                _sshDeviceService);
+            var configuration = _configuration;
+            var snapshot = await Task.Run(() => _tokenUsageService.FetchAsync(
+                configuration,
+                _sshDeviceService));
             RenderTokenUsage(snapshot);
         }
         catch (OperationCanceledException)
@@ -1000,6 +1030,12 @@ public sealed partial class MainPage : Page
 
     private void RenderDashboardDevices(DashboardSnapshot dashboard)
     {
+        _activeProfileId = dashboard.ActiveProfileId;
+        if (_renderedDeviceRevision == dashboard.ConfigurationRevision
+            && _renderedDevices is not null && _renderedDevices.SequenceEqual(dashboard.Devices))
+            return;
+        _renderedDevices = dashboard.Devices.ToArray();
+        _renderedDeviceRevision = dashboard.ConfigurationRevision;
         var selectedDeviceId = _selectedDeviceId;
         _deviceRows.Clear();
         var wsl = _wslConfigurationStore.Load();
@@ -1033,16 +1069,18 @@ public sealed partial class MainPage : Page
     {
         var selected = _configuration.Devices.FirstOrDefault(device =>
             string.Equals(device.Id, _selectedDeviceId, StringComparison.OrdinalIgnoreCase));
-        var canEdit = !_isBusy && !_configurationRecoveryNeeded && selected is not null;
+        var canEdit = !_isBusy && !_controllerBusy && !_configurationRecoveryNeeded && selected is not null;
         EditDeviceButton.IsEnabled = canEdit;
         RemoveDeviceButton.IsEnabled = canEdit;
         ActivateDeviceButton.IsEnabled = canEdit && selected!.Enabled is false;
         TestDeviceButton.IsEnabled = canEdit;
+        ApplySshDeviceButton.IsEnabled = canEdit && selected!.Enabled
+            && GetSelectedAccount() is { IsPending: false, NeedsLogin: false };
         ManageCliButton.IsEnabled = !_isBusy && !_configurationRecoveryNeeded;
         UpdateAllCliButton.IsEnabled = !_isBusy && !_configurationRecoveryNeeded;
     }
 
-    private async Task SaveDeviceAsync(DeviceDialog dialog)
+    private async Task<SshDeviceConfiguration> SaveDeviceAsync(DeviceDialog dialog)
     {
         using var mutationLock = await ControllerMutationLock.AcquireAsync(_paths);
         var draft = dialog.Device
@@ -1077,10 +1115,13 @@ public sealed partial class MainPage : Page
             _selectedDeviceId = prepared.Device.Id;
             await RefreshDevicesAsync();
             SetBanner(
-                prepared.RequiresActivationValidation
+                existing is null
+                    ? "SSH 장치를 추가했습니다. 설치와 활성화를 진행합니다."
+                    : prepared.RequiresActivationValidation
                     ? "SSH 장치를 저장했습니다. ‘설치 및 활성화’로 연결과 원격 Codex 설치를 검증해 주세요."
                     : "SSH 장치 설정을 저장했습니다.",
                 isError: false);
+            return prepared.Device;
         }
         catch
         {
@@ -1150,12 +1191,22 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        await ActivateDeviceAsync(device);
+    }
+
+    private async Task ActivateDeviceAsync(SshDeviceConfiguration device)
+    {
         SetBusy(true);
+        SetBanner($"{device.DisplayLabel} 설치 및 활성화 중…", isError: false);
         string? activationIntentPath = null;
         try
         {
             using var mutationLock = await ControllerMutationLock.AcquireAsync(_paths);
-            if (!await EnsureSshTrustAsync(device)) return;
+            if (!await EnsureSshTrustAsync(device))
+            {
+                SetBanner("SSH 장치는 저장했지만 서버 신뢰 확인을 취소하여 활성화하지 않았습니다.", isError: false);
+                return;
+            }
             var test = await _sshDeviceService.TestConnectionAsync(device);
             if (!test.IsReachable)
             {
@@ -1793,7 +1844,24 @@ public sealed partial class MainPage : Page
         await ApplyAccountAsync(account);
     }
 
-    private async Task ApplyAccountAsync(AccountProfile account)
+    private async void ApplySshDeviceButton_Click(object sender, RoutedEventArgs e)
+    {
+        var device = _configuration.Devices.FirstOrDefault(item => item.Id == _selectedDeviceId && item.Enabled);
+        if (device is null)
+        {
+            SetBanner("설치 및 활성화가 완료된 SSH 장치를 선택해 주세요.", isError: true);
+            return;
+        }
+        var account = GetSelectedAccount();
+        if (account is null)
+        {
+            SetBanner("적용할 계정을 선택해 주세요.", isError: true);
+            return;
+        }
+        await ApplyAccountAsync(account, device.Id);
+    }
+
+    private async Task ApplyAccountAsync(AccountProfile account, string? sshDeviceId = null)
     {
         if (account.IsPending || account.NeedsLogin || !_authStore.ProfileArtifactExists(account.Id))
         {
@@ -1805,7 +1873,9 @@ public sealed partial class MainPage : Page
         try
         {
             var snapshot = await Controller.GetSnapshotAsync();
-            var operation = await Controller.SwitchAccountAsync(account.Id, snapshot.ConfigurationRevision);
+            var operation = sshDeviceId is null
+                ? await Controller.SwitchAccountAsync(account.Id, snapshot.ConfigurationRevision)
+                : await Controller.SwitchSshDeviceAccountAsync(account.Id, sshDeviceId, snapshot.ConfigurationRevision);
             while (!operation.IsComplete)
             {
                 SetBanner(operation.Message, isError: false);
@@ -1813,8 +1883,9 @@ public sealed partial class MainPage : Page
                 operation = await Controller.GetOperationStatusAsync(operation.Id) ?? operation;
             }
             await RefreshDevicesAsync();
-            UpdateSelectedAccount(account);
-            await LoadUsageAsync(account.Id);
+            var selected = GetSelectedAccount();
+            UpdateSelectedAccount(selected);
+            if (selected is not null) await LoadUsageAsync(selected.Id);
             SetBanner(operation.Message, isError: operation.State != "completed");
         }
         catch (Exception error)
@@ -1925,13 +1996,19 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        SetBusy(true);
         try
         {
-            await SaveDeviceAsync(dialog);
+            var device = await SaveDeviceAsync(dialog);
+            await ActivateDeviceAsync(device);
         }
         catch (Exception error)
         {
             SetBanner(error.Message, isError: true);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
@@ -2444,7 +2521,7 @@ public sealed partial class MainPage : Page
 
     private void UpdateTrayTitle()
     {
-        var activeProfileId = _localSwitchService.GetActiveProfileId(_configuration.Accounts);
+        var activeProfileId = _activeProfileId;
         var profile = _configuration.Accounts.FirstOrDefault(account => account.Id == activeProfileId)
             ?? GetSelectedAccount();
         if (profile is null)
@@ -2472,11 +2549,11 @@ public sealed partial class MainPage : Page
     {
         var running = _loginCancellation is not null;
         var isLastLogin = account is not null && _lastLoginProfileId == account.Id;
-        var canRecover = !_isBusy && !_configurationRecoveryNeeded && account is not null && isLastLogin;
+        var canRecover = !_isBusy && !_controllerBusy && !_configurationRecoveryNeeded && account is not null && isLastLogin;
         CancelLoginButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         RetryLoginButton.Visibility = canRecover ? Visibility.Visible : Visibility.Collapsed;
         ReopenLoginButton.Visibility = canRecover ? Visibility.Visible : Visibility.Collapsed;
-        FreshLoginButton.Visibility = !_isBusy && !_configurationRecoveryNeeded && account is not null
+        FreshLoginButton.Visibility = !_isBusy && !_controllerBusy && !_configurationRecoveryNeeded && account is not null
             ? Visibility.Visible
             : Visibility.Collapsed;
         CancelLoginButton.IsEnabled = running;
@@ -2575,8 +2652,8 @@ public sealed partial class MainPage : Page
     private void UpdateAccountOrderActions()
     {
         var index = _configuration.Accounts.FindIndex(item => item.Id == _selectedProfileId);
-        MoveAccountUpButton.IsEnabled = !_isBusy && !_configurationRecoveryNeeded && index > 0;
-        MoveAccountDownButton.IsEnabled = !_isBusy && !_configurationRecoveryNeeded
+        MoveAccountUpButton.IsEnabled = !_isBusy && !_controllerBusy && !_configurationRecoveryNeeded && index > 0;
+        MoveAccountDownButton.IsEnabled = !_isBusy && !_controllerBusy && !_configurationRecoveryNeeded
             && index >= 0
             && index < _configuration.Accounts.Count - 1;
     }

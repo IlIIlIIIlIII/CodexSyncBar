@@ -16,6 +16,7 @@ public sealed partial class DeviceDialog : ContentDialog
         if (existing is not null)
         {
             Title = "SSH 장치 편집";
+            ActivationHelp.Text = "연결 정보가 바뀐 장치는 저장 후 ‘설치 및 활성화’로 연결 검증을 해야 동기화됩니다.";
             DisplayNameBox.Text = existing.DisplayName;
             HostBox.Text = existing.Host;
             PortBox.Value = existing.Port;
@@ -29,6 +30,11 @@ public sealed partial class DeviceDialog : ContentDialog
                 "password" => 2,
                 _ => 0,
             };
+        }
+        else
+        {
+            PrimaryButtonText = "추가 및 활성화";
+            EnabledBox.Visibility = Visibility.Collapsed;
         }
 
         // A new or already-disabled device must enter the activation flow
