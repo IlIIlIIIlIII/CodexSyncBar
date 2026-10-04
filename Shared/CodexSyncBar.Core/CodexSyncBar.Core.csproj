@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);SYNCBAR_LINUX</DefineConstants>
+    <AssemblyName>CodexSyncBar.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core/*.cs"
+      Exclude="../../Windows/CodexSyncBar.Windows.Core/WindowsPaths.cs;../../Windows/CodexSyncBar.Windows.Core/WindowsSecretStore.cs;../../Windows/CodexSyncBar.Windows.Core/WindowsPathSafety.cs;../../Windows/CodexSyncBar.Windows.Core/BrowserLoginService.cs;../../Windows/CodexSyncBar.Windows.Core/LocalSwitchService.cs;../../Windows/CodexSyncBar.Windows.Core/CodexCliLocator.cs;../../Windows/CodexSyncBar.Windows.Core/CodexDesktopLifecycle.cs;../../Windows/CodexSyncBar.Windows.Core/CliManagementService.cs;../../Windows/CodexSyncBar.Windows.Core/WslDeviceService.cs;../../Windows/CodexSyncBar.Windows.Core/CodexProcessScope.cs"
+      Link="Core/%(Filename)%(Extension)" />
+    <Compile Include="../../Ubuntu/CodexSyncBar.Ubuntu.Platform/*.cs" Link="Platform/%(Filename)%(Extension)" />
+    <InternalsVisibleTo Include="CodexSyncBar.Backend" />
+    <InternalsVisibleTo Include="CodexSyncBar.Ubuntu.Tests" />
+    <InternalsVisibleTo Include="CodexSyncBar.Windows.Core.Tests" />
+  </ItemGroup>
+</Project>

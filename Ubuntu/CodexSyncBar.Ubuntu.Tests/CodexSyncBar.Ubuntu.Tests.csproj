@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="../../Shared/CodexSyncBar.Core/CodexSyncBar.Core.csproj" />
+    <ProjectReference Include="../CodexSyncBar.Ubuntu.Backend/CodexSyncBar.Ubuntu.Backend.csproj" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/AccountSwitchTests.cs" Link="Contracts/AccountSwitchTests.cs" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/AuthRefreshTests.cs" Link="Contracts/AuthRefreshTests.cs" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/AuthVaultTests.cs" Link="Contracts/AuthVaultTests.cs" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/LoginProtocolTests.cs" Link="Contracts/LoginProtocolTests.cs" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/QuotaResetFormattingTests.cs" Link="Contracts/QuotaResetFormattingTests.cs" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/ResetCreditExpiryFormattingTests.cs" Link="Contracts/ResetCreditExpiryFormattingTests.cs" />
+    <Compile Include="../../Windows/CodexSyncBar.Windows.Core.Tests/WindowsFactAttribute.cs" Link="Contracts/WindowsFactAttribute.cs" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,8 @@
 # Codex SyncBar for macOS
 
-[Windows 앱 안내로 돌아가기](../../README.md)
+> **Deprecated (2026-10-04).** 기본 플랫폼은 Ubuntu이며 신규 개발은 `main`의 Ubuntu 구현에서 진행합니다. 아래 내용은 이전 버전 참고 자료입니다.
+
+[Ubuntu 기본 안내로 돌아가기](../../README.md)
 
 <p align="center">
   <img src="../../Resources/AppIcon.png" width="128" alt="Codex SyncBar 아이콘">

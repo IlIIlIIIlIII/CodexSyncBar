@@ -1,0 +1,39 @@
+{
+  "width": 1040,
+  "height": 760,
+  "mode": "isolated-demo",
+  "selectedProfileId": 2,
+  "operation": {
+    "id": "33bc502e4bd04b6083dcf2e1fece961a",
+    "kind": "switch",
+    "profileId": 1,
+    "state": "completed",
+    "message": "모든 활성 장치에 계정을 적용했습니다.",
+    "targets": [
+      {
+        "id": "local",
+        "displayName": "이 Ubuntu PC",
+        "state": "verified",
+        "detail": null
+      },
+      {
+        "id": "ssh:dev",
+        "displayName": "개발 서버",
+        "state": "verified",
+        "detail": null
+      },
+      {
+        "id": "ssh:build",
+        "displayName": "빌드 서버",
+        "state": "verified",
+        "detail": null
+      }
+    ],
+    "startedAt": "2026-10-02T18:19:41.885738+00:00",
+    "finishedAt": "2026-10-02T18:19:42.1662312+00:00",
+    "result": null,
+    "errorCode": null,
+    "isComplete": true
+  },
+  "source": "GTK WidgetPaintable"
+}

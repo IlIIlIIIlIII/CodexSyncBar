@@ -30,6 +30,7 @@ internal sealed class RemoteBootstrapTransaction
 internal sealed class RemoteBootstrapTransactionStore
 {
     private const long MaximumArchiveBytes = 64 * 1024 * 1024;
+    private const long MaximumStoredArchiveBytes = MaximumArchiveBytes + 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -83,11 +84,15 @@ internal sealed class RemoteBootstrapTransactionStore
         var manifestPath = ManifestPath(transaction);
         try
         {
+#if SYNCBAR_LINUX
+            AtomicWrite(archivePath, WindowsSecretStore.Protect(archive, ArchivePurpose(transaction)));
+#else
             AtomicWrite(archivePath, archive);
+#endif
             WindowsPathSafety.EnsurePrivateFile(
                 archivePath,
                 "원격 부트스트랩 복구 archive",
-                MaximumArchiveBytes);
+                MaximumStoredArchiveBytes);
             AtomicWrite(
                 manifestPath,
                 JsonSerializer.SerializeToUtf8Bytes(transaction, JsonOptions));
@@ -131,10 +136,15 @@ internal sealed class RemoteBootstrapTransactionStore
     public byte[] ReadArchive(RemoteBootstrapTransaction transaction)
     {
         var path = ArchivePath(transaction);
-        return WindowsPathSafety.ReadPrivateFile(
+        var bytes = WindowsPathSafety.ReadPrivateFile(
             path,
             "원격 부트스트랩 복구 archive",
-            MaximumArchiveBytes);
+            MaximumStoredArchiveBytes);
+#if SYNCBAR_LINUX
+        return WindowsSecretStore.Unprotect(bytes, ArchivePurpose(transaction));
+#else
+        return bytes;
+#endif
     }
 
     public void Delete(RemoteBootstrapTransaction transaction)
@@ -184,11 +194,23 @@ internal sealed class RemoteBootstrapTransactionStore
             WindowsPathSafety.EnsurePrivateFile(
                 archivePath,
                 "원격 부트스트랩 복구 archive",
-                MaximumArchiveBytes);
+                MaximumStoredArchiveBytes);
             if (!File.Exists(archivePath))
             {
                 throw new CodexSyncBarException("원격 부트스트랩 복구 archive가 없습니다.");
             }
+#if SYNCBAR_LINUX
+            var bytes = WindowsPathSafety.ReadPrivateFile(archivePath, "원격 부트스트랩 복구 archive", MaximumStoredArchiveBytes);
+            if (!bytes.AsSpan().StartsWith("CSBL1"u8))
+            {
+                // One-time migration of the private tar format used before
+                // encryption. Never interpret a damaged envelope as plaintext.
+                if (bytes.Length < 1024 || bytes.Length % 512 != 0
+                    || !(bytes.AsSpan(257, 5).SequenceEqual("ustar"u8) || bytes.All(value => value == 0)))
+                    throw new CodexSyncBarException("이전 원격 복구 archive 형식을 확인하지 못했습니다.");
+                AtomicWrite(archivePath, WindowsSecretStore.Protect(bytes, ArchivePurpose(transaction)));
+            }
+#endif
 
             return transaction;
         }
@@ -200,6 +222,8 @@ internal sealed class RemoteBootstrapTransactionStore
 
     private void EnsureDirectory() =>
         WindowsPathSafety.EnsureDirectory(DirectoryPath, "원격 부트스트랩 복구 디렉터리");
+
+    private static string ArchivePurpose(RemoteBootstrapTransaction transaction) => "remote-bootstrap-archive-v1:" + transaction.Operation;
 
     private static void Validate(RemoteBootstrapTransaction transaction)
     {
@@ -223,7 +247,7 @@ internal sealed class RemoteBootstrapTransactionStore
         var temporary = Path.Combine(
             Path.GetDirectoryName(path)!,
             $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        File.WriteAllBytes(temporary, contents);
+        WindowsPathSafety.WritePrivateBytes(temporary, contents);
         try
         {
             File.Move(temporary, path, overwrite: true);

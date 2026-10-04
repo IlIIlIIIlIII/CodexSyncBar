@@ -214,6 +214,9 @@ public sealed class CodexAuthMaintenanceService
                 // A Codex child can briefly retain a file handle. The runtime
                 // is isolated and a later maintenance pass can clean it up.
             }
+#if SYNCBAR_LINUX
+            _authStore.ProtectRecoveryAuthFile(temporaryAuth);
+#endif
         }
     }
 
@@ -252,7 +255,7 @@ public sealed class CodexAuthMaintenanceService
                         ["clientInfo"] = new JsonObject
                         {
                             ["name"] = "codex-syncbar-windows",
-                            ["title"] = "Codex SyncBar for Windows",
+                            ["title"] = OperatingSystem.IsLinux() ? "Codex SyncBar for Ubuntu" : "Codex SyncBar for Windows",
                             ["version"] = "1.0.0",
                         },
                         ["capabilities"] = new JsonObject(),
@@ -360,6 +363,9 @@ public sealed class CodexAuthMaintenanceService
                 {
                     process.Kill(entireProcessTree: true);
                 }
+#if SYNCBAR_LINUX
+                await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+#endif
             }
             catch
             {

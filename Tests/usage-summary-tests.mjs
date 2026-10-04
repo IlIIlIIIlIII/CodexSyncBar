@@ -8,9 +8,13 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const usageHelper = path.join(repositoryRoot, "Support/usage-summary.mjs");
 const controller = path.join(repositoryRoot, "Support/gpt-switch");
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-syncbar-usage-tests-"));
+// The production helper rejects writable runtime assets. Keep tests independent
+// of the checkout's group-writable directory/file permissions.
+const usageHelper = path.join(root, "usage-summary.mjs");
+fs.copyFileSync(path.join(repositoryRoot, "Support/usage-summary.mjs"), usageHelper);
+fs.chmodSync(usageHelper, 0o755);
 const sessions = path.join(root, ".codex/sessions");
 const cache = path.join(root, "usage-cache.json");
 

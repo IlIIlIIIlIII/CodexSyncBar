@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Codex SyncBar
+Comment=Review and switch Codex accounts across your devices
+Comment[ko]=여러 장치의 Codex 계정을 확인하고 전환합니다
+Exec=codex-syncbar
+Icon=codex-syncbar
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true
+StartupWMClass=io.github.codexsyncbar.Ubuntu

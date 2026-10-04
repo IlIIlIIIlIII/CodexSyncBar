@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+case "${CODEX_SYNCBAR_CREDENTIAL_ID-}" in ''|*[!A-Za-z0-9-]*) exit 1;; esac
+case "${CODEX_SYNCBAR_SECRET_KIND-}" in password|passphrase) ;; *) exit 1;; esac
+runtime_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$runtime_dir/../CodexSyncBar.Backend" --askpass

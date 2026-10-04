@@ -13,10 +13,11 @@ public sealed class SshHostTrust
         var options = SshDeviceService.BuildCommonOptions(device, false, false);
         options.InsertRange(0, ["-o", "UpdateHostKeys=no", "-o", "PreferredAuthentications=none", "-o", "PubkeyAuthentication=no", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no", "-o", "GSSAPIAuthentication=no", "-o", "HostbasedAuthentication=no"]);
         options.AddRange([$"{device.Username}@{device.Host}", "exit"]);
-        var probe = await ProcessRunner.RunAsync("ssh.exe", options, cancellationToken: token, timeout: TimeSpan.FromSeconds(20));
+        var ssh = OperatingSystem.IsWindows() ? "ssh.exe" : "ssh";
+        var probe = await ProcessRunner.RunAsync(ssh, options, cancellationToken: token, timeout: TimeSpan.FromSeconds(20));
         if (!RequiresRegistration(probe)) return null;
 
-        var config = await ProcessRunner.RunAsync("ssh.exe", ["-G", "-p", device.Port.ToString(), $"{device.Username}@{device.Host}"], cancellationToken: token);
+        var config = await ProcessRunner.RunAsync(ssh, ["-G", "-p", device.Port.ToString(), $"{device.Username}@{device.Host}"], cancellationToken: token);
         if (config.ExitCode != 0) throw new CodexSyncBarException("OpenSSH 연결 설정을 읽을 수 없습니다.");
         var fields = config.StandardOutput.Split('\n').Select(line => line.Trim().Split(' ', 2))
             .Where(parts => parts.Length == 2).GroupBy(parts => parts[0]).ToDictionary(group => group.Key, group => group.First()[1]);
@@ -41,9 +42,10 @@ public sealed class SshHostTrust
         try
         {
             WindowsPathSafety.WritePrivateBytes(scanFile, []);
-            var scanOptions = new List<string> { "-o", "StrictHostKeyChecking=accept-new", "-o", $"UserKnownHostsFile=\"{scanFile.Replace('\\', '/')}\"", "-o", "GlobalKnownHostsFile=NUL", "-o", "HashKnownHosts=no" };
+            var nullFile = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+            var scanOptions = new List<string> { "-o", "StrictHostKeyChecking=accept-new", "-o", $"UserKnownHostsFile=\"{scanFile.Replace('\\', '/')}\"", "-o", $"GlobalKnownHostsFile={nullFile}", "-o", "HashKnownHosts=no" };
             scanOptions.AddRange(options);
-            await ProcessRunner.RunAsync("ssh.exe", scanOptions, cancellationToken: token, timeout: TimeSpan.FromSeconds(20));
+            await ProcessRunner.RunAsync(ssh, scanOptions, cancellationToken: token, timeout: TimeSpan.FromSeconds(20));
             scanned = await File.ReadAllTextAsync(scanFile, token);
         }
         finally { if (File.Exists(scanFile)) File.Delete(scanFile); }
@@ -54,7 +56,7 @@ public sealed class SshHostTrust
         // Existing entries of any algorithm must never be silently replaced or supplemented.
         if (File.Exists(knownHosts))
         {
-            var found = await ProcessRunner.RunAsync("ssh-keygen.exe", ["-F", lookup, "-f", knownHosts], cancellationToken: token);
+            var found = await ProcessRunner.RunAsync(OperatingSystem.IsWindows() ? "ssh-keygen.exe" : "ssh-keygen", ["-F", lookup, "-f", knownHosts], cancellationToken: token);
             if (found.ExitCode == 0) throw new CodexSyncBarException("기존 서버 키가 있지만 검증에 실패했습니다. known_hosts 기록을 확인해 주세요.");
         }
         return new(host, port, lookup, knownHosts, key, Fingerprint(keys[0][2]));

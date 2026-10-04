@@ -15,8 +15,10 @@ HELPER="$TEST_ROOT/gpt-switch"
 mkdir -p "$STATE" "$CODEX/sessions"
 cp "$ROOT/Support/gpt-switch" "$HELPER"
 cp "$ROOT/Support/codex-syncbar-askpass" "$TEST_ROOT/askpass"
+cp "$ROOT/Support/usage-summary.mjs" "$TEST_ROOT/usage-summary.mjs"
 chmod 700 "$HELPER" "$STATE" "$CODEX"
 chmod 700 "$TEST_ROOT/askpass"
+chmod 700 "$TEST_ROOT/usage-summary.mjs"
 sed '$d' "$HELPER" >"$TEST_ROOT/functions.sh"
 jq -n '{schemaVersion:1,nextAccountID:2,accounts:[{id:1,email:"test@example.com"}],devices:[{
   id:"remote",displayName:"Remote",host:"example.invalid",port:22,username:"tester",
@@ -66,7 +68,7 @@ common_env=(
   GPT_SWITCH_STATE_ROOT="$STATE" CODEX_HOME="$CODEX"
   GPT_SWITCH_CONFIG_FILE="$STATE/config.json"
   GPT_SWITCH_NODE_BIN="$TEST_ROOT/node"
-  GPT_SWITCH_USAGE_HELPER="$ROOT/Support/usage-summary.mjs"
+  GPT_SWITCH_USAGE_HELPER="$TEST_ROOT/usage-summary.mjs"
   GPT_SWITCH_ASKPASS_HELPER="$TEST_ROOT/askpass"
   GPT_SWITCH_SSH_BIN="$TEST_ROOT/ssh" TEST_ROOT="$TEST_ROOT"
 )

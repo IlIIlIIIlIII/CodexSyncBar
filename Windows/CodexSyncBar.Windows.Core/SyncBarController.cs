@@ -110,6 +110,9 @@ public sealed class SyncBarController : IDisposable
         using (await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: cancellationToken))
         {
             var configuration = _configurationStore.LoadOrCreate();
+#if SYNCBAR_LINUX
+            _auth.ProtectAbandonedSessionCredentials();
+#endif
             new LoginTransactionStore(_paths).Recover(_auth);
             var pendingRefreshes = new CodexAuthMaintenanceService(_paths, _auth, _local).RecoverPendingRefreshes();
             new DeviceActivationTransactionStore(_paths).Recover(configuration, _configurationStore);
@@ -524,4 +527,11 @@ public sealed class SyncBarController : IDisposable
     }
 
     public void Dispose() => _lifetime.Cancel();
+
+    public async Task StopAsync()
+    {
+        _lifetime.Cancel();
+        if (_background is { } background)
+            try { await background; } catch (OperationCanceledException) { }
+    }
 }

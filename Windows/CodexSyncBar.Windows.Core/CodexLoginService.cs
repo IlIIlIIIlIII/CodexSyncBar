@@ -30,7 +30,8 @@ public sealed class CodexLoginService
     {
         var codex = CodexCliLocator.Find()
             ?? throw new CodexSyncBarException(
-                "공식 Codex CLI를 찾지 못했습니다. Scripts/Windows/setup-cli.ps1로 설치해 주세요.");
+                OperatingSystem.IsLinux() ? "공식 Codex CLI를 찾지 못했습니다. CLI 관리에서 설치해 주세요."
+                    : "공식 Codex CLI를 찾지 못했습니다. Scripts/Windows/setup-cli.ps1로 설치해 주세요.");
         _paths.EnsureDirectories();
         var loginHome = Path.Combine(
             _paths.LoginSessionsDirectory,
@@ -95,8 +96,8 @@ public sealed class CodexLoginService
                 {
                     ["clientInfo"] = new JsonObject
                     {
-                        ["name"] = "codex-syncbar-windows",
-                        ["title"] = "Codex SyncBar for Windows",
+                        ["name"] = OperatingSystem.IsLinux() ? "codex-syncbar-ubuntu" : "codex-syncbar-windows",
+                        ["title"] = OperatingSystem.IsLinux() ? "Codex SyncBar for Ubuntu" : "Codex SyncBar for Windows",
                         ["version"] = "1.0.0",
                     },
                     ["capabilities"] = new JsonObject(),
@@ -131,6 +132,9 @@ public sealed class CodexLoginService
                 {
                     process.Kill(entireProcessTree: true);
                 }
+#if SYNCBAR_LINUX
+                await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+#endif
             }
             catch
             {
@@ -150,6 +154,9 @@ public sealed class CodexLoginService
                 // The temporary login profile is harmless if Chrome still has
                 // a file handle; a later login can use a new directory.
             }
+#if SYNCBAR_LINUX
+            _authStore.ProtectRecoveryAuthFile(Path.Combine(loginHome, "auth.json"));
+#endif
         }
     }
 

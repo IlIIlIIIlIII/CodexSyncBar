@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-10-03T01:01:30.937127+00:00",
+  "mode": "read-only managed implementation diagnostic",
+  "captureSucceeded": true,
+  "roots": [
+    {
+      "pid": 12361,
+      "originalEnvironmentHasHome": false,
+      "verifiedHomeMatches": true,
+      "packagedServerIds": [
+        12709
+      ]
+    }
+  ],
+  "focusedTests": {
+    "passed": 12,
+    "failed": 0
+  },
+  "mutationPerformed": false,
+  "liveRestartProven": false
+}

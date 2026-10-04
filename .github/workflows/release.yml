@@ -1,9 +1,8 @@
-name: Release macOS app
+name: Deprecated - manual macOS release
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Ubuntu is primary; legacy workflows run only on explicit request.
+  workflow_dispatch:
 
 permissions:
   contents: write

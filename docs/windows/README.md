@@ -1,5 +1,7 @@
 # Windows 앱과 위젯
 
+> **Deprecated (2026-10-04).** 기본 플랫폼은 Ubuntu이며 신규 개발은 `main`의 Ubuntu 구현에서 진행합니다. 아래 내용은 이전 버전 참고 자료입니다.
+
 Codex SyncBar Windows는 WinUI 3/.NET 10 앱과 Windows 위젯 보드용 COM 제공자로 구성됩니다. `main`의 계정·사용량·SSH 동작을 기준으로 만들었으며 Cursor 브리지 기능은 포함하지 않습니다.
 
 ## 요구 환경

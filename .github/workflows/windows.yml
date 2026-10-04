@@ -1,9 +1,9 @@
-name: Windows and portable contracts
+name: Deprecated - manual Windows and portable contracts
+
 on:
-  push:
-    branches: [main, 'codex/**']
-  pull_request:
+  # Ubuntu is primary; legacy workflows run only on explicit request.
   workflow_dispatch:
+
 permissions:
   contents: read
 jobs:

@@ -1,0 +1,14 @@
+[Unit]
+Description=Codex SyncBar account controller
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/codex-syncbar/backend/CodexSyncBar.Backend
+EnvironmentFile=-%t/codex-syncbar/session.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5min
+UMask=0077
+
+# Deliberately no [Install] section: desktop login autostart is opt-in in the UI.

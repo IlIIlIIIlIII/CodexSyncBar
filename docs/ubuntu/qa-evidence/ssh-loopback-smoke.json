@@ -1,0 +1,96 @@
+{
+  "transport": "Real OpenSSH loopback TCP with public-key authentication",
+  "helperVersion": "2.1.3",
+  "home": "<isolated temporary Linux home>",
+  "checks": [
+    {
+      "name": "remote helper bootstrap over encrypted SSH",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "remote helper version",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "stream access-only profile 1",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "stream access-only profile 2",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "initialize account 1",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "preflight account 2",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "apply account 2 without signalling host clients",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "verify account 2",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "read remote active status",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "reverse rollback to account 1",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "verify rollback account 1",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "reject refresh-bearing remote credential",
+      "passed": true,
+      "exitCode": 1
+    },
+    {
+      "name": "make fixture profile insecure",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "reject insecure remote profile",
+      "passed": true,
+      "exitCode": 1
+    },
+    {
+      "name": "restore secure fixture profile",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "verify failed preflight preserves active account",
+      "passed": true,
+      "exitCode": 0
+    },
+    {
+      "name": "active auth mode0600, refresh absent, rejected profile absent",
+      "passed": true
+    }
+  ],
+  "serverScope": "Unprivileged current user; loopback only; generated/pinned key; forced temporary HOME/CODEX_HOME; no user SSH config or production auth",
+  "limitations": [
+    "Synthetic accounts only; no real cloud host or account.",
+    "Shell helper over SSH; C# SshDeviceService adapter is tested separately."
+  ]
+}

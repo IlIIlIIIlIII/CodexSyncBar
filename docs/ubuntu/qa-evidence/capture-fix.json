@@ -1,0 +1,51 @@
+{
+  "recordedAtUtc": "2026-10-03T01:20:04.249706+00:00",
+  "scope": "Read-only production GTK captures and isolated supervisor/owned-window tests; no account mutation",
+  "supervisorFixtures": {
+    "passed": 21,
+    "failed": 0
+  },
+  "ownedGtkCapture": {
+    "passed": 1,
+    "failed": 0,
+    "covers": [
+      "unmapped refusal",
+      "actual PNG",
+      "0600 output",
+      "empty paintable fallback through GTK snapshot_child",
+      "native window CSS background retained",
+      "dimensions and background pixels match normal capture"
+    ]
+  },
+  "readOnlyInstalledUi": [
+    {
+      "scenario": "own-window hide/remap and occlusion",
+      "capture": "live/live-profile-1-1790990232940579896.png",
+      "source": "Gtk.WidgetPaintable",
+      "passed": true
+    },
+    {
+      "scenario": "forced missing cached node plus hide/remap/occlusion",
+      "capture": "live/live-profile-1-1790990326666015278.png",
+      "source": "Gtk.Widget.snapshot_child with native CSS background",
+      "passed": true,
+      "visuallyInspected": true
+    }
+  ],
+  "discardedDevelopmentCapture": {
+    "capture": "live/live-profile-1-1790990260748455263.png",
+    "accepted": false,
+    "reason": "missing native window background; fixed before accepted capture"
+  },
+  "sandboxNote": "Initial supervisor fixture attempt could not bind its isolated Unix socket inside sandbox. All 21 rerun outside sandbox and passed.",
+  "finalFollowup": {
+    "additionalRegression": "Reject missing child node even when the CSS background can render; reject nearly uniform captures. Keep a persistent paintable and remap final state after restart.",
+    "testsPassed": {
+      "supervisorFixtures": 21,
+      "ownedGtkCapture": 1
+    },
+    "productionEvidence": "live-e2e-attempt-4.json",
+    "allThreeFinalScreensNonblankAndManuallyInspected": true,
+    "priorBlankRunRejected": "live-attempt-3-assessment.json"
+  }
+}

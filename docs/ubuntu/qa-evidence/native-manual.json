@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-10-02T18:48:51.992566+00:00",
+  "source": "explicit user confirmation in conversation",
+  "checks": [
+    {
+      "name": "mouse opens account selector and menu",
+      "passed": true
+    },
+    {
+      "name": "Tab moves visible keyboard focus",
+      "passed": true
+    }
+  ],
+  "notCovered": [
+    "150% fractional scaling",
+    "multiple monitor transitions",
+    "full keyboard traversal of every management dialog"
+  ]
+}

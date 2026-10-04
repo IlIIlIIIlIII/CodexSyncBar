@@ -1,0 +1,42 @@
+{
+  "kind": "in-process GTK + real demo IPC integration; not native pointer/keyboard E2E",
+  "checks": [
+    {
+      "name": "selecting an account leaves every active account unchanged",
+      "passed": true
+    },
+    {
+      "name": "all five production management dialogs and SSH form construct",
+      "passed": true
+    },
+    {
+      "name": "login waiting exposes reopen and cancel without an applying spinner",
+      "passed": true
+    },
+    {
+      "name": "account picker accepts keyboard focus",
+      "passed": true
+    },
+    {
+      "name": "rapid selection leaves preview bound to the latest account",
+      "passed": true
+    },
+    {
+      "name": "apply immediately disables duplicate activation",
+      "passed": true
+    },
+    {
+      "name": "GTK apply signal crosses IPC and completes A to B",
+      "passed": true
+    },
+    {
+      "name": "GTK apply signal crosses IPC and completes B to A",
+      "passed": true
+    },
+    {
+      "name": "last device row accepts focus and the body scrolls to its end",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

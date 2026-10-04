@@ -69,6 +69,9 @@ public sealed class AuthRefreshTransactionStore(WindowsPaths paths, AuthStore au
             try
             {
                 WindowsPathSafety.EnsureDirectory(runtime, "인증 갱신 복구 디렉터리");
+#if SYNCBAR_LINUX
+                auth.ProtectRecoveryAuthFile(Path.Combine(runtime, "auth.json"));
+#endif
                 if (TryComplete(runtime))
                 {
                     try { Directory.Delete(runtime, recursive: true); }

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CodexSyncBar.Backend</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodexSyncBar.Ubuntu.Tests" />
+    <ProjectReference Include="../../Shared/CodexSyncBar.Core/CodexSyncBar.Core.csproj" />
+    <None Include="../../Support/gpt-switch" Link="Runtime/gpt-switch" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Support/codex-syncbar-askpass" Link="Runtime/codex-syncbar-askpass" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../CodexSyncBar.Ubuntu.Platform/Runtime/codex-syncbar-linux-askpass" Link="Runtime/codex-syncbar-linux-askpass" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../CodexSyncBar.Ubuntu.Platform/Runtime/codex-syncbar-secret-tool" Link="Runtime/codex-syncbar-secret-tool" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Support/usage-summary.mjs" Link="Runtime/usage-summary.mjs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,40 @@
+name: Ubuntu isolated integration and package
+on:
+  push:
+    branches: [main, 'codex/ubuntu-*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi jq openssh-server
+      - name: Test production contracts and demo IPC in private temporary homes
+        run: bash Scripts/Ubuntu/test.sh
+      - name: Test real OpenSSH transport with generated loopback keys
+        env:
+          CODEX_SYNCBAR_SSH_QA_REPORT: dist/ubuntu/tests/ssh-loopback-smoke.json
+        run: bash Tests/ssh-loopback-smoke.sh
+      - name: Build and inspect the Ubuntu 26.04 package without installing it
+        run: bash Scripts/Ubuntu/package.sh --no-build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ubuntu-amd64-package-and-isolated-qa
+          path: |
+            dist/ubuntu/*.deb
+            dist/ubuntu/*.sha256
+            dist/ubuntu/tests/*

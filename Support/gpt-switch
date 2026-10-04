@@ -478,6 +478,7 @@ validate_auth_file() {
   [ ! -L "$file" ] || return 1
   jq -e '
     (.auth_mode == "chatgpt") and
+    ((.OPENAI_API_KEY // "") == "") and
     (.tokens | type == "object") and
     (.tokens.id_token | type == "string" and length > 0) and
     (.tokens.account_id | type == "string" and length > 0) and
@@ -1524,6 +1525,24 @@ node_status() {
   fi
   printf 'active=%s fingerprint=%s mode=%s auth_mode=%s cli=%s credential=%s access_fp=%s expires_at=%s\n' \
     "$active" "$fp" "$mode" "$auth_mode" "$cli_state" "$kind" "$access_fp" "$expires_at"
+}
+
+# Observation for management previews must never run setup, recovery or Codex.
+node_status_readonly() {
+  local active fp mode auth_mode kind access_fp expires_at
+  if ! validate_secure_auth_file "$AUTH_FILE"; then
+    printf 'active=unknown fingerprint=unknown mode=unknown auth_mode=unknown cli=not-checked credential=unknown access_fp=unknown expires_at=unknown\n'
+    return 0
+  fi
+  active=$(detect_active_profile 2>/dev/null || printf 'unknown')
+  fp=$(fingerprint "$AUTH_FILE")
+  mode=$(file_mode "$AUTH_FILE")
+  auth_mode=$(jq -r '.auth_mode // "unknown"' "$AUTH_FILE")
+  kind=$(credential_kind "$AUTH_FILE" 2>/dev/null || printf 'invalid')
+  access_fp=$(token_fingerprint "$AUTH_FILE" 2>/dev/null || printf 'unknown')
+  expires_at=$(access_expiry "$AUTH_FILE" 2>/dev/null || printf 'unknown')
+  printf 'active=%s fingerprint=%s mode=%s auth_mode=%s cli=not-checked credential=%s access_fp=%s expires_at=%s\n' \
+    "$active" "$fp" "$mode" "$auth_mode" "$kind" "$access_fp" "$expires_at"
 }
 
 node_inspect_access() {
@@ -4280,6 +4299,7 @@ node_main() {
       ;;
     verify) [ "$#" -eq 1 ] || die "node verify requires a profile"; node_verify "$1" ;;
     status) [ "$#" -eq 0 ] || die "node status takes no arguments"; node_status ;;
+    status-readonly) [ "$#" -eq 0 ] || die "node status-readonly takes no arguments"; node_status_readonly ;;
     stop-clients) [ "$#" -eq 0 ] || die "node stop-clients takes no arguments"; node_stop_clients ;;
     codex-info) [ "$#" -eq 0 ] || die "node codex-info takes no arguments"; node_codex_info ;;
     update-codex) [ "$#" -eq 0 ] || die "node update-codex takes no arguments"; node_update_codex ;;

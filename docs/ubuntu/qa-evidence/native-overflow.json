@@ -1,0 +1,12 @@
+{
+  "width": 600,
+  "height": 480,
+  "mode": "isolated-demo",
+  "selectedProfileId": 2,
+  "operation": null,
+  "source": "GTK WidgetPaintable",
+  "gtkScaleFactor": 2,
+  "scrollValue": 4280.0,
+  "scrollUpper": 4582.0,
+  "scrollPageSize": 302.0
+}

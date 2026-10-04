@@ -83,7 +83,13 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
             await Task.WhenAll(ordered.Select(async target =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var checkpoint = await target.PrepareAsync(profileId, cancellationToken);
+                string checkpoint;
+                try { checkpoint = await target.PrepareAsync(profileId, cancellationToken); }
+                catch
+                {
+                    SetTarget(journal, target.Id, "failed", "장치 사전 확인에 실패했습니다. 연결과 계정 설정을 확인해 주세요.");
+                    throw;
+                }
                 lock (_journalGate)
                 {
                     journal.Checkpoints.Add(new SwitchCheckpoint { Id = target.Id, Fingerprint = target.ConfigurationFingerprint, Value = checkpoint });
@@ -100,14 +106,24 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                     journal.Checkpoints.Single(checkpoint => checkpoint.Id == target.Id).Attempted = true;
                     SetTarget(journal, target.Id, "applying"); // durable intent precedes the first write
                 }
-                await target.ApplyAsync(profileId, cancellationToken);
+                try { await target.ApplyAsync(profileId, cancellationToken); }
+                catch
+                {
+                    SetTarget(journal, target.Id, "failed", "계정 적용을 완료하지 못했습니다.");
+                    throw;
+                }
                 SetTarget(journal, target.Id, "applied");
             }));
             SetState(journal, "verifying", "적용 대상 장치의 결과를 확인하고 있습니다.");
             await Task.WhenAll(ordered.Select(async target =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await target.VerifyAsync(profileId, cancellationToken);
+                try { await target.VerifyAsync(profileId, cancellationToken); }
+                catch
+                {
+                    SetTarget(journal, target.Id, "failed", "적용된 계정을 확인하지 못했습니다.");
+                    throw;
+                }
                 SetTarget(journal, target.Id, "verified");
             }));
             SetState(journal, "completed", ordered.Length == 1
@@ -117,7 +133,9 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
         }
         catch (Exception error)
         {
-            return await RestoreAsync(journal, targets, error is OperationCanceledException ? "계정 전환을 취소했습니다." : "계정 전환 검증에 실패하여 이전 상태로 복구했습니다.");
+            var changed = journal.Checkpoints.Any(checkpoint => checkpoint.Attempted);
+            return await RestoreAsync(journal, targets, error is OperationCanceledException ? "계정 전환을 취소했습니다." : changed
+                ? "계정 전환을 완료하지 못해 이전 상태로 복구했습니다." : "장치 사전 확인에 실패하여 계정은 변경하지 않았습니다.");
         }
     }
 

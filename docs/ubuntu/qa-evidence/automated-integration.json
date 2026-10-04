@@ -1,0 +1,286 @@
+{
+  "recordedAtUtc": "2026-10-02T18:34:38.357031+00:00",
+  "scope": "Automated integration QA using synthetic accounts and isolated homes; no production auth switch or global desktop automation",
+  "suites": {
+    "portableWindowsCore": {
+      "passed": 245,
+      "failed": 0,
+      "skipped": 12,
+      "total": 257
+    },
+    "ubuntuProductionCore": {
+      "passed": 98,
+      "skipped": 1,
+      "failed": 0,
+      "total": 99
+    },
+    "pythonIpcAndLauncher": {
+      "passed": 8,
+      "failed": 0
+    },
+    "rootlessInstaller": {
+      "passed": 5,
+      "failed": 0
+    },
+    "liveSupervisorFixtures": {
+      "passed": 21,
+      "failed": 0
+    },
+    "secretGiHelperFixtures": {
+      "passed": 4,
+      "failed": 0
+    },
+    "privateSessionEnvironment": {
+      "passed": 6,
+      "failed": 0
+    },
+    "publishedDemoDaemonIpc": {
+      "passed": 11,
+      "failed": 0
+    },
+    "installedDemoDaemonIpc": {
+      "passed": 11,
+      "failed": 0,
+      "scope": "Initial installation run; final installation validated against the latest tested build by file hashes"
+    },
+    "nodeUsageSummary": {
+      "passed": true
+    },
+    "shellHelperContracts": {
+      "passed": true
+    },
+    "shellUsageConcurrency": {
+      "passed": true
+    },
+    "remoteCliUpdateContracts": {
+      "passed": true
+    },
+    "ownedGtkCapture": {
+      "passed": 1,
+      "failed": 0,
+      "scope": "Owned isolated GTK window, real rendering, private PNG permissions; no production service"
+    }
+  },
+  "productionServiceCoverage": [
+    "local A to B to A using real synthetic auth files",
+    "same-request idempotence",
+    "stale preview rejection before writes",
+    "SSH-only and local-only explicit scope",
+    "real gpt-switch helper behind owned SSH/scp fixtures",
+    "verification failure rolls back local and remote auth",
+    "preview streams bundled readonly helper without executing or replacing old installed helper"
+  ],
+  "realSshTransport": {
+    "passed": 17,
+    "failed": 0,
+    "evidence": "ssh-loopback-smoke.json",
+    "scope": "Extracted official OpenSSH daemon, generated keys, loopback only and forced temporary HOME/CODEX_HOME; no system SSH installation"
+  },
+  "package": {
+    "file": "codex-syncbar_1.0.0.28+ubuntu1_amd64.deb",
+    "bytes": 28942984,
+    "sha256": "9c825f94b48470c19a18ffb08610d875a9cf670de215c59d7fd5ce534c742e9b",
+    "format": "deb",
+    "architecture": "amd64",
+    "target": "Ubuntu 26.04",
+    "bundledDotnetRuntime": true,
+    "structureCheckPassed": true,
+    "installedSystemWide": false
+  },
+  "userInstall": {
+    "completed": true,
+    "application": "~/.local/share/codex-syncbar/app",
+    "launcher": "~/.local/bin/codex-syncbar",
+    "bundledNode": "24.19.0",
+    "secretStore": "GNOME Secret Service via GI fallback when secret-tool unavailable",
+    "serviceImmediatelyAfterInstall": {
+      "loadState": "loaded",
+      "activeState": "inactive",
+      "unitFileState": "static",
+      "mainPid": 0
+    },
+    "autostartEnabledByInstall": false,
+    "buildAndInstalledFilesMatch": true
+  },
+  "limitations": [
+    "Windows-only tests require Windows; 13 skipped tests are reported separately.",
+    "GitHub Actions workflow was added but has not run remotely.",
+    "Basic mouse selector/menu and visible Tab focus confirmed by user; broader native input and physical monitor-scale checks remain separate. Live account/restart/restoration results are recorded separately in live-final-summary.json.",
+    "Own GTK signal integration and captures are recorded by the UI QA evidence; they are not native global input E2E."
+  ],
+  "reproduce": [
+    "bash Scripts/Ubuntu/test.sh",
+    "CODEX_SYNCBAR_SSH_QA_REPORT=ssh-loopback-smoke.json bash Tests/ssh-loopback-smoke.sh /path/to/sshd",
+    "bash Scripts/Ubuntu/package.sh --no-build"
+  ],
+  "finalDelta": {
+    "recordedAtUtc": "2026-10-02T19:01:20.531701+00:00",
+    "previousPackageSha256": "07f5c422459b67b9f47f17af4b7460ae29c2a30d4ac62d32daa339bae4ca2aeb",
+    "ubuntuTargetedCore": {
+      "passed": 51,
+      "failed": 0,
+      "skipped": 1,
+      "total": 52
+    },
+    "originalWindowsCoreTargetedOnLinux": {
+      "passed": 30,
+      "failed": 0,
+      "skipped": 1,
+      "total": 31
+    },
+    "supervisorFixtures": {
+      "passed": 15,
+      "failed": 0
+    },
+    "gtkOwnWidgetIntegration": {
+      "passed": 9,
+      "failed": 0,
+      "evidence": "gtk-integration-600x480.json"
+    },
+    "nativeManualBasicControls": {
+      "source": "explicit user confirmation",
+      "passed": 2,
+      "evidence": "native-manual.json"
+    },
+    "publishedDemoIpc": {
+      "passed": 11,
+      "failed": 0
+    },
+    "coverage": [
+      "full Ubuntu email and absent-alias labels",
+      "hash-only canonical identity API exactness and credential nonmutation",
+      "pending/needs-login export refusal",
+      "failed new login reports reserved profile ID",
+      "encrypted remote recovery archive roundtrip, cross-operation and tamper rejection",
+      "private legacy tar migration",
+      "retained and incomplete temporary auth encrypted without losing recoverable contents",
+      "generation-mismatched refresh candidate remains encrypted and does not overwrite newer canonical auth"
+    ],
+    "installation": {
+      "reinstalled": true,
+      "startedByInstaller": false,
+      "stateImmediatelyAfterInstall": "inactive",
+      "mainPidImmediatelyAfterInstall": 0,
+      "nodePreserved": true,
+      "backendCoreHelperUiAndSessionHashesMatchTestedBuild": true,
+      "previousManagedApplicationRetained": true
+    },
+    "notClaimed": [
+      "No live two-account A to B to A proof in this report.",
+      "GTK own signals are not global pointer/keyboard automation.",
+      "Native manual proof covers basic account selector/menu and Tab focus only."
+    ]
+  },
+  "restartFixDelta": {
+    "recordedAtUtc": "2026-10-03T01:02:18.783973+00:00",
+    "previousPackageSha256": "0e14ab7c801bca28475f6eec6798eb85f57d7d0e39640714f58e65b9b70e0b20",
+    "portableWindowsCore": {
+      "passed": 245,
+      "failed": 0,
+      "skipped": 12,
+      "total": 257
+    },
+    "ubuntuProductionCore": {
+      "passed": 95,
+      "failed": 0,
+      "skipped": 1,
+      "total": 96
+    },
+    "supervisorFixtures": {
+      "passed": 20,
+      "failed": 0
+    },
+    "ownedGtkCapture": {
+      "passed": 1,
+      "failed": 0
+    },
+    "publishedDemoIpc": {
+      "passed": 11,
+      "failed": 0
+    },
+    "otherRepeatedChecks": [
+      "Python IPC 8",
+      "user installer 5",
+      "Secret GI 4",
+      "private session environment 6",
+      "Node usage summary",
+      "shell helper contracts",
+      "usage concurrency",
+      "remote CLI contracts"
+    ],
+    "coverage": [
+      "Desktop root resolution using same-user packaged app-server descendants when Electron clears its root environment",
+      "Flattened Electron helpers excluded from desktop roots",
+      "Unknown home, conflicting homes, unrelated executable and reused PID rejected",
+      "Whitelisted GUI environment retained for restart",
+      "Supervisor requires running desktop baseline and replaced process identity",
+      "Waits for completed operation busy lock release before restoring next device",
+      "GTK captures wait for realized rendered widget and fail rather than claim nonexistent artifact"
+    ],
+    "build": {
+      "sdk": "10.0.401",
+      "runtimeBundled": true,
+      "structureCheckPassed": true,
+      "packageSha256": "5257a0833382cd64672dd2a208a126b89a7361a053ee037256ee2f10519c7252"
+    },
+    "installation": "Latest build ready; service lifecycle and installation coordinated separately by parent task",
+    "liveEvidence": {
+      "previousRun": "live-e2e.json",
+      "previousRunStatus": "incomplete: desktop baseline missed; final remote restoration not verified",
+      "readonlyPostcheck": "live-postcheck.json",
+      "postcheckStatus": "All three targets currently match original account A; no account changes"
+    },
+    "notClaimed": [
+      "The initial incomplete live test is not converted into a pass.",
+      "Current unit and integration checks do not certify actual desktop restart.",
+      "Physical100%/150%monitor scale remains unverified."
+    ],
+    "historicalRecord": true
+  },
+  "finalVerifiedBuild": "final-build.json",
+  "liveAcceptance": "live-final-summary.json",
+  "finalQuitAndCaptureDelta": {
+    "recordedAtUtc": "2026-10-03T01:27:15.416333+00:00",
+    "ubuntuCore": {
+      "passed": 98,
+      "skipped": 1,
+      "failed": 0,
+      "total": 99
+    },
+    "supervisorFixtures": {
+      "passed": 21,
+      "failed": 0
+    },
+    "ownedGtkCapture": {
+      "passed": 1,
+      "failed": 0,
+      "evidence": "capture-fix.json"
+    },
+    "publishedDemoIpc": {
+      "passed": 11,
+      "failed": 0
+    },
+    "package": {
+      "file": "codex-syncbar_1.0.0.28+ubuntu1_amd64.deb",
+      "bytes": 28942984,
+      "sha256": "9c825f94b48470c19a18ffb08610d875a9cf670de215c59d7fd5ce534c742e9b",
+      "structureCheckPassed": true
+    },
+    "installedFilesMatchBuild": {
+      "backend/CodexSyncBar.Backend.dll": true,
+      "backend/CodexSyncBar.Core.dll": true,
+      "ui/codex_syncbar/app.py": true,
+      "backend/Runtime/gpt-switch": true,
+      "prepare-session.py": true
+    },
+    "autostartEnabledByInstall": false,
+    "serviceStartedByInstall": false,
+    "coverage": [
+      "busy quit drains cancellation and rollback",
+      "failed rollback remains recoveryRequired in memory and journal",
+      "lock-waiting mutation rejected after quit",
+      "native GTK snapshot fallback keeps CSS background and dimensions"
+    ]
+  },
+  "lastUpdatedAtUtc": "2026-10-03T01:45:08.674405+00:00"
+}

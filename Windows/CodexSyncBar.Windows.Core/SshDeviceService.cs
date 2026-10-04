@@ -460,12 +460,16 @@ public sealed class SshDeviceService
         int? activeProfileId,
         CancellationToken cancellationToken)
     {
+#if SYNCBAR_LINUX
+        var result = await RunReadOnlyStatusAsync(device, cancellationToken);
+#else
         var result = await RunSshAsync(
             device,
             ["~/.local/bin/gpt-switch", "__node", "status"],
             cancellationToken,
             TimeSpan.FromSeconds(20),
             ResolveSecret(device));
+#endif
         if (result.ExitCode != 0)
         {
             throw new CodexSyncBarException(
@@ -494,11 +498,45 @@ public sealed class SshDeviceService
                 ? auth
                 : device.Authentication,
             cliState is "unknown" or null ? "unavailable" : cliState,
-            active is not null && (activeProfileId is null || active == activeProfileId),
+            true,
                     active is not null && activeProfileId is not null && active != activeProfileId
                 ? $"원격 활성 계정 {active} · 이 PC의 계정 {activeProfileId}와 다름"
                 : null);
     }
+
+#if SYNCBAR_LINUX
+    private async Task<ProcessResult> RunReadOnlyStatusAsync(SshDeviceConfiguration device, CancellationToken token)
+    {
+        // The bundled observer is streamed to Bash, not installed. Old or absent
+        // remote helpers must not require a mutation just to preview an account.
+        SshUploadFile.EnsureSource(_paths, _paths.BundledGptSwitch);
+        return await RunSshWithInputAsync(device, ["bash", "-l", "-s", "--", "__node", "status-readonly"],
+            await File.ReadAllTextAsync(_paths.BundledGptSwitch, token), ResolveSecret(device), token, TimeSpan.FromSeconds(20));
+    }
+
+    public sealed record RemotePrerequisites(IReadOnlyList<string> Missing, bool NodeAvailable, bool CodexAvailable);
+
+    public async Task<RemotePrerequisites> InspectPrerequisitesAsync(SshDeviceConfiguration device, CancellationToken token)
+    {
+        var result = await RunSshWithInputAsync(device, ["bash", "-l", "-s"], """
+            set -eu
+            export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin"
+            for program in bash jq tar base64 stat id awk sed grep tr sort find ps pgrep mktemp mkdir chmod cp mv rm cat wc hostname cmp ln sleep; do
+              command -v "$program" >/dev/null 2>&1 || printf 'missing=%s\n' "$program"
+            done
+            if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+              printf 'missing=sha256sum-or-shasum\n'
+            fi
+            if command -v node >/dev/null 2>&1; then printf 'node=yes\n'; else printf 'node=no\n'; fi
+            if command -v codex >/dev/null 2>&1; then printf 'codex=yes\n'; else printf 'codex=no\n'; fi
+            """, ResolveSecret(device), token, TimeSpan.FromSeconds(20));
+        EnsureRemoteSuccess(device, result, "필수 도구 확인");
+        var lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var missing = lines.Where(line => line.StartsWith("missing=", StringComparison.Ordinal)).Select(line => line[8..])
+            .Where(value => Regex.IsMatch(value, "^[a-z0-9-]+$")).Distinct().ToArray();
+        return new(missing, lines.Contains("node=yes"), lines.Contains("codex=yes"));
+    }
+#endif
 
     public IAccountTarget CreateAccountTarget(SshDeviceConfiguration device) => new SshAccountTarget(this, device);
 
@@ -542,10 +580,21 @@ public sealed class SshDeviceService
             _ = service._authStore.ReadCredentials(profileId);
             var test = await service.TestAsync(device, cancellationToken);
             if (!test.IsReachable) throw new CodexSyncBarException(test.Message);
+#if SYNCBAR_LINUX
+            var result = await service.RunReadOnlyStatusAsync(device, cancellationToken);
+            EnsureRemoteSuccess(device, result, "현재 계정 확인");
+#else
             var result = await RunAsync(["status"], cancellationToken);
+#endif
             var fields = ParseFields(result.StandardOutput);
             if (!int.TryParse(fields.GetValueOrDefault("active"), out var previous) || previous <= 0)
                 throw new CodexSyncBarException($"{DisplayName}: 현재 계정을 확인하지 못했습니다.");
+            // A numeric slot is a usable rollback checkpoint only when its identity
+            // agrees with this controller. Uploading a different account to the
+            // active slot would otherwise destroy the checkpoint before switching.
+            var previousCredentials = service._authStore.ReadCredentials(previous);
+            if (!string.Equals(fields.GetValueOrDefault("fingerprint"), Fingerprint(previousCredentials.AccountId), StringComparison.Ordinal))
+                throw new CodexSyncBarException($"{DisplayName}: 계정 슬롯이 달라 설치 및 활성화를 먼저 실행해야 합니다.");
             await RunAsync(["preflight", previous.ToString()], cancellationToken);
             return previous.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
@@ -557,8 +606,13 @@ public sealed class SshDeviceService
             await RunAsync(["switch", profileId.ToString(), "1"], cancellationToken);
         }
 
-        public async Task VerifyAsync(int profileId, CancellationToken cancellationToken) =>
-            _ = await RunAsync(["verify", profileId.ToString()], cancellationToken);
+        public async Task VerifyAsync(int profileId, CancellationToken cancellationToken)
+        {
+            var verified = await RunAsync(["verify", profileId.ToString()], cancellationToken);
+            var expected = Fingerprint(service._authStore.ReadCredentials(profileId).AccountId);
+            if (!string.Equals(ParseFields(verified.StandardOutput).GetValueOrDefault("fingerprint"), expected, StringComparison.Ordinal))
+                throw new CodexSyncBarException($"{DisplayName}: 적용된 계정이 선택한 계정과 다릅니다.");
+        }
 
         public async Task RestoreAsync(string checkpoint, CancellationToken cancellationToken)
         {
@@ -587,6 +641,15 @@ public sealed class SshDeviceService
         await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         var secret = ResolveSecret(device);
         var accessOnly = _authStore.CreateAccessOnlyCopy(profileId);
+#if SYNCBAR_LINUX
+        // Automatic token distribution must not silently replace a differently
+        // mapped active slot. Bootstrap owns intentional profile-map replacement
+        // and protects it with a durable remote snapshot.
+        var status = await FetchRemoteStatusAsync(device, null, cancellationToken);
+        if (status.ProfileId is not { } currentProfile || status.AccountId is not { } currentFingerprint
+            || !string.Equals(Fingerprint(_authStore.ReadCredentials(currentProfile).AccountId), currentFingerprint, StringComparison.Ordinal))
+            throw new CodexSyncBarException($"{device.DisplayLabel}: 현재 계정 슬롯을 확인하지 못했습니다. 설치 및 활성화를 먼저 실행해 주세요.");
+#endif
         await InstallRemoteHelpersAsync(device, secret, cancellationToken);
         var install = await RunSshWithInputAsync(
             device,
@@ -1428,15 +1491,24 @@ public sealed class SshDeviceService
     {
         var archiveName = $".syncbar-bootstrap-restore-{Guid.NewGuid():N}.tar";
         var remoteArchive = $"~/{archiveName}";
-        _ = _bootstrapTransactions.ReadArchive(transaction);
+        var archive = _bootstrapTransactions.ReadArchive(transaction);
         try
         {
+#if SYNCBAR_LINUX
+            // Decrypt only in memory. The remote recovery archive is streamed
+            // through SSH stdin with mode 0600; no plaintext local upload exists.
+            var upload = await RunSshWithInputAsync(device,
+                ["sh", "-c", "'umask 077; set -C; base64 -d > \"$HOME/" + archiveName + "\"'"],
+                Convert.ToBase64String(archive), secret, cancellationToken);
+            EnsureRemoteSuccess(device, upload, "원격 부트스트랩 복구 archive 전송");
+#else
             await UploadFileAsync(
                 device,
                 _bootstrapTransactions.ArchivePath(transaction),
                 remoteArchive,
                 secret,
                 cancellationToken);
+#endif
             var restore = await RunSshWithInputAsync(
                 device,
                 ["sh", "-s"],
@@ -2002,7 +2074,8 @@ public sealed class SshDeviceService
         IEnumerable<string> remoteArguments,
         string standardInput,
         string? secret,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         var ssh = FindExecutable("ssh.exe", "ssh");
         var arguments = BuildCommonOptions(device, forScp: false, secret is not null);
@@ -2013,7 +2086,7 @@ public sealed class SshDeviceService
             arguments,
             standardInput: NormalizeRemoteInput(standardInput),
             cancellationToken: cancellationToken,
-            timeout: TimeSpan.FromSeconds(120),
+            timeout: timeout ?? TimeSpan.FromSeconds(120),
             environment: AskPassEnvironment(device, secret)?.ToDictionary(
                 pair => pair.Key,
                 pair => pair.Value));
@@ -2206,7 +2279,12 @@ public sealed class SshDeviceService
             ["SSH_ASKPASS"] = executable,
             ["SSH_ASKPASS_REQUIRE"] = "force",
             ["DISPLAY"] = "codex-syncbar",
+#if SYNCBAR_LINUX
+            ["CODEX_SYNCBAR_CREDENTIAL_ID"] = device.CredentialId?.ToString("D"),
+            ["CODEX_SYNCBAR_SECRET_KIND"] = device.Authentication == "password" ? "password" : "passphrase",
+#else
             ["CODEX_SYNCBAR_ASKPASS_SECRET"] = secret,
+#endif
         };
     }
 
@@ -2216,7 +2294,12 @@ public sealed class SshDeviceService
         var source = _paths.BundledWindowsAskPass;
         if (!File.Exists(source))
             throw new CodexSyncBarException("SSH 비밀번호 도우미가 없습니다. 앱을 최신 패키지로 설치해 주세요.");
+#if SYNCBAR_LINUX
+        WindowsPathSafety.EnsureBundledFile(source, _paths.RuntimeDirectory);
+        return _preparedAskPass = source;
+#else
         return _preparedAskPass = MaterializeAskPassExecutable(_paths, source);
+#endif
     }
 
     internal static string MaterializeAskPassExecutable(WindowsPaths paths, string source)

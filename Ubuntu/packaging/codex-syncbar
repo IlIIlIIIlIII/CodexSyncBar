@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+app_dir=${SYNCBAR_APP_DIR:-/usr/lib/codex-syncbar}
+export PYTHONPATH="$app_dir/ui${PYTHONPATH:+:$PYTHONPATH}"
+demo=0
+has_socket=0
+background=0
+for argument in "$@"; do
+    case "$argument" in
+        --demo) demo=1 ;;
+        --socket|--socket=*) has_socket=1 ;;
+        --background) background=1 ;;
+    esac
+done
+
+if [[ "$background" = 1 ]]; then
+    if [[ "$demo" = 1 || "$has_socket" = 1 || ${SYNCBAR_DEV:-0} = 1 ]]; then
+        printf 'Background startup is available for the installed application only.\n' >&2
+        exit 64
+    fi
+    /usr/bin/python3 "$app_dir/prepare-session.py"
+    exit 0
+fi
+
+# An explicit socket belongs to the caller, including isolated QA harnesses.
+if [[ "$has_socket" = 1 ]]; then
+    exec /usr/bin/python3 -m codex_syncbar "$@"
+fi
+
+if [[ "$demo" = 1 || ${SYNCBAR_DEV:-0} = 1 ]]; then
+    test_root=$(mktemp -d "${TMPDIR:-/tmp}/codex-syncbar-launch.XXXXXXXX")
+    chmod 700 "$test_root"
+    backend_pid=
+    cleanup() {
+        if [[ -n "$backend_pid" ]]; then
+            kill "$backend_pid" 2>/dev/null || true
+            wait "$backend_pid" 2>/dev/null || true
+        fi
+        rm -rf "$test_root"
+    }
+    trap cleanup EXIT INT TERM
+    backend_arguments=(--socket "$test_root/control.sock")
+    if [[ "$demo" = 1 ]]; then backend_arguments+=(--demo); fi
+    "$app_dir/backend/CodexSyncBar.Backend" "${backend_arguments[@]}" >"$test_root/backend.log" 2>&1 &
+    backend_pid=$!
+    for ((attempt = 0; attempt < 100; attempt++)); do
+        [[ -S "$test_root/control.sock" ]] && break
+        if ! kill -0 "$backend_pid" 2>/dev/null; then
+            printf 'Codex SyncBar backend could not start.\n' >&2
+            exit 1
+        fi
+        sleep 0.05
+    done
+    if [[ ! -S "$test_root/control.sock" ]]; then
+        printf 'Codex SyncBar backend did not become ready.\n' >&2
+        exit 1
+    fi
+    /usr/bin/python3 -m codex_syncbar "$@" --socket "$test_root/control.sock"
+else
+    # Installation never starts/enables the unit. Only an explicit launch starts it.
+    /usr/bin/python3 "$app_dir/prepare-session.py"
+    exec /usr/bin/python3 -m codex_syncbar "$@"
+fi

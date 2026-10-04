@@ -111,6 +111,13 @@ internal sealed class WindowsLogoutTarget(AuthStore auth, LocalSwitchService loc
         var value = JsonSerializer.Deserialize<LocalLogoutCheckpoint>(_secrets.Read(checkpoint)
             ?? throw new CodexSyncBarException("로그아웃 복구 인증이 없습니다."))
             ?? throw new CodexSyncBarException("로그아웃 복구 인증이 올바르지 않습니다.");
+#if SYNCBAR_LINUX
+        auth.RestoreProfileSnapshot(removedProfileId, value.Profile);
+        await local.RestoreAsync(value.Active, cancellationToken);
+        if (auth.ReadCredentials(removedProfileId).AccountId != value.Profile.Tokens.AccountId
+            || auth.ReadActiveAccountId() != value.Active?.Tokens.AccountId)
+            throw new CodexSyncBarException("Ubuntu 로그아웃 복구를 확인하지 못했습니다.");
+#else
         var temporary = Path.Combine(paths.LoginSessionsDirectory, "logout-restore-" + Guid.NewGuid().ToString("N"), "auth.json");
         WindowsPathSafety.EnsureDirectory(Path.GetDirectoryName(temporary)!, "로그아웃 복구 디렉터리");
         try
@@ -123,6 +130,7 @@ internal sealed class WindowsLogoutTarget(AuthStore auth, LocalSwitchService loc
                 throw new CodexSyncBarException("Windows 로그아웃 복구를 확인하지 못했습니다.");
         }
         finally { if (Directory.Exists(Path.GetDirectoryName(temporary))) Directory.Delete(Path.GetDirectoryName(temporary)!, recursive: true); }
+#endif
     }
 
     public Task ReleaseAsync(string checkpoint, CancellationToken cancellationToken)

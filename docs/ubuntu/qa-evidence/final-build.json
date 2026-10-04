@@ -1,0 +1,43 @@
+{
+  "recordedAtUtc": "2026-10-03T01:27:15.416333+00:00",
+  "ubuntuCore": {
+    "passed": 98,
+    "skipped": 1,
+    "failed": 0,
+    "total": 99
+  },
+  "supervisorFixtures": {
+    "passed": 21,
+    "failed": 0
+  },
+  "ownedGtkCapture": {
+    "passed": 1,
+    "failed": 0,
+    "evidence": "capture-fix.json"
+  },
+  "publishedDemoIpc": {
+    "passed": 11,
+    "failed": 0
+  },
+  "package": {
+    "file": "codex-syncbar_1.0.0.28+ubuntu1_amd64.deb",
+    "bytes": 28942984,
+    "sha256": "9c825f94b48470c19a18ffb08610d875a9cf670de215c59d7fd5ce534c742e9b",
+    "structureCheckPassed": true
+  },
+  "installedFilesMatchBuild": {
+    "backend/CodexSyncBar.Backend.dll": true,
+    "backend/CodexSyncBar.Core.dll": true,
+    "ui/codex_syncbar/app.py": true,
+    "backend/Runtime/gpt-switch": true,
+    "prepare-session.py": true
+  },
+  "autostartEnabledByInstall": false,
+  "serviceStartedByInstall": false,
+  "coverage": [
+    "busy quit drains cancellation and rollback",
+    "failed rollback remains recoveryRequired in memory and journal",
+    "lock-waiting mutation rejected after quit",
+    "native GTK snapshot fallback keeps CSS background and dimensions"
+  ]
+}

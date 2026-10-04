@@ -17,3 +17,7 @@ tmp/
 *.binlog
 **/TestResults/
 **/__pycache__/
+
+# Local live-account QA records are not distribution assets.
+docs/ubuntu/qa-evidence/live*
+docs/ubuntu/live-e2e-status.md

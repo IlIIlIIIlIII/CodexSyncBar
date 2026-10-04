@@ -67,7 +67,9 @@ public sealed class AuthStore
     /// <summary>Call under the controller lock after transaction recovery.</summary>
     public void ProtectLegacyProfiles()
     {
+#if !SYNCBAR_LINUX
         if (!OperatingSystem.IsWindows()) return;
+#endif
         foreach (var profileId in ExistingProfileIds())
         {
             var path = ProfileAuthFile(profileId);
@@ -76,6 +78,47 @@ public sealed class AuthStore
                 WriteJsonAtomically(path, ReadAuthFile(path));
         }
     }
+
+#if SYNCBAR_LINUX
+    // Only after the isolated CLI has stopped: pending recovery must not keep
+    // its temporary plaintext credential file on disk between service runs.
+    internal void ProtectRecoveryAuthFile(string path)
+    {
+        if (!File.Exists(path)) return;
+        var bytes = WindowsPathSafety.ReadPrivateFile(path, "인증 복구 파일", 16 * 1024 * 1024);
+        try
+        {
+            using var document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("protectedAuth", out _)) return;
+        }
+        catch (JsonException) { /* Preserve even an incomplete credential file in encrypted form. */ }
+        var protectedBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schemaVersion = 1,
+            protectedAuth = Convert.ToBase64String(WindowsSecretStore.Protect(bytes, "codex-account-auth-v1")),
+        });
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try { WindowsPathSafety.WritePrivateBytes(temporary, protectedBytes); File.Move(temporary, path, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    internal void ProtectAbandonedSessionCredentials()
+    {
+        if (!Directory.Exists(_paths.LoginSessionsDirectory)) return;
+        foreach (var directory in Directory.EnumerateDirectories(_paths.LoginSessionsDirectory))
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(directory),
+                "^(?:refresh-)?profile-[1-9][0-9]*-[a-f0-9]{32}$|^logout-restore-[a-f0-9]{32}$")) continue;
+            ProtectRecoveryAuthFile(Path.Combine(directory, "auth.json"));
+        }
+    }
+
+    internal void RestoreProfileSnapshot(int profileId, CodexAuthFile auth)
+    {
+        ValidateFullAuth(auth);
+        WriteJsonAtomically(ProfileAuthFile(profileId), auth);
+    }
+#endif
 
     // A running CLI may rotate the active account's tokens. Prefer that copy
     // only when it identifies the same account and has a newer refresh time.
@@ -121,8 +164,10 @@ public sealed class AuthStore
             {
                 if (envelope.RootElement.TryGetProperty("protectedAuth", out var protectedAuth))
                 {
+#if !SYNCBAR_LINUX
                     if (!OperatingSystem.IsWindows())
                         throw new PlatformNotSupportedException("DPAPI 인증은 해당 Windows 사용자만 해독할 수 있습니다.");
+#endif
                     bytes = WindowsSecretStore.Unprotect(Convert.FromBase64String(protectedAuth.GetString()!), "codex-account-auth-v1");
                 }
             }
@@ -178,7 +223,8 @@ public sealed class AuthStore
                     "활성 Codex 인증 파일",
                     16 * 1024 * 1024, ActiveSandboxReader(_paths.ActiveAuthFile)),
                 JsonOptions);
-            return auth?.Tokens?.AccountId;
+            return auth is not null && string.Equals(auth.AuthMode, "chatgpt", StringComparison.Ordinal)
+                && string.IsNullOrEmpty(auth.OpenAiApiKey) ? auth.Tokens?.AccountId : null;
         }
         catch (JsonException)
         {
@@ -319,10 +365,15 @@ public sealed class AuthStore
         // Profiles and rollback copies stay encrypted. Only the active CLI
         // file and an explicitly isolated login/refresh session need plaintext.
         var fullPath = Path.GetFullPath(destination);
-        var isActive = fullPath.Equals(Path.GetFullPath(_paths.ActiveAuthFile), StringComparison.OrdinalIgnoreCase);
+        var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var isActive = fullPath.Equals(Path.GetFullPath(_paths.ActiveAuthFile), pathComparison);
         var isSession = fullPath.StartsWith(Path.GetFullPath(_paths.LoginSessionsDirectory)
-            + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            + Path.DirectorySeparatorChar, pathComparison);
+#if SYNCBAR_LINUX
+        if (!isActive && !isSession)
+#else
         if (OperatingSystem.IsWindows() && !isActive && !isSession)
+#endif
         {
             bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
@@ -370,6 +421,7 @@ public sealed class AuthStore
     private static void ValidateFullAuth(CodexAuthFile auth)
     {
         if (!string.Equals(auth.AuthMode, "chatgpt", StringComparison.Ordinal)
+            || !string.IsNullOrEmpty(auth.OpenAiApiKey)
             || auth.Tokens is null
             || string.IsNullOrWhiteSpace(auth.Tokens.AccessToken)
             || string.IsNullOrWhiteSpace(auth.Tokens.IdToken)

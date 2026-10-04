@@ -12,7 +12,7 @@ file_mode() {
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 HELPER_REPOSITORY_SOURCE="$ROOT/Support/gpt-switch"
 ASKPASS_REPOSITORY_SOURCE="$ROOT/Support/codex-syncbar-askpass"
-USAGE_SOURCE="$ROOT/Support/usage-summary.mjs"
+USAGE_REPOSITORY_SOURCE="$ROOT/Support/usage-summary.mjs"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/codex-syncbar-helper.XXXXXX")
 TEST_PROCESS_PIDS=()
 cleanup() {
@@ -29,9 +29,11 @@ trap cleanup EXIT
 # both scripts with the secured copies that build-app.sh places in the bundle.
 HELPER="$TMP/gpt-switch"
 ASKPASS_SOURCE="$TMP/codex-syncbar-askpass"
+USAGE_SOURCE="$TMP/usage-summary.mjs"
 cp "$HELPER_REPOSITORY_SOURCE" "$HELPER"
 cp "$ASKPASS_REPOSITORY_SOURCE" "$ASKPASS_SOURCE"
-chmod 700 "$HELPER" "$ASKPASS_SOURCE"
+cp "$USAGE_REPOSITORY_SOURCE" "$USAGE_SOURCE"
+chmod 700 "$HELPER" "$ASKPASS_SOURCE" "$USAGE_SOURCE"
 
 node "$ROOT/Tests/usage-summary-tests.mjs"
 bash "$ROOT/Tests/remote-codex-update-tests.sh"
