@@ -175,11 +175,15 @@ class ManagerDialog(Adw.Dialog):
 
     def build_devices(self):
         top = box(False)
-        top.append(button('SSH 장치 추가', callback=lambda *_: self.edit_device({}), css='suggested-action'))
+        top.append(button('SSH config에서 추가', callback=lambda *_: self.import_ssh_config(), css='suggested-action'))
+        top.append(button('직접 입력', callback=lambda *_: self.edit_device({})))
         top.append(button('목록 새로고침', callback=lambda *_: self.render()))
         self.body.append(top)
         self.devices_group = self.group('SSH 장치', '설치 및 활성화를 완료한 장치가 전체 계정 전환에 포함됩니다.')
+        group = self.devices_group
         def loaded(result, error):
+            if self.closed or group.get_parent() is None:
+                return False
             if error:
                 self.feedback.set_text(str(error))
                 return False
@@ -187,13 +191,66 @@ class ManagerDialog(Adw.Dialog):
             for device in devices:
                 row = Adw.ActionRow(title=device.get('displayName') or device.get('host', 'SSH'), subtitle=f"{device.get('username','')}@{device.get('host','')}:{device.get('port',22)}")
                 row.add_suffix(button('관리', callback=lambda _b,d=device: self.edit_device(d)))
-                self.devices_group.add(row)
+                group.add(row)
                 if self.device_id in (device.get('id'), 'ssh:' + device.get('id','')):
                     self.device_id = None
                     self.edit_device(device)
             if not devices:
-                self.devices_group.add(Adw.ActionRow(title='등록된 SSH 장치가 없습니다.'))
+                group.add(Adw.ActionRow(title='등록된 SSH 장치가 없습니다.'))
             return False
+        self.app.client.submit('device.list', callback=loaded)
+
+    def import_ssh_config(self):
+        from .ssh_config import list_hosts, device_from_host
+        clear(self.body)
+        self.body.append(button('장치 목록으로', callback=lambda *_: self.render()))
+        group = self.group('SSH config에서 추가', '~/.ssh/config의 호스트를 선택하세요. 연결 설정을 확인한 뒤 저장할 수 있습니다.')
+        self.feedback.set_text('SSH 호스트를 읽고 있습니다…')
+
+        def resolved(future):
+            if self.closed:
+                return False
+            self.body.set_sensitive(True)
+            try:
+                draft = future.result()
+            except Exception as error:
+                self.feedback.set_text(str(error))
+                return False
+            self.feedback.set_text('설정을 확인한 뒤 저장하세요. 저장 후 설치 및 활성화를 진행할 수 있습니다.')
+            self.edit_device(draft)
+            return False
+
+        def select(alias):
+            self.body.set_sensitive(False)
+            self.feedback.set_text('SSH 연결 설정을 확인하고 있습니다…')
+            future = self.app.client.pool.submit(device_from_host, alias)
+            future.add_done_callback(lambda done: GLib.idle_add(resolved, done))
+
+        def loaded(devices, error):
+            if self.closed or group.get_parent() is None:
+                return False
+            if error:
+                self.feedback.set_text(str(error))
+                return False
+            try:
+                aliases = list_hosts()
+            except (OSError, ValueError) as failure:
+                self.feedback.set_text(str(failure))
+                return False
+            registered = {d.get('host', '').lower() for d in (devices or [])}
+            for alias in aliases:
+                exists = alias.lower() in registered
+                row = Adw.ActionRow(title=alias, subtitle='이미 등록된 호스트입니다.' if exists else 'OpenSSH 설정 사용')
+                row.set_use_markup(False)
+                choose = button('등록됨' if exists else '선택', callback=lambda _b, host=alias: select(host))
+                choose.set_sensitive(not exists)
+                row.add_suffix(choose)
+                group.add(row)
+            if not aliases:
+                group.add(Adw.ActionRow(title='추가할 SSH 호스트가 없습니다.', subtitle='~/.ssh/config에 Host 별칭을 추가해 주세요. 와일드카드 항목은 표시하지 않습니다.'))
+            self.feedback.set_text('')
+            return False
+
         self.app.client.submit('device.list', callback=loaded)
 
     def edit_device(self, device):
@@ -236,6 +293,9 @@ class ManagerDialog(Adw.Dialog):
         enabled.set_active(bool(device.get('enabled')))
         enabled.set_sensitive(bool(device.get('enabled')))
         group.add(enabled)
+        skip_failure = Adw.SwitchRow(title='계정 전환 실패 시 건너뛰기', subtitle='연결 또는 전환에 실패해도 다른 장치의 계정 전환을 계속합니다.')
+        skip_failure.set_active(bool(device.get('skipOnSwitchFailure')))
+        group.add(skip_failure)
         def save(*_):
             try:
                 port = int(fields['port'].get_text())
@@ -245,7 +305,7 @@ class ManagerDialog(Adw.Dialog):
                 self.feedback.set_text('포트는 1~65535 사이의 숫자여야 합니다.')
                 return
             draft = {key:entry.get_text().strip() for key,entry in fields.items()}
-            draft.update({'port':port,'authentication':auth_values[auth.get_selected()],'identityFile':identity.get_text().strip() or None,'certificateFile':certificate.get_text().strip() or None,'enabled':enabled.get_active()})
+            draft.update({'port':port,'authentication':auth_values[auth.get_selected()],'identityFile':identity.get_text().strip() or None,'certificateFile':certificate.get_text().strip() or None,'enabled':enabled.get_active(),'skipOnSwitchFailure':skip_failure.get_active()})
             if device.get('id'):
                 draft['id'] = device['id']
             params = {'device':draft,'clearPassphrase':clear_passphrase.get_active()}
@@ -356,25 +416,33 @@ class ManagerDialog(Adw.Dialog):
         settings = self.app.snapshot.get('settings') or {}
         group = self.group('표시와 실행')
         switches = {}
-        for key,title,subtitle,default in [('fiveHour','5시간 사용량 표시','계정에서 제공하는 경우 표시합니다.',True),('codexWeekly','주간 사용량 표시','선택한 계정의 주간 잔여량을 표시합니다.',True),('launchAtLogin','로그인 시 자동 시작','창을 열지 않고 백그라운드 서비스를 시작합니다.',False)]:
+        for key,title,subtitle,default in [('codexWeekly','주간 사용량 표시','선택한 계정의 주간 잔여량을 표시합니다.',True),('launchAtLogin','로그인 시 자동 시작','창을 열지 않고 백그라운드 서비스를 시작합니다.',False)]:
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
             row.set_active(settings.get(key, default))
             group.add(row)
             switches[key] = row
         self.body.append(button('설정 저장', callback=lambda *_: self.run('settings.save', {**settings, **{key:row.get_active() for key,row in switches.items()}}), css='suggested-action'))
-        weekly = self.group('주간 자동 메시지', '기본값은 꺼짐입니다. 활성화한 계정에서만 주간 시작 메시지를 보냅니다.')
+        weekly = self.group('주간 자동 메시지', '새 계정은 기본으로 켜집니다. 켜진 계정은 주간 한도가 초기화되면 시작 메시지를 보냅니다.')
         weekly_settings = settings.get('weekly') or {}
         enabled_ids = weekly_settings.get('preferences', {}).get('enabledProfileIds', [])
         for account in self.app.accounts:
-            row = Adw.SwitchRow(title=account_name(account))
-            row.set_active(account['id'] in enabled_ids)
-            row.connect('notify::active', lambda widget,_prop,p=account['id']: self.run('weekly.set', {'profileId':p,'enabled':widget.get_active()}))
-            weekly.add(row)
-            send = Adw.ActionRow(title=account_name(account), subtitle='주간 시작 메시지를 지금 보냅니다.')
+            name = account_name(account)
+            available = not account.get('needsLogin') and not account.get('isPending')
+            row = Adw.ActionRow(title=name, title_lines=1)
+            row.set_use_markup(False)
+            row.set_tooltip_text(name)
             send_button = button('지금 보내기', callback=lambda _b,p=account['id']: self.confirm('주간 시작 메시지를 보낼까요?', '선택한 계정으로 Codex 메시지를 한 번 전송합니다.', '보내기', lambda: self.run('weekly.send', {'profileId':p})))
-            send_button.set_sensitive(not account.get('needsLogin') and not account.get('isPending'))
-            send.add_suffix(send_button)
-            weekly.add(send)
+            send_button.set_valign(Gtk.Align.CENTER)
+            send_button.set_sensitive(available)
+            send_button.set_tooltip_text(f'{name} 계정의 주간 시작 메시지 보내기')
+            row.add_suffix(send_button)
+            enabled = Gtk.Switch(valign=Gtk.Align.CENTER, active=account['id'] in enabled_ids)
+            enabled.set_sensitive(available)
+            enabled.update_property([Gtk.AccessibleProperty.LABEL], [f'{name} 주간 자동 메시지'])
+            enabled.connect('notify::active', lambda widget,_prop,p=account['id']: self.run('weekly.set', {'profileId':p,'enabled':widget.get_active()}))
+            row.add_suffix(enabled)
+            row.set_activatable_widget(enabled)
+            weekly.add(row)
         self.body.append(label('창을 닫아도 백그라운드 갱신과 진행 중인 전환은 계속됩니다. 메뉴의 “완전히 종료”로 서비스를 종료할 수 있습니다.', 'muted small', True))
 
 

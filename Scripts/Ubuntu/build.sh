@@ -25,4 +25,6 @@ import sys
 shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 PY
+mkdir -p "$SYNCBAR_OUTPUT/gnome"
+cp -a "$SYNCBAR_REPO/Ubuntu/gnome/." "$SYNCBAR_OUTPUT/gnome/"
 printf 'Ubuntu application built: %s\n' "$SYNCBAR_OUTPUT"

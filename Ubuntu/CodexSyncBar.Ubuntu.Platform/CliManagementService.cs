@@ -20,12 +20,18 @@ public sealed record CliInstallation(string Version, string Path, string Manager
 
 public sealed record CliUpdateResult(string Before, string After, string Manager, string Restart)
 {
-    public string DisplayText => $"업데이트 완료: {Before} → {After}\n" + (Restart switch
+    public string DisplayText => (Manager == "termux"
+        ? Before == After
+            ? $"Termux 저장소 기준 최신 버전입니다: {After}\n"
+            : $"Termux 패키지 업데이트 완료: {Before} → {After}\n"
+        : $"업데이트 완료: {Before} → {After}\n") + (Restart switch
     {
+        "not-needed" => "버전 변경이 없어 실행 중인 CLI를 유지했습니다.",
         "reconnected" => "Codex 연결에 새 버전을 적용했습니다.",
+        "not-running" when Manager == "termux" => "새 버전은 다음 실행에 적용됩니다. 열려 있는 Codex CLI는 종료 후 다시 실행해 주세요.",
         "not-running" => "실행 중인 Codex 연결이 없습니다. 다음 실행에 새 버전이 적용됩니다.",
         _ => "업데이트 완료 · 재연결 대기. 해당 장치의 Codex 연결을 다시 열어 주세요.",
-    });
+    }) + (Manager == "termux" ? "\nTermux 배포는 공식 CLI보다 늦을 수 있습니다." : "");
 
     public static CliUpdateResult Parse(ProcessResult result)
     {

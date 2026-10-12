@@ -10,6 +10,7 @@ gi.require_version('Adw', '1')
 gi.require_version('Gsk', '4.0')
 from gi.repository import Adw, Gdk, Gio, GLib, Gsk, Gtk, Pango
 from .ipc import Client, ServiceError
+from .weekly_overview import WeeklyOverview, CSS as WEEKLY_CSS
 
 CSS = b'''
 .main-content { padding: 30px 32px; font-size: 16px; }
@@ -161,6 +162,7 @@ class SyncBarApplication(Adw.Application):
         self._capture_started = False
         self._narrow = None
         self._dialogs = []
+        self._refresh_requested = False
 
     def do_activate(self):
         if self.window:
@@ -168,11 +170,12 @@ class SyncBarApplication(Adw.Application):
             self.poll()
             return
         provider = Gtk.CssProvider()
-        provider.load_from_data(CSS)
+        provider.load_from_data(CSS + WEEKLY_CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         if self.args.light:
             self.get_style_manager().set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
         self.window = Adw.ApplicationWindow(application=self, title='Codex SyncBar')
+        self.window.set_icon_name('codex-syncbar')
         self.window.set_default_size(self.args.width, self.args.height)
         self.window.set_size_request(600, 480)
         self.window.connect('close-request', self.on_close)
@@ -183,6 +186,7 @@ class SyncBarApplication(Adw.Application):
         header = Adw.HeaderBar()
         header.set_title_widget(Adw.WindowTitle(title='Codex SyncBar', subtitle='데모 · 가상 데이터' if self.args.demo else ''))
         refresh = button(symbol='view-refresh-symbolic', callback=lambda *_: self.refresh())
+        self.header_refresh = refresh
         refresh.set_tooltip_text('모든 상태 새로고침 (Ctrl+R)')
         header.pack_end(refresh)
         menu = Gio.Menu()
@@ -204,8 +208,24 @@ class SyncBarApplication(Adw.Application):
             self.add_action(action)
         self.set_accels_for_action('app.refresh', ['<Primary>r'])
         self.set_accels_for_action('app.quit-service', ['<Primary>q'])
+        root = box(spacing=0)
+        shell.set_content(root)
+        self.pages = Gtk.Stack(vexpand=True)
+        self.pages.set_vhomogeneous(False)
+        self.pages.set_hhomogeneous(False)
+        navigation = Gtk.StackSwitcher(stack=self.pages, halign=Gtk.Align.CENTER)
+        navigation.add_css_class('page-navigation')
+        root.append(navigation)
+        root.append(self.pages)
+        self.overview = WeeklyOverview(
+            self.open_account_from_overview, self.refresh,
+            lambda: self.pages.set_visible_child_name('switch'), self.add_account)
+        self.pages.add_titled(self.overview, 'usage', '계정별 사용량')
         content = box(spacing=0)
-        shell.set_content(content)
+        self.pages.add_titled(content, 'switch', '계정 전환')
+        self.pages.connect('notify::visible-child-name', self.page_changed)
+        self.pages.set_visible_child_name(getattr(self.args, 'page', 'usage'))
+        self.page_changed()
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         content.append(self.scroll)
         body = box(spacing=0)
@@ -238,6 +258,21 @@ class SyncBarApplication(Adw.Application):
         self.poll()
         GLib.timeout_add(2000, self.poll)
         GLib.timeout_add(150, self.reflow)
+
+    def page_changed(self, *_):
+        self.header_refresh.set_visible(self.pages.get_visible_child_name() == 'switch')
+
+    def open_account_from_overview(self, profile_id):
+        if self.busy or self._refresh_requested:
+            return
+        index = next((i for i, account in enumerate(self.accounts) if account['id'] == profile_id), None)
+        if index is None:
+            return
+        self.account_choice.set_selected(index)
+        self.pages.set_visible_child_name('switch')
+
+    def render_overview(self, error=None):
+        self.overview.update(self.snapshot, error=error, pending=self._refresh_requested)
 
     def build_accounts(self):
         self.left.append(label('현재 적용 · 이 Ubuntu PC', 'section-title'))
@@ -323,9 +358,7 @@ class SyncBarApplication(Adw.Application):
         self.right.append(self.usage_updated)
         self.quotas = box(False, 24)
         self.quotas.set_margin_top(12)
-        self.session_quota = Quota('5시간')
         self.weekly_quota = Quota('주간')
-        self.quotas.append(self.session_quota)
         self.quotas.append(self.weekly_quota)
         self.right.append(self.quotas)
         self.usage_empty = label('사용량 정보가 없습니다.', 'muted', True)
@@ -380,6 +413,7 @@ class SyncBarApplication(Adw.Application):
         if not self.window:
             return False
         width = self.window.get_width() or self.args.width
+        self.overview.reflow(width)
         height = self.window.get_height() or self.args.height
         compact = height < 900
         if compact:
@@ -429,6 +463,7 @@ class SyncBarApplication(Adw.Application):
         if error:
             self.status_text.set_text(str(error))
             self.apply_button.set_sensitive(False)
+            self.render_overview(error=str(error))
             return False
         if self.args.demo and not (snapshot or {}).get('isDemo'):
             self.status_text.set_text('데모 모드는 운영 서비스에 연결할 수 없습니다.')
@@ -467,7 +502,8 @@ class SyncBarApplication(Adw.Application):
         self.render_usage()
         self.render_devices()
         self.render_state()
-        if self.args.capture and self.preview and not self._capture_started:
+        self.render_overview()
+        if self.args.capture and (self.preview or self.pages.get_visible_child_name() == 'usage') and not self._capture_started:
             self._capture_started = True
             GLib.timeout_add(800, self.capture)
         return False
@@ -512,11 +548,9 @@ class SyncBarApplication(Adw.Application):
         self.login_button.set_visible(bool(needs_login))
         usage = selected.get('usage') or {}
         settings = self.snapshot.get('settings') or {}
-        session = usage.get('session') if settings.get('fiveHour', True) else None
         weekly = usage.get('weekly') if settings.get('codexWeekly', True) else None
-        self.session_quota.update(session)
         self.weekly_quota.update(weekly)
-        self.usage_empty.set_visible(not session and not weekly)
+        self.usage_empty.set_visible(not weekly)
         updated = timestamp(usage.get('updatedAt'))
         text = f'마지막 확인 {updated:%m월 %d일 %H:%M}' if updated else '아직 조회된 사용량이 없습니다.'
         if usage.get('error'):
@@ -552,8 +586,8 @@ class SyncBarApplication(Adw.Application):
         self.scope.set_text(f'활성 장치 {len(included)}대에 적용합니다.' if included else '계정과 장치를 확인해 주세요.')
         self.table_header.set_visible(not self._narrow)
         operation = self.snapshot.get('operation') or {}
-        results = {t.get('id'): t for t in operation.get('targets', [])} if self.busy or operation.get('state') == 'recoveryRequired' else {}
-        states = {'pending':'대기', 'ready':'준비 완료', 'applying':'적용 중', 'applied':'검증 대기', 'verified':'검증 완료', 'restored':'복구됨', 'recoveryRequired':'복구 필요'}
+        results = {t.get('id'): t for t in operation.get('targets', []) if self.busy or operation.get('state') == 'recoveryRequired' or t.get('state') == 'skipped'}
+        states = {'pending':'대기', 'ready':'준비 완료', 'applying':'적용 중', 'applied':'검증 대기', 'verified':'검증 완료', 'restored':'복구됨', 'skipped':'건너뜀', 'failed':'실패', 'recoveryRequired':'복구 필요'}
         for device in targets:
             row = Gtk.ListBoxRow(activatable=True, selectable=False)
             layout = box(bool(self._narrow), 8)
@@ -589,9 +623,13 @@ class SyncBarApplication(Adw.Application):
             detail = device.get('detail') or ''
             if device.get('action') == 'reapply':
                 detail = '동일 계정 재적용'
+            if device.get('skipOnSwitchFailure'):
+                detail = ' · '.join(filter(None, [detail, '전환 실패 시 건너뜀']))
             if device.get('id') in results:
                 state = results[device['id']]
                 detail = states.get(state.get('state'), state.get('state', ''))
+                if not self.busy and state.get('state') == 'skipped':
+                    detail = '최근 전환 · ' + detail
                 if state.get('detail'):
                     detail += ' · ' + state['detail']
             if detail:
@@ -615,7 +653,8 @@ class SyncBarApplication(Adw.Application):
         self.spinner.set_visible(self.busy and not waiting_login)
         recovery = operation.get('state') == 'recoveryRequired'
         self.recover_button.set_visible(recovery)
-        message = operation.get('message') if self.busy or recovery or operation.get('state') == 'failed' else self.snapshot.get('error')
+        skipped = any(t.get('state') == 'skipped' for t in operation.get('targets', []))
+        message = operation.get('message') if self.busy or recovery or skipped or operation.get('state') == 'failed' else self.snapshot.get('error')
         if not message and self.preview:
             message = self.preview.get('blockingReason')
         self.status_text.set_text(message or '')
@@ -657,7 +696,15 @@ class SyncBarApplication(Adw.Application):
         self.client.submit(method, params, complete, timeout=120)
 
     def refresh(self):
-        self.command('refresh', {'kind':'all'}, lambda result, error: self.request_preview())
+        if self._refresh_requested or self.busy:
+            return
+        self._refresh_requested = True
+        self.render_overview()
+        def complete(result, error):
+            self._refresh_requested = False
+            self.render_overview(error=str(error) if error else None)
+            self.request_preview()
+        self.command('refresh', {'kind':'all'}, complete)
 
     def add_account(self):
         self.command('account.add', after=lambda result, error: self.open_dialog('accounts') if not error else None)
@@ -697,9 +744,10 @@ class SyncBarApplication(Adw.Application):
         return False
 
     def capture(self):
+        scroll = self.overview.scroll if self.pages.get_visible_child_name() == 'usage' else self.scroll
         if getattr(self.args, 'scroll_end', False) and not getattr(self, '_scrolled_for_capture', False):
             self._scrolled_for_capture = True
-            adjustment = self.scroll.get_vadjustment()
+            adjustment = scroll.get_vadjustment()
             adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
             GLib.timeout_add(300, self.capture)
             return False
@@ -718,7 +766,7 @@ class SyncBarApplication(Adw.Application):
             output.parent.mkdir(parents=True, exist_ok=True)
             texture.save_to_png(str(output))
             renderer.unrealize()
-            output.with_suffix('.json').write_text(json.dumps({'width':width,'height':height,'mode':'isolated-demo','selectedProfileId':self.selected_id,'operation':self.snapshot.get('operation'),'source':'GTK WidgetPaintable','gtkScaleFactor':self.window.get_scale_factor(),'scrollValue':self.scroll.get_vadjustment().get_value(),'scrollUpper':self.scroll.get_vadjustment().get_upper(),'scrollPageSize':self.scroll.get_vadjustment().get_page_size()}, ensure_ascii=False, indent=2))
+            output.with_suffix('.json').write_text(json.dumps({'width':width,'height':height,'mode':'isolated-demo','page':self.pages.get_visible_child_name(),'selectedProfileId':self.selected_id,'operation':self.snapshot.get('operation'),'source':'GTK WidgetPaintable','gtkScaleFactor':self.window.get_scale_factor(),'scrollValue':scroll.get_vadjustment().get_value(),'scrollUpper':scroll.get_vadjustment().get_upper(),'scrollPageSize':scroll.get_vadjustment().get_page_size()}, ensure_ascii=False, indent=2))
             print(f'GTK_CAPTURE={output}', flush=True)
             self.quit()
         except Exception as error:

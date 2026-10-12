@@ -213,6 +213,7 @@ public sealed class ConfigurationStore
                 HasPassword = original.HasPassword,
                 HasKeyPassphrase = original.HasKeyPassphrase,
                 Enabled = true,
+                SkipOnSwitchFailure = original.SkipOnSwitchFailure,
             };
             if (DeviceConfigurationComparer.AreEqual(configuration.Devices[index], original))
             {

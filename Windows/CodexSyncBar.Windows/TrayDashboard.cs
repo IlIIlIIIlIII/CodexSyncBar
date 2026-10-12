@@ -53,7 +53,7 @@ internal sealed class DemoTrayDashboard(DemoDashboardRuntime runtime) : ITrayDas
         var selected = snapshot.Accounts.First(a => a.ProfileId == _selectedId);
         var usage = selected.Usage!;
         var raw = new UsageSnapshot(selected.ProfileId, selected.MaskedEmail, "Demo",
-            usage.Session, usage.Weekly, null, false,
+            usage.Weekly, null, false,
             usage.ResetCredits, usage.ResetCreditExpirations, usage.UpdatedAt);
         var accounts = snapshot.Accounts.Select(account => new TrayAccountSnapshot(account.ProfileId,
             account.DisplayName, account.MaskedEmail, account.DisplayName[..1], account.ProfileId == _selectedId,

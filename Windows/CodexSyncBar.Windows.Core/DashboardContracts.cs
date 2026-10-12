@@ -19,7 +19,7 @@ public sealed record DashboardAccount(
     DashboardUsage? Usage = null);
 
 public sealed record DashboardUsage(
-    UsageWindow? Session, UsageWindow? Weekly, int? ResetCredits,
+    UsageWindow? Weekly, int? ResetCredits,
     IReadOnlyList<DateTimeOffset> ResetCreditExpirations, DateTimeOffset UpdatedAt)
 {
     public string? Error { get; init; }

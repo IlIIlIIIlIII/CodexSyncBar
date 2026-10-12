@@ -50,6 +50,9 @@ public sealed class ManagementService : IManagementService
         try
         {
             await _controller.InitializeAsync(_lifetime.Token);
+            var preferences = new UsageDisplayPreferencesStore(_paths);
+            preferences.LoadUsagePreferences();
+            preferences.LoadMenuPreferences();
             var recovered = await _controller.GetSnapshotAsync(_lifetime.Token);
             if (recovered.Operation?.State == "recoveryRequired")
                 lock (_state)
@@ -244,7 +247,8 @@ public sealed class ManagementService : IManagementService
             rows.Add(new("ssh:" + device.Id, device.DisplayLabel, "ssh", device.Enabled,
                 device.Enabled && status?.IsReachable == true, known, AccountLabel(c, known), observed,
                 !device.Enabled ? "disabled" : status?.IsReachable != true ? "unreachable" : known is null ? "unknown" : mappingMismatch ? "mappingMismatch" : "ready",
-                !device.Enabled ? "대상 제외 · 설치 및 활성화 필요" : status?.IsReachable != true ? "연결을 확인하지 못했습니다." : known is null ? "등록된 계정과 일치하지 않습니다." : mappingMismatch ? "계정 슬롯이 달라 설치 및 활성화가 필요합니다." : null));
+                !device.Enabled ? "대상 제외 · 설치 및 활성화 필요" : status?.IsReachable != true ? "연결을 확인하지 못했습니다." : known is null ? "등록된 계정과 일치하지 않습니다." : mappingMismatch ? "계정 슬롯이 달라 설치 및 활성화가 필요합니다." : null,
+                SkipOnSwitchFailure: device.SkipOnSwitchFailure));
         }
         return rows;
     }
@@ -283,14 +287,15 @@ public sealed class ManagementService : IManagementService
             d.Enabled && (singleDevice is null || d.Id == NormalizeDeviceId(singleDevice)))).ToArray();
         bool recoveryRequired;
         lock (_state) recoveryRequired = _operation?.State == "recoveryRequired" || _error is not null;
-        var canApply = !recoveryRequired && targets.Where(d => d.Included).All(d => d.IsReachable && (d.Kind == "local" || d.Status == "ready"));
+        var canApply = !recoveryRequired && targets.Where(d => d.Included && !d.SkipOnSwitchFailure)
+            .All(d => d.IsReachable && (d.Kind == "local" || d.Status == "ready"));
         var view = new SwitchPreview(Guid.NewGuid().ToString("N"), profileId, revision, DateTimeOffset.UtcNow,
-            canApply, canApply ? null : recoveryRequired ? "이전 작업의 복구를 먼저 완료해 주세요." : "모든 활성 장치의 연결과 현재 계정을 먼저 확인해 주세요.", targets);
+            canApply, canApply ? null : recoveryRequired ? "이전 작업의 복구를 먼저 완료해 주세요." : "필수 장치의 연결과 현재 계정을 먼저 확인해 주세요.", targets);
         lock (_state)
         {
             foreach (var id in _previews.Where(x => DateTimeOffset.UtcNow - x.Value.View.CreatedAt > TimeSpan.FromMinutes(5)).Select(x => x.Key).ToArray()) _previews.Remove(id);
             if (_previews.Count >= 128) _previews.Remove(_previews.Keys.First());
-            _previews[view.PreviewId] = new(view, ObservationKey(targets.Where(t => t.Included).Select(t => t.Device)), credential.AccountId);
+            _previews[view.PreviewId] = new(view, ObservationKey(targets.Where(t => t.Included && !t.SkipOnSwitchFailure).Select(t => t.Device)), credential.AccountId);
             _devices = devices;
         }
         return view;
@@ -323,7 +328,7 @@ public sealed class ManagementService : IManagementService
             throw new RpcException("stale_preview", "계정 또는 장치 설정이 변경되었습니다. 미리보기를 다시 확인해 주세요.");
         var current = await QueryDevicesAsync(c, token);
         var included = preview.View.Targets.Where(t => t.Included).Select(t => t.Id).ToHashSet();
-        if (ObservationKey(current.Where(d => included.Contains(d.Id))) != preview.Observations)
+        if (ObservationKey(current.Where(d => included.Contains(d.Id) && !d.SkipOnSwitchFailure)) != preview.Observations)
             throw new RpcException("stale_preview", "장치의 현재 계정 또는 연결 상태가 변경되었습니다. 다시 확인해 주세요.");
         var targets = c.Devices.Where(d => included.Contains("ssh:" + d.Id) && d.Enabled).Select(_ssh.CreateAccountTarget).ToList();
         if (included.Contains("local")) targets.Add(new WindowsAccountTarget(_auth, _local, _paths));
@@ -351,7 +356,7 @@ public sealed class ManagementService : IManagementService
         {
             await new CodexLoginService(_paths, _auth, _browser).LoginAsync(account.Id, replace,
                 new Progress<string>(m => SetMessage(m)), cancel.Token);
-            _config.UpdateAccountEmail(c, account.Id, _auth.ReadCredentials(account.Id).Email);
+            CompleteAccountRegistration(c, account);
             var failed = await _ssh.SyncProfileAsync(c, account.Id, ct);
             var result = new { profileId = account.Id, pendingDeviceCount = failed.Count };
             if (failed.Count > 0) CompleteCurrent("로그인은 완료했지만 일부 장치의 인증 동기화가 보류되었습니다.", result);
@@ -374,11 +379,24 @@ public sealed class ManagementService : IManagementService
         var account = OptionalProfile(p) is { } id ? c.Accounts.FirstOrDefault(a => a.Id == id)
             ?? throw new RpcException("account_unavailable", "계정 항목을 찾지 못했습니다.") : _config.ReserveAccount(c);
         new LoginTransactionStore(_paths).ImportAuth(_auth, path, account.Id, Wire.Flag(p, "replaceExisting", !account.IsPending));
-        _config.UpdateAccountEmail(c, account.Id, _auth.ReadCredentials(account.Id).Email);
+        CompleteAccountRegistration(c, account);
         var failed = await _ssh.SyncProfileAsync(c, account.Id, token);
         var result = new { profileId = account.Id, pendingDeviceCount = failed.Count };
         if (failed.Count > 0) CompleteCurrent("인증은 등록했지만 일부 장치의 동기화가 보류되었습니다.", result);
         return result;
+    }
+
+    // Both callers hold the controller mutation lock. Reauthentication keeps the
+    // user's preference; only the first successful registration opts an account in.
+    private void CompleteAccountRegistration(AppConfiguration configuration, AccountProfile account)
+    {
+        var isNewAccount = account.IsPending;
+        _config.UpdateAccountEmail(configuration, account.Id, _auth.ReadCredentials(account.Id).Email);
+        if (!isNewAccount) return;
+        var store = new WeeklyAnchorStore(_paths);
+        var state = store.Load();
+        state.Preferences.SetEnabled(account.Id, true);
+        store.Save(state);
     }
 
     private async Task<AccountIdentityHashes> IdentityHashesAsync(CancellationToken token)
@@ -561,7 +579,7 @@ public sealed class ManagementService : IManagementService
     {
         var usage = new UsageDisplayPreferencesStore(_paths).LoadUsagePreferences();
         var anchor = _controller.WeeklyAnchor.Load();
-        return new { usage.FiveHour, usage.CodexWeekly, launchAtLogin = File.Exists(AutostartPath), weekly = anchor, stateDirectory = _paths.StateRoot, codexHome = _paths.CodexHome };
+        return new { usage.CodexWeekly, launchAtLogin = File.Exists(AutostartPath), weekly = anchor, stateDirectory = _paths.StateRoot, codexHome = _paths.CodexHome };
     }
 
     private string AutostartPath => Path.Combine((!_paths.IsIsolated ? Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") : null)
@@ -570,7 +588,6 @@ public sealed class ManagementService : IManagementService
     {
         var store = new UsageDisplayPreferencesStore(_paths);
         var usage = store.LoadUsagePreferences();
-        usage.FiveHour = Wire.Flag(p, "fiveHour", usage.FiveHour);
         usage.CodexWeekly = Wire.Flag(p, "codexWeekly", usage.CodexWeekly);
         store.SaveUsagePreferences(usage);
         if (Wire.Item(p, "launchAtLogin").ValueKind is JsonValueKind.True or JsonValueKind.False)
@@ -594,6 +611,7 @@ public sealed class ManagementService : IManagementService
             if (_busy) throw new RpcException("busy", "진행 중인 작업을 먼저 완료해 주세요.");
             if (_operation?.State == "recoveryRequired" || _error is not null) throw new RpcException("recovery_required", "이전 작업의 복구를 먼저 완료해 주세요.");
         }
+        using var maintenancePause = _controller.PauseBackgroundAuthMaintenance();
         using var lease = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: token);
         lock (_state)
         {
@@ -626,6 +644,7 @@ public sealed class ManagementService : IManagementService
                 SetOperation(accepted with { State = "running", Message = "작업을 진행하고 있습니다." });
                 try
                 {
+                    using var maintenancePause = _controller.PauseBackgroundAuthMaintenance();
                     var result = await action(_lifetime.Token);
                     lock (_state)
                         if (_operation is { IsComplete: false } current) SetOperation(current with { State = "completed", Message = "작업을 완료했습니다.", Result = result, FinishedAt = DateTimeOffset.UtcNow });

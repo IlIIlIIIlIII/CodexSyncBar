@@ -40,7 +40,7 @@ public sealed class CliBatchUpdater
                 Report(CliDeviceUpdateState.Updating, "업데이트·버전 검증·재연결 진행 중");
                 var result = await target.Service.UpdateAsync(deadline.Token);
                 before = result.Before;
-                return Report(result.Restart is "reconnected" or "not-running" ? CliDeviceUpdateState.Completed : CliDeviceUpdateState.ReconnectPending,
+                return Report(result.Restart is "reconnected" or "not-running" or "not-needed" ? CliDeviceUpdateState.Completed : CliDeviceUpdateState.ReconnectPending,
                     result.DisplayText, result.After);
             }
             catch (OperationCanceledException)

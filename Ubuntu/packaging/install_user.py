@@ -12,6 +12,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 MARKER = 'Codex SyncBar managed'
+TRAY_UUID = 'codex-syncbar@griplabs.io'
 
 
 def systemd_quote(value):
@@ -58,7 +59,9 @@ def install(source, user_root, node=None, reload=True):
     desktop = user_root / '.local/share/applications/io.github.codexsyncbar.Ubuntu.desktop'
     unit = user_root / '.config/systemd/user/codex-syncbar.service'
     icon = user_root / '.local/share/icons/hicolor/256x256/apps/codex-syncbar.png'
-    for destination in (app, launcher, desktop, unit, icon):
+    tray = user_root / '.local/share/gnome-shell/extensions' / TRAY_UUID
+    has_tray = (source / 'gnome/metadata.json').is_file()
+    for destination in (app, launcher, desktop, unit, icon, tray):
         for ancestor in (destination, *destination.parents):
             if ancestor.is_symlink():
                 raise RuntimeError(f'Refusing an existing symbolic link: {ancestor}')
@@ -71,12 +74,18 @@ def install(source, user_root, node=None, reload=True):
             raise RuntimeError(f'Refusing to overwrite an unmanaged application: {app}')
     if icon.exists() and not app.exists():
         raise RuntimeError(f'Refusing to overwrite an unmanaged icon: {icon}')
+    if has_tray and tray.exists() and (not (tray / '.syncbar-managed').is_file()
+                                     or (tray / '.syncbar-managed').read_text() != MARKER):
+        raise RuntimeError(f'Refusing to overwrite an unmanaged tray extension: {tray}')
     private_parents(app.parent)
     stage = Path(tempfile.mkdtemp(prefix='.app-install-', dir=app.parent))
     previous = None
+    previous_tray = None
     try:
         shutil.copytree(source / 'backend', stage / 'backend', ignore=shutil.ignore_patterns('__pycache__'))
         shutil.copytree(source / 'ui', stage / 'ui', ignore=shutil.ignore_patterns('__pycache__'))
+        if has_tray:
+            shutil.copytree(source / 'gnome', stage / 'gnome')
         shutil.copy2(ROOT / 'Ubuntu/packaging/codex-syncbar', stage / 'launch')
         shutil.copy2(ROOT / 'Ubuntu/packaging/prepare_session.py', stage / 'prepare-session.py')
         (stage / 'launch').chmod(0o755)
@@ -112,7 +121,24 @@ def install(source, user_root, node=None, reload=True):
                      'Restart=on-failure\nRestartSec=3\nTimeoutStopSec=5min\nUMask=0077\n')
         write_managed(unit, unit_text, 0o644)
         private_parents(icon.parent)
-        shutil.copy2(ROOT / 'Resources/AppIcon.png', icon)
+        shutil.copy2(ROOT / 'Ubuntu/resources/codex-syncbar.png', icon)
+        if has_tray:
+            private_parents(tray.parent)
+            tray_stage = Path(tempfile.mkdtemp(prefix='.syncbar-tray-', dir=app.parent))
+            try:
+                shutil.copytree(app / 'gnome', tray_stage, dirs_exist_ok=True)
+                (tray_stage / '.syncbar-managed').write_text(MARKER)
+                if tray.exists():
+                    previous_tray = app.parent / ('.tray-previous-' + uuid.uuid4().hex)
+                    tray.rename(previous_tray)
+                tray_stage.rename(tray)
+            except Exception:
+                if previous_tray and previous_tray.exists() and not tray.exists():
+                    previous_tray.rename(tray)
+                raise
+            finally:
+                if tray_stage.exists():
+                    shutil.rmtree(tray_stage)
         if reload and user_root == Path.home():
             subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
     except Exception:
@@ -125,6 +151,9 @@ def install(source, user_root, node=None, reload=True):
     # Keep an old managed installation recoverable after an upgrade.
     return {'application': str(app), 'launcher': str(launcher), 'desktop': str(desktop),
             'unit': str(unit), 'previousApplication': str(previous) if previous else None,
+            'trayExtension': str(tray) if has_tray else None,
+            'previousTrayExtension': str(previous_tray) if previous_tray else None,
+            'trayActivation': 'Enable extension; a new GNOME session may be required' if has_tray else None,
             'started': False, 'autostartEnabled': False}
 
 

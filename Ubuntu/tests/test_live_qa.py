@@ -144,11 +144,11 @@ class SupervisorTests(unittest.TestCase):
         response = {"ok": True, "operation": {"id": "gtk", "kind": "switch", "profileId": 2,
             "state": "completed", "isComplete": True}, "capture": str(capture),
             "usageDisplay": {"updatedAt": datetime.now(timezone.utc).isoformat(),
-                "windows": {"session": {"text": "72% 남음", "resetsAt": None}, "weekly": None}, "unexpectedSecret": "drop-me"}}
+                "windows": {"weekly": {"text": "72% 남음", "resetsAt": None}}, "unexpectedSecret": "drop-me"}}
         with patch.object(live_qa.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(response).encode())):
             operation = live_qa.gtk_apply(self.args, 2, set(self.originals))
         self.assertEqual(str(capture), operation["_gtkCapture"])
-        self.assertEqual("72% 남음", operation["_gtkUsageDisplay"]["windows"]["session"]["text"])
+        self.assertEqual("72% 남음", operation["_gtkUsageDisplay"]["windows"]["weekly"]["text"])
         self.assertNotIn("unexpectedSecret", operation["_gtkUsageDisplay"])
         response["usageDisplay"]["updatedAt"] = "2000-01-01T00:00:00+00:00"
         with patch.object(live_qa.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(response).encode())), \

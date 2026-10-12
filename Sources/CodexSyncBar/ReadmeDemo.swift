@@ -104,18 +104,14 @@ struct ReadmeDemoFixture {
                 email: profiles[0].email,
                 referenceDate: referenceDate,
                 resetBaseDate: resetBaseDate,
-                fiveHourUsed: 18,
                 weeklyUsed: 32,
-                sparkFiveHourUsed: 40,
                 sparkWeeklyUsed: 5)),
             2: .loaded(usageSnapshot(
                 profileID: 2,
                 email: profiles[1].email,
                 referenceDate: referenceDate,
                 resetBaseDate: resetBaseDate,
-                fiveHourUsed: 27,
                 weeklyUsed: 58,
-                sparkFiveHourUsed: 12,
                 sparkWeeklyUsed: 24)),
         ]
         let tokenDevices = [
@@ -152,26 +148,18 @@ struct ReadmeDemoFixture {
         email: String,
         referenceDate: Date,
         resetBaseDate: Date,
-        fiveHourUsed: Double,
         weeklyUsed: Double,
-        sparkFiveHourUsed: Double,
         sparkWeeklyUsed: Double) -> UsageSnapshot
     {
         UsageSnapshot(
             profileID: profileID,
             email: email,
             plan: "Pro",
-            session: UsageWindow(
-                usedPercent: fiveHourUsed,
-                resetsAt: resetBaseDate.addingTimeInterval(2 * 60 * 60 + 35 * 60),
                 durationSeconds: 5 * 60 * 60),
             weekly: UsageWindow(
                 usedPercent: weeklyUsed,
                 resetsAt: resetBaseDate.addingTimeInterval(5 * 24 * 60 * 60 + 4 * 60 * 60),
                 durationSeconds: 7 * 24 * 60 * 60),
-            sparkSession: UsageWindow(
-                usedPercent: sparkFiveHourUsed,
-                resetsAt: resetBaseDate.addingTimeInterval(3 * 60 * 60 + 10 * 60),
                 durationSeconds: 5 * 60 * 60),
             sparkWeekly: UsageWindow(
                 usedPercent: sparkWeeklyUsed,

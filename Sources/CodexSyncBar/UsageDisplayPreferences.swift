@@ -1,42 +1,35 @@
 import Foundation
 
 enum UsageDisplayItem: String, CaseIterable, Identifiable, Sendable {
-    case fiveHour
     case codexWeekly
-    case sparkFiveHour
     case sparkWeekly
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .fiveHour: "5시간"
         case .codexWeekly: "주간"
-        case .sparkFiveHour: "Spark 5시간"
         case .sparkWeekly: "Spark 주간"
         }
     }
 
     var icon: String {
         switch self {
-        case .fiveHour: "clock.fill"
         case .codexWeekly: "calendar"
-        case .sparkFiveHour, .sparkWeekly: "bolt.fill"
+        case .sparkWeekly: "bolt.fill"
         }
     }
 
     var isSpark: Bool {
         switch self {
-        case .fiveHour, .codexWeekly: false
-        case .sparkFiveHour, .sparkWeekly: true
+        case .codexWeekly: false
+        case .sparkWeekly: true
         }
     }
 
     func window(in snapshot: UsageSnapshot) -> UsageWindow? {
         switch self {
-        case .fiveHour: snapshot.session
         case .codexWeekly: snapshot.weekly
-        case .sparkFiveHour: snapshot.sparkSession
         case .sparkWeekly: snapshot.sparkWeekly
         }
     }
@@ -47,31 +40,23 @@ enum UsageDisplayItem: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct UsageDisplayPreferences: Equatable, Sendable {
-    var fiveHour: Bool
     var codexWeekly: Bool
-    var sparkFiveHour: Bool
     var sparkWeekly: Bool
 
     static let allVisible = UsageDisplayPreferences(
-        fiveHour: true,
         codexWeekly: true,
-        sparkFiveHour: true,
         sparkWeekly: true)
 
     func isVisible(_ item: UsageDisplayItem) -> Bool {
         switch item {
-        case .fiveHour: fiveHour
         case .codexWeekly: codexWeekly
-        case .sparkFiveHour: sparkFiveHour
         case .sparkWeekly: sparkWeekly
         }
     }
 
     mutating func setVisible(_ visible: Bool, for item: UsageDisplayItem) {
         switch item {
-        case .fiveHour: fiveHour = visible
         case .codexWeekly: codexWeekly = visible
-        case .sparkFiveHour: sparkFiveHour = visible
         case .sparkWeekly: sparkWeekly = visible
         }
     }
@@ -129,6 +114,7 @@ struct MenuBarUsagePreferences: Equatable, Sendable {
 struct MenuBarUsagePreferencesStore {
     private let defaults: UserDefaults
     private let defaultsKey = "menuBarUsage.items.v1"
+    private static let supportedDefaults = MenuBarUsagePreferences.defaultItems
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -137,7 +123,10 @@ struct MenuBarUsagePreferencesStore {
     func load() -> MenuBarUsagePreferences {
         guard defaults.object(forKey: defaultsKey) != nil else { return .default }
         let rawItems = defaults.stringArray(forKey: defaultsKey) ?? []
-        return MenuBarUsagePreferences(items: rawItems.compactMap(UsageDisplayItem.init(rawValue:)))
+        let supported = rawItems.compactMap(UsageDisplayItem.init(rawValue:))
+        let preferences = MenuBarUsagePreferences(items: supported.isEmpty && !rawItems.isEmpty ? Self.supportedDefaults : supported)
+        save(preferences)
+        return preferences
     }
 
     func save(_ preferences: MenuBarUsagePreferences) {
@@ -152,7 +141,14 @@ struct UsageDisplayPreferencesStore {
         self.defaults = defaults
     }
 
+    private func removeRetiredSettings() {
+        for key in ["usageDisplay.fiveHour", "usageDisplay.sparkFiveHour"] {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     func load() -> UsageDisplayPreferences {
+        removeRetiredSettings()
         var preferences = UsageDisplayPreferences.allVisible
         for item in UsageDisplayItem.allCases {
             let visible = defaults.object(forKey: item.defaultsKey) as? Bool ?? true
@@ -162,6 +158,7 @@ struct UsageDisplayPreferencesStore {
     }
 
     func save(_ preferences: UsageDisplayPreferences) {
+        removeRetiredSettings()
         for item in UsageDisplayItem.allCases {
             defaults.set(preferences.isVisible(item), forKey: item.defaultsKey)
         }

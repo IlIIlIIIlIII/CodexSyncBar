@@ -19,7 +19,10 @@ cd "$SYNCBAR_REPO"
 # Includes usage summary, controller concurrency and remote CLI update contracts.
 bash Tests/helper-contract-tests.sh
 python3 Ubuntu/tests/test_ipc_client.py
+python3 Ubuntu/tests/test_weekly_usage.py
+python3 Ubuntu/tests/test_weekly_overview.py
 python3 Ubuntu/tests/test_user_install.py
+node Ubuntu/tests/tray/model.test.mjs
 python3 Ubuntu/tests/test_live_qa.py
 python3 Ubuntu/tests/test_live_gtk_capture.py
 python3 Ubuntu/tests/test_secret_tool.py

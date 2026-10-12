@@ -119,6 +119,100 @@ SH
   [[ "$output" == *'manager=brew-'* ]]
 done
 
+# Termux packages follow their configured repository, which may lag upstream.
+# Exercise an upgrade, a no-op, repository/install failures and wrong ownership.
+termux_fixture() {
+  fixture
+  export PREFIX="$TEST_ROOT/termux"
+  export TEST_APT_REFRESH_FAIL=0 TEST_APT_INSTALL_FAIL=0 TEST_APT_NOOP=0 TEST_TERMUX_OWNED=1
+  export TEST_APT_REBUILD=0 TEST_APT_SKIP=0 TEST_PACKAGE_VERSION="$TEST_ROOT/package-version"
+  printf '1.0.0\n' >"$TEST_PACKAGE_VERSION"
+  mkdir -p "$PREFIX/bin"
+  cp "$TEST_PREFIX/lib/node_modules/@openai/codex/bin/codex.js" "$PREFIX/bin/codex"
+  cat >"$PREFIX/bin/pkg" <<'SH'
+#!/bin/bash
+exit 90 # The unattended updater must use apt-get, not pkg's interactive mirror UI.
+SH
+  cat >"$PREFIX/bin/dpkg-query" <<'SH'
+#!/bin/bash
+[ "$TEST_TERMUX_OWNED" = 1 ] || exit 1
+if [ "$1" = -S ]; then printf 'codex: %s/bin/codex\n' "$PREFIX"; else cat "$TEST_PACKAGE_VERSION"; fi
+SH
+  cat >"$PREFIX/bin/apt-cache" <<'SH'
+#!/bin/bash
+if [ "$TEST_APT_NOOP" = 1 ]; then echo '  Candidate: 1.0.0';
+elif [ "$TEST_APT_REBUILD" = 1 ]; then echo '  Candidate: 1.0.0-1';
+else echo '  Candidate: 2.0.0'; fi
+sleep 0.02
+printf '  Version table:\n'
+SH
+  cat >"$PREFIX/bin/apt-get" <<'SH'
+#!/bin/bash
+printf 'apt %s\n' "$*" >>"$TEST_EVENTS"
+case " $* " in
+  *' update '*) [ "$TEST_APT_REFRESH_FAIL" = 0 ] || exit 100 ;;
+  *' install '*)
+    [ "$*" = 'install -y --only-upgrade --no-remove codex' ] || exit 91
+    [ "$TEST_APT_INSTALL_FAIL" = 0 ] || exit 100
+    [ "$TEST_APT_SKIP" = 0 ] || exit 0
+    if [ "$TEST_APT_REBUILD" = 1 ]; then printf '1.0.0-1\n' >"$TEST_PACKAGE_VERSION";
+    elif [ "$TEST_APT_NOOP" = 0 ]; then
+      printf '2.0.0\n' >"$TEST_VERSION"
+      printf '2.0.0\n' >"$TEST_PACKAGE_VERSION"
+    fi
+    ;;
+  *) exit 92 ;;
+esac
+exit 0
+SH
+  chmod +x "$PREFIX/bin/"*
+  export PATH="$PREFIX/bin:$TEST_ORIGINAL_PATH"
+}
+termux_fixture
+info=$(node_codex_info)
+printf '%s' "$info" | jq -e '.manager == "termux" and .canUpdate and (.notice | contains("Termux"))' >/dev/null
+[ ! -s "$TEST_EVENTS" ]
+output=$(node_update_codex)
+[[ "$output" == *'before=1.0.0 after=2.0.0 manager=termux restart=not-running'* ]]
+grep -F 'APT::Update::Error-Mode=any update' "$TEST_EVENTS" >/dev/null
+[[ "$(tail -1 "$TEST_EVENTS")" == stop ]]
+
+termux_fixture
+TEST_APT_NOOP=1
+output=$(node_update_codex)
+[[ "$output" == *'before=1.0.0 after=1.0.0 manager=termux restart=not-needed'* ]]
+! grep -q '^stop$' "$TEST_EVENTS"
+
+termux_fixture
+TEST_APT_REBUILD=1
+output=$(node_update_codex)
+[[ "$output" == *'before=1.0.0 after=1.0.0 manager=termux restart=not-running'* ]]
+[[ "$(tail -1 "$TEST_EVENTS")" == stop ]]
+
+termux_fixture
+TEST_APT_SKIP=1
+if (node_update_codex) >"$TEST_ROOT/failure" 2>&1; then exit 1; fi
+! grep -q '^stop$' "$TEST_EVENTS"
+
+termux_fixture
+TEST_APT_REFRESH_FAIL=1
+if (node_update_codex) >"$TEST_ROOT/failure" 2>&1; then exit 1; fi
+! grep -q 'apt install\|^stop$' "$TEST_EVENTS"
+
+termux_fixture
+TEST_APT_INSTALL_FAIL=1
+if (node_update_codex) >"$TEST_ROOT/failure" 2>&1; then exit 1; fi
+! grep -q '^stop$' "$TEST_EVENTS"
+
+termux_fixture
+TEST_TERMUX_OWNED=0
+info=$(node_codex_info)
+printf '%s' "$info" | jq -e '.manager == "unknown" and (.canUpdate | not)' >/dev/null
+if (node_update_codex) >"$TEST_ROOT/failure" 2>&1; then exit 1; fi
+[ ! -s "$TEST_EVENTS" ]
+unset PREFIX
+fixture
+
 # Run the public controller through an SSH substitute, including the shipped
 # helper payload and disabled-device filtering. First host fails; second runs.
 TEST_STATE="$TEST_HOME/.local/share/gpt-switch"

@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-06",
+  "scope": "Ubuntu GNOME panel weekly remaining usage",
+  "modelAssertions": "passed",
+  "nativeFixtureAssertions": "passed including closed-menu account and usage updates and 100 percent width",
+  "nativeFixtureHarnessExit": 1,
+  "nativeFixtureHarnessLimitation": "All assertions reached SYNCBAR_COMPLETE; PerfHelper exit failed during private compositor teardown",
+  "liveReadonlyHarnessExit": 0,
+  "liveReadonlyPanel": "주간 10%",
+  "activeProfileId": 6,
+  "installedFilesVerified": true,
+  "desktopActivation": "pending next GNOME login; existing imported extension remains cached",
+  "liveAccountSwitchPerformed": false
+}

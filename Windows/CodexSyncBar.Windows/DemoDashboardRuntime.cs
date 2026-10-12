@@ -83,14 +83,13 @@ public sealed class DemoDashboardRuntime
     private static DashboardSnapshot CreateSnapshot()
     {
         var now = DateTimeOffset.UtcNow;
-        DashboardUsage Usage(double session, double weekly) => new(
-            new UsageWindow(session, now.AddHours(3), 18_000),
+        DashboardUsage Usage(double weekly) => new(
             new UsageWindow(weekly, now.AddDays(4), 604_800), 3, [now.AddDays(7)], now);
         return new DashboardSnapshot
         {
             ConfigurationRevision = "demo-v1", ActiveProfileId = 1, UpdatedAt = now,
-            Accounts = [new(1, "개인 계정", "p***@example.com", false, Usage(28, 42)),
-                        new(2, "작업용 계정", "w***@example.com", false, Usage(65, 18))],
+            Accounts = [new(1, "개인 계정", "p***@example.com", false, Usage(42)),
+                        new(2, "작업용 계정", "w***@example.com", false, Usage(18))],
             Devices = [new("local", "이 Windows PC", "windows", 1, true),
                        new("wsl:Ubuntu-26.04", "Ubuntu-26.04", "wsl", 1, true),
                        new("ssh:demo", "개발 서버", "ssh", 1, true)],

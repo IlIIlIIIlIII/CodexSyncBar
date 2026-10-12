@@ -6,11 +6,12 @@ Ubuntu가 기본이자 유일한 신규 개발 대상이며 `main`에서 개발�
 
 [Ubuntu 설치·빌드 안내](docs/ubuntu/README.md) · [플랫폼 지원 정책](docs/platform-support.md)
 
-![Ubuntu 계정 관리 화면 — 가상 데이터](docs/ubuntu/qa-evidence/native-default.png)
+![Ubuntu 주간 잔여량 비교 — 가상 데이터](docs/ubuntu/qa-evidence/weekly/desktop.png)
 
 ## 주요 기능
 
-- 계정별 사용량과 초기화 시각 확인, 계정 추가·재로그인·별칭 관리
+- 첫 화면에서 모든 계정의 **주간 잔여율·초기화 시각** 비교, 조회 실패·이전 수치 구분
+- 계정 행을 눌러 전환 화면으로 이동, 계정 추가·재로그인·별칭 관리
 - 현재 계정과 전환할 계정, 로컬·SSH 장치별 적용 예정 상태 확인
 - 여러 장치에 계정 적용, 실패 시 복구, Codex CLI 관리
 - GTK 4·libadwaita 기반 Yaru 화면, 밝은 테마·어두운 테마와 작은 창 대응

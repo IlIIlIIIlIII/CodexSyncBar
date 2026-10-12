@@ -16,6 +16,7 @@ public static class DeviceConfigurationComparer
         HasPassword = device.HasPassword,
         HasKeyPassphrase = device.HasKeyPassphrase,
         Enabled = device.Enabled,
+        SkipOnSwitchFailure = device.SkipOnSwitchFailure,
     };
 
     public static bool AreEqual(SshDeviceConfiguration left, SshDeviceConfiguration right) =>
@@ -30,7 +31,8 @@ public static class DeviceConfigurationComparer
         && string.Equals(left.CertificateFile, right.CertificateFile, StringComparison.Ordinal)
         && left.HasPassword == right.HasPassword
         && left.HasKeyPassphrase == right.HasKeyPassphrase
-        && left.Enabled == right.Enabled;
+        && left.Enabled == right.Enabled
+        && left.SkipOnSwitchFailure == right.SkipOnSwitchFailure;
 
     public static bool HasSameCredentialEndpoint(
         SshDeviceConfiguration left,

@@ -1,0 +1,12 @@
+{
+  "sourceMatchesInstalled": true,
+  "enabledForNextLogin": true,
+  "activeInCurrentSession": false,
+  "otherExtensionsPreserved": true,
+  "realAccountsRead": 6,
+  "realAccountSwitchPerformed": false,
+  "nativeSyntheticSwitch": "A to B to A; SSH unchanged",
+  "userInstallTests": 6,
+  "modelAssertions": 16,
+  "packageVerified": true
+}

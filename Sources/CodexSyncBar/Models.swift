@@ -79,9 +79,7 @@ struct UsageSnapshot: Equatable, Sendable {
     let profileID: Int
     let email: String
     let plan: String
-    let session: UsageWindow?
     let weekly: UsageWindow?
-    let sparkSession: UsageWindow?
     let sparkWeekly: UsageWindow?
     let creditBalance: Double?
     let unlimitedCredits: Bool

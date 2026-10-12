@@ -44,9 +44,7 @@ public sealed partial class ReadmeDemoPage : Page
     private void RenderSelection()
     {
         if (AccountPicker.SelectedItem is not DashboardAccount { Usage: { } usage }) return;
-        SessionBar.Value = 100 - (usage.Session?.UsedPercent ?? 0);
         WeeklyBar.Value = 100 - (usage.Weekly?.UsedPercent ?? 0);
-        SessionValue.Text = $"{SessionBar.Value:0}% 남음";
         WeeklyValue.Text = $"{WeeklyBar.Value:0}% 남음";
         UsageText.Text = "사용량을 확인했습니다.";
         CreditsText.Text = $"{usage.ResetCredits}개";

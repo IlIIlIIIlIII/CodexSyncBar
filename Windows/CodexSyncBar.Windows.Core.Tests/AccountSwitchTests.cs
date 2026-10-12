@@ -47,6 +47,88 @@ public sealed class AccountSwitchTests
         Assert.DoesNotContain(fixture.Events, value => value.EndsWith(":apply") || value.EndsWith(":restore"));
     }
 
+    [Theory]
+    [InlineData("prepare", false)]
+    [InlineData("apply", false)]
+    [InlineData("verify", false)]
+    [InlineData("apply", true)]
+    [InlineData("verify", true)]
+    public async Task OptionalFailureKeepsOtherDevicesAppliedAndDoesNotBlockNextSwitch(string phase, bool failRestore)
+    {
+        using var fixture = new Fixture();
+        var tablet = fixture.Target("tablet");
+        tablet.SkipOnFailure = true;
+        tablet.FailAt = phase;
+        tablet.FailRestore = failRestore;
+        var required = fixture.Target("windows", local: true);
+        var result = await fixture.Coordinator.SwitchAsync(2, [tablet, required]);
+        Assert.Equal("completed", result.State);
+        Assert.Equal("skipped", result.Targets.Single(target => target.Id == "tablet").State);
+        Assert.Equal("verified", result.Targets.Single(target => target.Id == "windows").State);
+        Assert.Contains("건너뜀: tablet", result.Message);
+        Assert.Equal(2, required.Active);
+        Assert.Equal(failRestore ? 2 : 1, tablet.Active);
+        Assert.DoesNotContain("windows:restore", fixture.Events);
+        Assert.DoesNotContain("test-access-secret", File.ReadAllText(fixture.Coordinator.JournalPath));
+        fixture.Events.Clear();
+        var restarted = new AccountSwitchCoordinator(fixture.Paths);
+        Assert.Equal("completed", (await restarted.RecoverAsync([tablet, required]))!.State);
+        Assert.DoesNotContain(fixture.Events, value => value.EndsWith(":restore"));
+        Assert.Equal("completed", (await restarted.SwitchAsync(3, [tablet, required])).State);
+        Assert.Equal(3, required.Active);
+    }
+
+    [Fact]
+    public async Task RequiredFailureStillRollsBackWhenOptionalDeviceCannotRestore()
+    {
+        using var fixture = new Fixture();
+        var tablet = fixture.Target("tablet");
+        tablet.SkipOnFailure = true;
+        tablet.FailRestore = true;
+        var required = fixture.Target("windows", local: true);
+        required.FailAt = "verify";
+        var result = await fixture.Coordinator.SwitchAsync(2, [tablet, required]);
+        Assert.Equal("failed", result.State);
+        Assert.Equal(1, required.Active);
+        Assert.Equal("restored", result.Targets.Single(target => target.Id == "windows").State);
+        Assert.Equal("skipped", result.Targets.Single(target => target.Id == "tablet").State);
+        required.FailAt = null;
+        Assert.Equal("completed", (await fixture.Coordinator.SwitchAsync(3, [tablet, required])).State);
+    }
+
+    [Fact]
+    public async Task OptionalPolicyCanUnblockOldRecoveryJournalWithoutIgnoringRequiredFailures()
+    {
+        using var fixture = new Fixture();
+        var tablet = fixture.Target("tablet");
+        tablet.FailAt = "apply";
+        tablet.FailRestore = true;
+        var required = fixture.Target("windows", local: true);
+        Assert.Equal("recoveryRequired", (await fixture.Coordinator.SwitchAsync(2, [tablet, required])).State);
+        tablet.SkipOnFailure = true;
+        var recovered = await new AccountSwitchCoordinator(fixture.Paths).RecoverAsync([tablet, required]);
+        Assert.Equal("failed", recovered!.State);
+        Assert.Equal("skipped", recovered.Targets.Single(target => target.Id == "tablet").State);
+        Assert.Equal(1, required.Active);
+        var journal = JsonSerializer.Deserialize<SwitchJournal>(File.ReadAllText(fixture.Coordinator.JournalPath))!;
+        Assert.True(journal.Checkpoints.Single(checkpoint => checkpoint.Id == "tablet").SkipOnFailure);
+        Assert.Equal("completed", (await fixture.Coordinator.SwitchAsync(3, [tablet, required])).State);
+    }
+
+    [Fact]
+    public async Task CancellationOnOptionalDeviceStillCancelsTheTransaction()
+    {
+        using var fixture = new Fixture();
+        using var cancellation = new CancellationTokenSource();
+        var tablet = fixture.Target("tablet");
+        tablet.SkipOnFailure = true;
+        tablet.AfterApply = cancellation.Cancel;
+        tablet.FailAt = "apply";
+        var result = await fixture.Coordinator.SwitchAsync(2, [tablet], cancellationToken: cancellation.Token);
+        Assert.Equal("failed", result.State);
+        Assert.Equal(1, tablet.Active);
+    }
+
     [Fact]
     public async Task DisconnectAfterRemoteWriteRestoresEveryAttemptedTarget()
     {
@@ -242,6 +324,7 @@ public sealed class AccountSwitchTests
         public string DisplayName => id;
         public string ConfigurationFingerprint { get; set; } = "endpoint";
         public bool IsLocal => isLocal;
+        public bool SkipOnFailure { get; set; }
         public int Active { get; set; } = 1;
         public string? FailAt { get; set; }
         public bool FailRestore { get; set; }

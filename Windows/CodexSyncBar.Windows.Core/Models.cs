@@ -96,6 +96,9 @@ public sealed class SshDeviceConfiguration
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
 
+    [JsonPropertyName("skipOnSwitchFailure")]
+    public bool SkipOnSwitchFailure { get; set; }
+
     [JsonIgnore]
     public string DisplayLabel => string.IsNullOrWhiteSpace(DisplayName) ? Host : DisplayName;
 }
@@ -112,7 +115,6 @@ public sealed record UsageSnapshot(
     int ProfileId,
     string Email,
     string Plan,
-    UsageWindow? Session,
     UsageWindow? Weekly,
     double? CreditBalance,
     bool UnlimitedCredits,

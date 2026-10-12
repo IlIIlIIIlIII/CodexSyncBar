@@ -657,6 +657,16 @@ lock_owner_running() {
 hardlink_lock_file() {
   local source="$1"
   local destination="$2"
+  if is_termux_environment; then
+    # Android denies hard links. Both files are in the same private state
+    # directory: coreutils' no-clobber rename publishes the complete owner
+    # file without replacing an existing gate, symlink or directory. Callers
+    # already discard source after success. mv -n returns success on a skip,
+    # so require the source to have actually moved before claiming the lock.
+    mv -nT --no-copy "$source" "$destination" 2>/dev/null || return 1
+    [ ! -e "$source" ] && [ ! -L "$source" ]
+    return
+  fi
   # `ln source existing-directory` succeeds by creating a child entry on
   # BSD/macOS. The two-argument `link` utility maps directly to link(2), so
   # LOCK_PATH itself is the atomic create-if-absent destination everywhere.
@@ -1839,6 +1849,19 @@ codex_app_servers_run_version() {
   [ "$count" -gt 0 ]
 }
 
+is_termux_environment() {
+  [ -n "${PREFIX:-}" ] && [ -x "$PREFIX/bin/pkg" ]
+}
+
+is_termux_codex() {
+  local resolved="$1" prefix
+  is_termux_environment || return 1
+  prefix=$(cd "$PREFIX" && pwd -P) || return 1
+  [ "$resolved" = "$prefix/bin/codex" ] || return 1
+  # Do not mistake a manually copied binary for a package-managed install.
+  [ "$(dpkg-query -S "$PREFIX/bin/codex" 2>/dev/null)" = "codex: $PREFIX/bin/codex" ] || return 1
+}
+
 node_codex_info() {
   local cli="" resolved="" manager=unknown version=""
   export PATH="$PATH:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin"
@@ -1855,13 +1878,15 @@ node_codex_info() {
       */Cellar/codex/*) manager=brew-formula ;;
       "$CODEX_DIR"/packages/standalone/*) manager=standalone ;;
     esac
+    if is_termux_codex "$resolved"; then manager=termux; fi
   fi
   jq -n --arg version "$version" --arg path "$cli" --arg manager "$manager" \
-    '{version:$version,path:$path,manager:$manager,canUpdate:($manager != "unknown"),notice:(if $path == "" then "Codex CLI가 설치되지 않았습니다. 원격 장치에서 먼저 설치해 주세요." elif $manager == "unknown" then "설치 방식을 확인할 수 없습니다. 기존 설치 도구로 업데이트해 주세요." else "" end)}'
+    '{version:$version,path:$path,manager:$manager,canUpdate:($manager != "unknown"),notice:(if $path == "" then "Codex CLI가 설치되지 않았습니다. 원격 장치에서 먼저 설치해 주세요." elif $manager == "unknown" then "설치 방식을 확인할 수 없습니다. 기존 설치 도구로 업데이트해 주세요." elif $manager == "termux" then "Termux 저장소의 최신 패키지로 업데이트합니다. 공식 CLI보다 배포가 늦을 수 있습니다. 계정 전환이나 업데이트 후 열려 있는 Codex CLI는 종료 후 다시 실행해 주세요." else "" end)}'
 }
 
 node_update_codex() {
   local cli resolved npm_bin npm_root standalone_root manager before after stopped attempts
+  local before_package="" after_package="" candidate=""
   local installer="" restart="not-running"
   # Keep the login shell's selected toolchain first. Add common install paths
   # for noninteractive SSH sessions, and load nvm only if Codex is absent.
@@ -1896,10 +1921,27 @@ node_update_codex() {
       fi
       ;;
   esac
+  if is_termux_codex "$resolved"; then manager=termux; fi
   [ -n "$manager" ] || die "unsupported or ambiguous Codex installation: $cli; update it with its original installer"
 
   # Never stop a working server until installation and version validation pass.
   case "$manager" in
+    termux)
+      # Android/Bionic needs Termux's own build. Never replace it with npm or
+      # a Linux release, and never upgrade unrelated installed packages.
+      before_package=$(dpkg-query -W -f='${Version}' codex) || die "could not identify the installed Termux package"
+      apt-get -o Acquire::Retries=1 -o Acquire::https::Timeout=30 \
+        -o Acquire::http::Timeout=30 -o APT::Update::Error-Mode=any update </dev/null || \
+        die "Termux repository refresh failed; existing clients were not stopped"
+      # Drain stdout: exiting awk at Candidate can SIGPIPE apt-cache on Android
+      # and make the successful query fail under pipefail.
+      candidate=$(LC_ALL=C apt-cache policy codex | awk '$1 == "Candidate:" { candidate=$2 } END { print candidate }')
+      [ -n "$candidate" ] && [ "$candidate" != '(none)' ] || die "no Codex candidate is available in the Termux repository"
+      apt-get install -y --only-upgrade --no-remove codex </dev/null || \
+        die "Termux Codex update failed; existing clients were not stopped"
+      after_package=$(dpkg-query -W -f='${Version}' codex) || die "could not verify the updated Termux package"
+      [ "$after_package" = "$candidate" ] || die "installed Termux package does not match the repository candidate"
+      ;;
     npm)
       "$npm_bin" install --global @openai/codex@latest --no-audit --no-fund \
         --fetch-retries=1 --fetch-timeout=60000 </dev/null || die "npm Codex update failed; existing clients were not stopped"
@@ -1928,6 +1970,10 @@ node_update_codex() {
   hash -r
   after=$(codex_cli_version "$cli")
   [ -n "$after" ] || die "updated Codex failed version validation; existing clients were not stopped"
+  if [ "$manager" = termux ] && [ "$before" = "$after" ] && [ "$before_package" = "$after_package" ]; then
+    printf 'before=%s after=%s manager=termux restart=not-needed\n' "$before" "$after"
+    return 0
+  fi
   stopped=$(node_stop_clients) || die "Codex was updated to $after, but the old SSH app-server could not be stopped"
   if [ "$(field_value "$stopped" stopped_processes)" != 0 ]; then
     restart=reconnect-pending

@@ -1,0 +1,2575 @@
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.Daemon' requested by ':1.0' (uid=1000 pid=133203 comm="/usr/bin/gnome-extensions install --print-uuid /tm" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.Daemon'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.Metadata' requested by ':1.0' (uid=1000 pid=133203 comm="/usr/bin/gnome-extensions install --print-uuid /tm" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.Metadata'
+libmutter-Message: 15:46:26.266: Running GNOME Shell (using mutter 50.1) as a Wayland display server
+
+(gnome-shell:133227): libmutter-WARNING **: 15:46:26.267: Unknown experimental feature 'scale-monitor-framebuffer'
+
+(gnome-shell:133227): libmutter-WARNING **: 15:46:26.267: Unknown experimental feature 'xwayland-native-scaling'
+libmutter-Message: 15:46:26.310: Added device '/dev/dri/renderD129' (i915) using no mode setting.
+libmutter-Message: 15:46:26.392: Added device '/dev/dri/renderD128' (nvidia-drm) using no mode setting.
+libmutter-Message: 15:46:26.394: Created gbm renderer for '/dev/dri/renderD129'
+libmutter-Message: 15:46:26.397: Created gbm renderer for '/dev/dri/renderD128'
+libmutter-Message: 15:46:26.397: Boot VGA GPU /dev/dri/renderD129 selected as primary
+** Message: 15:46:26.399: Obtained a high priority EGL context
+libmutter-Message: 15:46:26.411: Added virtual monitor Meta-0
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.a11y.Bus' requested by ':1.5' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.a11y.Bus'
+libmutter-Message: 15:46:26.424: Using public X11 display :2, (using unix:/tmp/.X11-unix/X3 for managed services)
+libmutter-Message: 15:46:26.424: Using Wayland display name 'gnome-shell-test-display'
+dbus-daemon[133270]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133270]: Successfully activated service 'org.a11y.atspi.Registry'
+SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+GNOME Shell-Message: 15:46:26.594: Unset XDG_SESSION_ID, getCurrentSessionProxy() called outside a user session. Asking logind directly.
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.Shell.Screencast' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.Shell.CalendarServer' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.evolution.dataserver.Sources5' requested by ':1.11' (uid=1000 pid=133295 comm="/usr/libexec/gnome-shell-calendar-server" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.OnlineAccounts' requested by ':1.12' (uid=1000 pid=133308 comm="/usr/libexec/evolution-source-registry" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.evolution.dataserver.Sources5'
+GNOME Shell-Message: 15:46:26.661: Registering session with GDM
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.evolution.dataserver.Calendar8' requested by ':1.11' (uid=1000 pid=133295 comm="/usr/libexec/gnome-shell-calendar-server" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.Shell.CalendarServer'
+goa-daemon-Message: 15:46:26.671: goa-daemon version 3.58.0 starting
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.Identity' requested by ':1.14' (uid=1000 pid=133318 comm="/usr/libexec/goa-daemon" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.OnlineAccounts'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.Identity'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.evolution.dataserver.Calendar8'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.evolution.dataserver.AddressBook10' requested by ':1.13' (uid=1000 pid=133323 comm="/usr/libexec/evolution-calendar-factory" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.evolution.dataserver.AddressBook10'
+GNOME Shell-Message: 15:46:26.727: Will monitor session 2
+GNOME Shell-Message: 15:46:26.733: Error looking up permission: GDBus.Error:org.freedesktop.portal.Error.NotFound: No entry for geolocation
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.UDisks2VolumeMonitor' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.UDisks2VolumeMonitor'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.AfcVolumeMonitor' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.AfcVolumeMonitor'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.GPhoto2VolumeMonitor' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.GPhoto2VolumeMonitor'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.GoaVolumeMonitor' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.GoaVolumeMonitor'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gtk.vfs.MTPVolumeMonitor' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gtk.vfs.MTPVolumeMonitor'
+GNOME Shell-Message: 15:46:26.792: Failed to register AuthenticationAgent
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.portal.IBus' requested by ':1.22' (uid=1000 pid=133357 comm="ibus-daemon --panel disable" label="chatgpt (unconfined)")
+Not connected to the ibus bus
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activated service 'org.freedesktop.portal.IBus' failed: Process org.freedesktop.portal.IBus exited with status 1
+portal is not running: GDBus.Error:org.freedesktop.DBus.Error.Spawn.ChildExited: Process org.freedesktop.portal.IBus exited with status 1
+
+(gnome-shell:133227): libmutter-WARNING **: 15:46:26.808: Failed to load background 'file:///usr/share/backgrounds/gnome/adwaita-morning.jpg': Error opening file /usr/share/backgrounds/gnome/adwaita-morning.jpg: No such file or directory
+
+(gnome-shell:133227): libmutter-WARNING **: 15:46:26.809: Failed to load background 'file:///usr/share/backgrounds/gnome/adwaita-day.jpg': Error opening file /usr/share/backgrounds/gnome/adwaita-day.jpg: No such file or directory
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.gnome.Shell.Notifications' requested by ':1.4' (uid=1000 pid=133227 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+GNOME Shell-Message: 15:46:26.812: GNOME Shell started at Tue Oct 06 2026 15:46:26 GMT+0900 (Korean Standard Time)
+GNOME Shell-Message: 15:46:26.812: Registering display with GDM
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.portal.Desktop' requested by ':1.25' (uid=1000 pid=133467 comm="/usr/libexec/gnome-shell-perf-helper" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.portal.Documents' requested by ':1.26' (uid=1000 pid=133492 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.Shell.Notifications'
+
+(gnome-shell:133227): GnomeDesktop-WARNING **: 15:46:26.838: Could not create transient scope for PID 133467: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Name "org.freedesktop.systemd1" does not exist
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.freedesktop.portal.Documents'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.gnome' requested by ':1.26' (uid=1000 pid=133492 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+
+** (xdg-desktop-portal-gnome:133509): WARNING **: 15:46:26.859: GDK backend forced via env var, portal dialogs will not work properly.
+Non-compatible display server, exposing settings only.
+** Message: 15:46:26.860: Failed to start camera monitor
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.gnome'
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.gtk' requested by ':1.26' (uid=1000 pid=133492 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+
+(gnome-shell:133227): Gjs-WARNING **: 15:46:26.904: Type GITypeInfo of property NM.Object::client does not match return type GITypeInfo of getter get_client. Falling back to slow path
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+
+(/usr/libexec/xdg-desktop-portal:133492): xdg-desktop-portal-WARNING **: 15:46:27.060: Failed to connect to PipeWire: Couldn't connect to PipeWire
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.secrets' requested by ':1.26' (uid=1000 pid=133492 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activating service name='org.freedesktop.portal.IBus' requested by ':1.32' (uid=1000 pid=133936 comm="ibus-daemon --panel disable -r --xim" label="chatgpt (unconfined)")
+** Message: 15:46:27.065: couldn't access control socket: /tmp/syncbar-tray-qa-oajmkc9u/runtime/keyring/control: No such file or directory
+discover_other_daemon: 0dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.gnome.Shell.Screencast'
+Not connected to the ibus bus
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Activated service 'org.freedesktop.portal.IBus' failed: Process org.freedesktop.portal.IBus exited with status 1
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.freedesktop.secrets'
+portal is not running: GDBus.Error:org.freedesktop.DBus.Error.Spawn.ChildExited: Process org.freedesktop.portal.IBus exited with status 1
+dbus-daemon[133193]: [session uid=1000 pid=133193 pidfd=5] Successfully activated service 'org.freedesktop.portal.Desktop'
+SYNCBAR_PASS extension enabled
+SYNCBAR_PASS native async socket reads accounts
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [Gjs_ui_boxpointer_BoxPointer] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBin] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StScrollView] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.335: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.336: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_PASS tray opens native popup
+SYNCBAR_PASS switch shows pending synchronously
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [Gjs_ui_boxpointer_BoxPointer] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBin] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StScrollView] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.357: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.370: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.385: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.386: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.402: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.419: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.436: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.452: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.469: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.486: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.502: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.519: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.536: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.552: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.569: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.586: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.602: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.619: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.636: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.652: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.669: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.686: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.702: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.719: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.736: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_PASS native button applies account B
+SYNCBAR_PASS tray switch leaves every SSH device unchanged
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.754: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.769: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.785: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.785: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.785: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.785: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.802: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.802: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.802: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.802: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.819: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.819: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.819: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.819: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.836: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.836: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.836: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.836: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.852: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.852: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.852: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.852: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.869: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.869: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.869: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.869: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.886: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.886: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.886: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.886: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.902: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.902: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.902: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.902: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.919: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.919: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.919: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.919: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.936: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.936: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.936: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.936: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.952: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.952: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.952: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.952: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.969: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.969: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.969: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.969: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.986: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.986: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.986: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:27.986: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.002: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.002: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.002: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.002: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.019: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.019: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.019: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.019: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.036: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.036: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.036: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.036: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.052: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.052: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.052: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.052: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.069: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.069: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.069: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.069: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.086: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.086: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.086: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.086: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.102: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.102: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.102: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.102: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.119: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.119: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.119: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.119: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.136: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.136: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.136: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.136: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_PASS native button restores account A
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.158: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [Gjs_ui_boxpointer_BoxPointer] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBin] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StScrollView] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.174: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.190: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_PASS refresh invokes weekly usage job
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [Gjs_ui_boxpointer_BoxPointer] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBin] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StScrollView] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.214: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.228: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.228: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.228: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.228: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.245: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.245: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.245: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.245: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.261: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.261: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.261: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.261: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.278: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.278: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.278: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.278: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.295: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.295: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.295: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.295: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.311: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.311: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.311: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.311: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.328: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.328: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.328: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.328: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.345: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.345: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.345: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.345: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.362: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.362: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.362: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.362: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.378: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.378: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.378: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.378: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.395: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.395: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.395: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.395: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.412: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.412: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.412: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.412: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.428: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.428: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.428: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.428: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.462: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.462: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.462: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.462: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.478: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.478: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.478: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.478: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.495: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.495: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.495: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.495: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.528: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.528: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.528: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.528: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.545: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.545: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.545: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.545: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.593: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.593: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.593: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.593: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.609: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.610: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.610: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.610: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_CAPTURE selected-design 598x643
+SYNCBAR_PASS active and re-login accounts have no switch button
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [Gjs_ui_boxpointer_BoxPointer] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBin] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StScrollView] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.628: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.643: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.643: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.643: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.643: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.659: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.659: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.659: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.659: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_PASS failed switch stays inline without claiming success
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.676: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.676: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.676: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.676: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.693: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.693: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.693: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.693: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.709: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.709: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.709: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.709: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.726: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.726: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.726: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.726: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.743: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.743: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.743: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.743: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.759: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.759: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.759: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.759: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.776: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.776: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.776: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.776: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.793: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.793: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.793: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.793: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.809: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.809: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.809: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.809: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.826: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.826: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.826: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.826: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.843: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.843: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.843: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.843: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.859: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.859: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.859: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.859: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.876: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.876: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.876: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.876: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.893: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.893: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.893: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.893: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.909: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.909: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.909: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.909: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.926: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.926: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.926: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.926: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.943: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.943: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.943: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.943: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.959: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.959: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.959: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.959: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.976: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.976: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.976: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.976: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.993: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.993: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.993: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:28.993: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.009: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.009: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.009: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.009: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.035: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.035: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.035: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.035: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.051: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.051: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.051: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.051: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_CAPTURE switch-error 598x678
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.073: Can't update stage views actor unnamed [Gjs_ui_boxpointer_BoxPointer] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.073: Can't update stage views actor unnamed [StBin] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.073: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.073: Can't update stage views actor unnamed [StScrollView] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.073: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.073: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.074: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.113: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.135: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.157: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.179: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.179: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.179: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.179: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.180: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.201: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.202: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.224: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.246: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.268: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.290: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.312: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.334: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.355: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.377: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.397: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.445: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.446: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.446: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.446: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.446: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.467: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_CAPTURE overflow-top 598x890
+SYNCBAR_PASS overflow accounts scroll
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.489: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.511: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.532: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.554: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.576: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.598: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.620: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.642: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.663: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.684: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.706: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.727: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.748: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.770: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.791: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.813: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.835: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.885: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StBoxLayout] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+
+(gnome-shell:133227): Clutter-WARNING **: 15:46:29.907: Can't update stage views actor unnamed [StWidget] is on because it needs an allocation.
+SYNCBAR_CAPTURE overflow-bottom 598x890
+SYNCBAR_PASS footer stays on-screen
+SYNCBAR_CAPTURE empty 598x335
+SYNCBAR_PASS disable removes tray
+SYNCBAR_PASS extension can enable again
+SYNCBAR_COMPLETE
+** Message: 15:46:30.366: Shutting down GNOME Shell
+libmutter-Message: 15:46:30.466: Removed virtual monitor Meta-0
+args: ['python3', '/home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/tests/tray/compositor.py', '/usr/bin/gnome-shell', '--automation-script', '/home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/tests/tray/scenes.js', '--headless', '--virtual-monitor', '1280x720', '--wayland-display', 'gnome-shell-test-display']
+------------------------------------------------------------
+------------------------------------------------------------
+A connection to the bus can't be made
+gnome-shell-calendar-server[133295]: Lost (or failed to acquire) the name org.gnome.Shell.CalendarServer - exiting
+
+(evolution-calendar-factory:133323): libedbus-private-WARNING **: 15:46:30.519: Error setting property 'ConnectionStatus' on interface org.gnome.evolution.dataserver.Source: The connection is closed (g-io-error-quark, 18)

@@ -1,66 +1,48 @@
-# Codex SyncBar Ubuntu — design QA
+# Codex SyncBar native tray — option 1
 
-**Final result: passed**
+Date: 2026-10-06. Scope: the first displayed image of the new **weekly-only** design set, implemented as a GNOME Shell 50 extension. The previous GTK overview QA is preserved in [design-qa-weekly.md](docs/ubuntu/design-qa-weekly.md).
 
-2026-10-03. This result covers the rendered native GTK design and the explicitly recorded GTK integration checks. It does **not** certify live two-account/SSH E2E, global pointer/keyboard input, or fractional Wayland scaling.
+## Source and visual evidence
 
-## Visual truth and evidence
+- Source: [selected-option-1.png](docs/ubuntu/qa-evidence/tray/selected-option-1.png), 1182×1330 pixels. Popup crop (77,94)–(1104,1242), normalized proportionally to 598×668 for comparison.
+- Implementation: [selected-design.png](docs/ubuntu/qa-evidence/tray/final/selected-design.png), actual GNOME Shell 50.1, private headless Wayland compositor, 1280×900 at scale 1. Popup visible crop 598×671.
+- Same state: dark popup, four accounts, 68% / 84% / 5% / unavailable, first account active. Fixture timestamps follow capture time; the production header says “이 PC” instead of the source's demo annotation.
+- [Combined final comparison](docs/ubuntu/qa-evidence/tray/comparison-final.png), viewed with both images together. [Initial comparison](docs/ubuntu/qa-evidence/tray/comparison-initial.png) retains the pre-fix evidence. [Popup only](docs/ubuntu/qa-evidence/tray/popup.png).
+- [Large text](docs/ubuntu/qa-evidence/tray/large-text/selected-design.png): 1280×720, text scale 1.25; [100% and 0%](docs/ubuntu/qa-evidence/tray/large-text/quota-extremes.png), [scroll end](docs/ubuntu/qa-evidence/tray/large-text/overflow-bottom.png).
 
-- Source: `/home/sunggu/.codex/generated_images/01a0fda5-ffc0-7493-b460-72f294cd70fa/exec-1b4b356b-00ed-4718-8260-0dbda14af4cb.png` (selected option 3), preserved as [selected-mock.png](docs/ubuntu/qa-evidence/selected-mock.png).
-- Render: [native-dark.png](docs/ubuntu/qa-evidence/native-dark.png), real GTK4/libadwaita widgets connected to the compiled isolated demo service. The source raster is not embedded in the app.
-- Full comparison: [comparison.png](docs/ubuntu/qa-evidence/comparison.png), both source and rendered implementation in one image.
-- Focused comparison: [comparison-controls.png](docs/ubuntu/qa-evidence/comparison-controls.png), current-account and target-account controls. This was needed to inspect typography, wrapping, spacing, and dropdown affordance.
-- Default: [native-default.png](docs/ubuntu/qa-evidence/native-default.png), 1040×760.
-- Compact: [native-small.png](docs/ubuntu/qa-evidence/native-small.png) and [native-small-bottom.png](docs/ubuntu/qa-evidence/native-small-bottom.png), 600×480, top and bottom of scrollable body.
-- Light: [native-light.png](docs/ubuntu/qa-evidence/native-light.png), 1040×760.
-- 100% attempt: [native-scale-100.png](docs/ubuntu/qa-evidence/native-scale-100.png), GDK_SCALE=1 (also attempted GDK_DPI_SCALE=0.5), 1040×760. The current 200% Wayland session retained a different DPI for native header/button fonts than pixel-sized content; this capture is density-inconsistent and **inconclusive**, not a 100% pass or a proven normal-display defect. Physical 100%/150% checks remain pending.
-- HiDPI: [native-hidpi.png](docs/ubuntu/qa-evidence/native-hidpi.png), logical 600×480 with GDK_SCALE=2. This is a normalized widget render, not proof of a physical 200% monitor capture.
-- Offline state: [native-offline.png](docs/ubuntu/qa-evidence/native-offline.png).
+## Findings resolved
 
-The source is 1487×1058 pixels. The comparison normalizes it to 1440×1024 beside the 1440×1024 GTK render, with labels outside each image. GTK captures use logical widget dimensions, GTK WidgetPaintable, and Gsk CairoRenderer. The live helper also supports a real GTK child snapshot with the native CSS background; it rejects missing child content and blank image pixels. The accepted final live run used WidgetPaintable for all three screens, which were opened and visually inspected. CSS viewport terminology does not apply to this native app. No desktop/browser frame is introduced. The comparison uses the same current account, selected account, 5-hour/week percentages, and three-device scenario. Native titlebar, font metrics, symbolic icons, and theme colors are intentional substitutions required by the accepted implementation plan. The user subsequently requested full email display; production snapshot/preview labels and all GTK views now preserve the full email, with word/character wrapping. Historical demo evidence contains intentionally synthetic starred fixture values; live captures reflect the updated requirement.
-
-## Findings and iterations
-
-1. **Initial result: blocked.** [initial.png](docs/ubuntu/qa-evidence/initial.png) had an overly wide account pane, fixture content that did not match the selected reference, and a weak typography hierarchy (P2). The implementation changed the two-column proportions to approximately 1:2, restored the reference data in the demo service, and adjusted title/section/account font hierarchy. [revised.png](docs/ubuntu/qa-evidence/revised.png) records the intervening layout; the final full comparison above uses matching data.
-2. **Default-window result: blocked.** The first responsive implementation requested more than the planned 600-pixel minimum and crowded the device rows at 1040×760 (P2). Initial reflow now runs before presentation; shorter windows use compact spacing and font sizes. [native-default.png](docs/ubuntu/qa-evidence/native-default.png) shows all three rows and the complete fixed apply footer. [native-small.png](docs/ubuntu/qa-evidence/native-small.png) establishes an actual 600×480 window.
-3. **Post-fix result: passed.** The combined source/render and focused comparison show no remaining actionable P0/P1/P2 mismatch within the accepted native substitutions. Compact bottom evidence and the 9/9 GTK integration report establish access to the final device row, selector focus, and body scrolling. The footer remains visible independently of body scroll.
-
-The real-login trial also exposed a misleading “적용 중” label during browser login. The UI now labels this “로그인 대기 중”, hides the applying spinner, and offers visible reopen/cancel controls. The added GTK regression passed.
+1. **P1 — quota fill was centered, then disappeared in the first allocation fix.** The initial comparison showed a centered low-quota dot. Replaced the custom allocation with GNOME's native accessible `BarLevel`. Final meters share a left origin, show the expected 68/84/5 values, and have equal 150px tracks. Final logs contain no allocation-loop warnings.
+2. **P2 — row density and missing dividers drifted from option 1.** Enlarged avatars, account names and header, added explicit native separators, aligned identity/meter/action columns and reserved the same border in active/inactive rows. The normalized popup heights are now 668px source versus 671px implementation.
+3. **P1 — 100% and enlarged text could be ellipsized.** Changed percentage, identity and action widths to font-relative units. Added runtime checks rejecting any ellipsized quota in captured scenes, including 0% and 100%. Long real email addresses wrap at the domain boundary without inserting hyphens.
+4. **P2 — long account lists could crowd persistent controls.** Only the account list scrolls; the header, refresh and app button remain visible. Verified sixteen accounts at both tested sizes.
 
 ## Required fidelity surfaces
 
-| Surface | Evidence and assessment |
-|---|---|
-| Fonts and typography | Uses Ubuntu's native GTK font selection and Korean fallback, rather than a hard-coded web font. Display, section, account, and secondary text retain the source hierarchy. Default-size important labels and percentages neither overlap nor truncate; long account information wraps/ellipsizes in native controls. Native antialiasing and font metrics are accepted variations. |
-| Spacing and layout | Approximately 1:2 account/detail regions at desktop width; the layout stacks below 900. Compact spacing keeps the three-device scenario visible at 1040×760. At 600×480 the body scrolls and the fixed footer remains accessible. Card radii, headerbar, borders, and controls follow native Yaru. |
-| Colors and tokens | Window, card, foreground, accent, success/error colors use GTK/Yaru semantic colors. Current system Yaru Olive dark is reflected in the controls. Quota accent text measured approximately 4.82:1 against its background. Selected target text uses native foreground for readable contrast. Light-mode evidence shows the corresponding native surface and text palette. |
-| Image quality and assets | No decorative raster assets are needed. Native symbolic device, account, refresh, and menu icons remain sharp. Replacing mock icons with native symbols is explicitly required by the accepted plan. Source image is used only as comparison evidence. |
-| Copy and content | Current local account, selected account, and planned per-device account remain distinct. “현재 적용 · 이 Ubuntu PC” clarifies local scope. “예정”, “동일 계정 재적용”, unknown/connection state, and explicit “모든 장치에 적용” communicate preview versus mutation. Missing quota values remain absent rather than showing fabricated zero. |
+| Surface | Assessment |
+| --- | --- |
+| Typography | Native system Latin/Korean font, bold account names and numeric percentages, subdued email/reset captions. 100% remains fully visible at 1.25 text scale. Font rendering differs from the generated raster; hierarchy and reading order are retained. |
+| Spacing/layout | Charcoal anchored popup, brand header, weekly heading, olive active row, aligned quota columns, dividers, footer. Active account moves to the top of this presentation without changing stored account order. |
+| Color | #242424 surface, #373d29 active row, green normal quota and amber ≤25%, muted unavailable/stale values. Numeric labels accompany colors. |
+| Image/icon quality | Reuses the installed Codex SyncBar PNG logo. Account, refresh, check and open icons are native GNOME symbolic icons. No embedded mock image or hand-drawn replacement assets. Native `BarLevel` supplies the progress control and accessibility semantics. |
+| Copy/content | Weekly only. Missing values never become 0%. Login/error/stale reasons are visible. Update time comes from usage data, not snapshot polling. Switching is explicitly scoped to this PC. |
 
-## Interaction and remaining coverage
+The full combined comparison is readable at native density; individual quota-extreme, large-text, error and scroll-end captures supply the focused state checks. Native GNOME omits the illustrative arrow and raster glow from the generated reference. The footer button and check icon differ slightly in width/stroke; these are accepted P3 native-widget differences.
 
-Latest production capture: [full-email live screen](docs/ubuntu/qa-evidence/live/live-profile-1-1790991581924570291.png), 1040×760, actual registered accounts and local/ml/rogally observations. It confirms the user-requested unmasked email labels, one available quota window (missing 5-hour window is hidden), all three device rows, and fixed footer without overlap. This is the final restored-A screen from the accepted live A→B→A run. Its current→same-account state differs from the original reference's A→B state, so it validates live content/layout rather than exact source-state matching.
+## Functional evidence
 
-[gtk-integration-600x480.json](docs/ubuntu/qa-evidence/gtk-integration-600x480.json) passed 9/9: account selection does not change active accounts; all five production dialogs plus SSH form construct; login waiting exposes reopen/cancel without an applying spinner; picker accepts focus; latest selection wins; apply disables duplicate activation; GTK button signals traverse IPC for A→B and B→A; final device row accepts focus and body scroll reaches the end. These are app-internal GTK actions against the real compiled demo service, not global native input automation.
+- 16 pure model/command assertions: weekly/unknown/zero/stale semantics, unavailable accounts, busy state and fail-closed local-only preview validation.
+- Native GNOME integration through the compiled demo backend: tray popup, A→B→A, SSH accounts unchanged, weekly refresh, visible quota meters, login-disabled row, failed switch notice, empty/overflow states, launcher callback, extension disable/re-enable.
+- Separate private Wayland pointer/keyboard run clicks the tray and account button, then restores account A with Enter. Input devices belong to that test compositor only.
+- Six installer tests passed; built Debian package includes all six extension files. Source and installed extension hashes match.
+- Real production service: six accounts rendered read-only in the native popup. Identity hashes, active account and weekly preference remained unchanged after installation. Private screenshots are outside the repository under `/tmp/syncbar-tray-install/native-readonly/`.
 
-Additional overflow evidence: [native-overflow.png](docs/ubuntu/qa-evidence/native-overflow.png) shows a long target account name and 24 devices at 600×480, scrolled to the last row. This synthetic visual fixture checks layout only.
+## Installation boundary
 
-User-confirmed native input: [native-manual.json](docs/ubuntu/qa-evidence/native-manual.json) records that the account dropdown/menu open with the mouse and Tab moves a visible focus indicator. This covers those actions only.
+The extension is installed at `~/.local/share/gnome-shell/extensions/codex-syncbar@griplabs.io` and is included in the enabled-extension list. Other extension settings were preserved. The current GNOME session's `GetExtensionInfo` still returns an empty dictionary: **the new tray is not active in this desktop session yet**. It will load at the next login. No logout, compositor restart, global input change or real-account switch was performed.
 
-Remaining acceptance steps: full dialog keyboard traversal on GNOME Wayland; physical 100% and 150% fractional monitor scale; testing a different system accent without changing the user's current desktop preference; multiple physical monitors. Actual login and live A→B→A against ml and rogally, local desktop restarts, and original-state restoration passed separately in the locally retained live QA report. Those are tracked separately from visual fidelity and must not be reported as passed from these screenshots.
+The visual and isolated interaction gate passed. Live tray activation and real-account switching from that live tray remain acceptance checks after re-login; the demo switch is not evidence of a new real-account A→B→A run.
 
-**Follow-up polish:** P3 — the native downward chevron between current and target accounts is subtler than the reference's direction arrow. The relationship is already explicit in section labels, so it is not blocking.
-
-**Implementation checklist:**
-
-- [x] Source and implementation captured and compared together.
-- [x] All five required fidelity surfaces reviewed.
-- [x] P2 layout findings fixed and recaptured.
-- [x] Default and minimum dimensions verified with fixed footer.
-- [x] Light/dark and normalized HiDPI evidence recorded.
-- [x] GTK selection, focus, latest-response, apply and restoration signal flow recorded.
-- [x] User confirms mouse dropdown/menu and visible Tab focus.
-- [x] Actual two-account/SSH flow, three local Codex restarts and original-state restoration verified separately.
-- [ ] Complete remaining physical scale and full-dialog native input checks.
+Implementation checklist: complete. Deployment activation: pending next login.
 
 final result: passed

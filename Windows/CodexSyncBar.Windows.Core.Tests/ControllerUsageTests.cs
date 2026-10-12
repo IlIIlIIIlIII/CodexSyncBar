@@ -41,7 +41,7 @@ public sealed class ControllerUsageTests
         fail = true;
         var last = await controller.RefreshUsageAsync();
         Assert.Equal(first.Accounts[0].Usage!.UpdatedAt, last.Accounts[0].Usage!.UpdatedAt);
-        Assert.Equal(25, last.Accounts[0].Usage!.Session!.UsedPercent);
+        Assert.Equal(25, last.Accounts[0].Usage!.Weekly!.UsedPercent);
         Assert.NotNull(last.Accounts[0].Usage!.Error);
         Assert.DoesNotContain("sensitive-token-output", JsonSerializer.Serialize(last));
     }
@@ -68,7 +68,7 @@ public sealed class ControllerUsageTests
         using var controller = new SyncBarController(fixture.Paths,
             new UsageService(new HttpClient(new Handler(() => new(HttpStatusCode.ServiceUnavailable)))));
         var result = await controller.RefreshUsageAsync();
-        Assert.Null(result.Accounts[0].Usage!.Session);
+        Assert.Null(result.Accounts[0].Usage!.Weekly);
         Assert.NotNull(result.Accounts[0].Usage!.Error);
         await Assert.ThrowsAsync<CodexSyncBarException>(() => controller.SwitchAccountAsync(1, "stale-revision"));
         Assert.False((await controller.GetSnapshotAsync()).IsBusy);
@@ -83,7 +83,7 @@ public sealed class ControllerUsageTests
         using var restarted = new SyncBarController(fixture.Paths,
             new UsageService(new HttpClient(new Handler(() => new(HttpStatusCode.ServiceUnavailable)))));
         await restarted.RefreshUsageAsync();
-        Assert.Equal(25, restarted.TryGetUsageSnapshot(1)!.Session!.UsedPercent);
+        Assert.Equal(25, restarted.TryGetUsageSnapshot(1)!.Weekly!.UsedPercent);
         Assert.NotNull(restarted.GetUsageError(1));
     }
 
@@ -290,7 +290,7 @@ public sealed class ControllerUsageTests
     private static HttpResponseMessage Success() => new(HttpStatusCode.OK)
     {
         Content = new StringContent("""
-            {"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000}},
+            {"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800}},
              "rate_limit_reset_credits":{"available_count":0,"credits":[]}}
             """, Encoding.UTF8, "application/json"),
     };

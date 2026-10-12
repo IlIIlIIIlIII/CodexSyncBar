@@ -10,6 +10,7 @@
     <Compile Include="../../Windows/CodexSyncBar.Windows.Core/*.cs"
       Exclude="../../Windows/CodexSyncBar.Windows.Core/WindowsPaths.cs;../../Windows/CodexSyncBar.Windows.Core/WindowsSecretStore.cs;../../Windows/CodexSyncBar.Windows.Core/WindowsPathSafety.cs;../../Windows/CodexSyncBar.Windows.Core/BrowserLoginService.cs;../../Windows/CodexSyncBar.Windows.Core/LocalSwitchService.cs;../../Windows/CodexSyncBar.Windows.Core/CodexCliLocator.cs;../../Windows/CodexSyncBar.Windows.Core/CodexDesktopLifecycle.cs;../../Windows/CodexSyncBar.Windows.Core/CliManagementService.cs;../../Windows/CodexSyncBar.Windows.Core/WslDeviceService.cs;../../Windows/CodexSyncBar.Windows.Core/CodexProcessScope.cs"
       Link="Core/%(Filename)%(Extension)" />
+    <Compile Remove="../../Windows/CodexSyncBar.Windows.Core/WslDesktopAccountTarget.cs" />
     <Compile Include="../../Ubuntu/CodexSyncBar.Ubuntu.Platform/*.cs" Link="Platform/%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="CodexSyncBar.Backend" />
     <InternalsVisibleTo Include="CodexSyncBar.Ubuntu.Tests" />

@@ -6,11 +6,11 @@ namespace CodexSyncBar.Windows.Core.Tests;
 public sealed class UsagePreferencesMigrationTests
 {
     [Fact]
-    public void NewPreferencesDefaultToFiveHourAndWeeklyOnly()
+    public void NewPreferencesDefaultToWeeklyOnly()
     {
         using var fixture = new Fixture();
         var store = new UsageDisplayPreferencesStore(fixture.Paths);
-        Assert.Equal(new[] { UsageDisplayItem.FiveHour, UsageDisplayItem.CodexWeekly }, Enum.GetValues<UsageDisplayItem>());
+        Assert.Equal(new[] { UsageDisplayItem.CodexWeekly }, Enum.GetValues<UsageDisplayItem>());
         Assert.Equal(Enum.GetValues<UsageDisplayItem>(), store.LoadMenuPreferences().NormalizedItems());
         Assert.All(Enum.GetValues<UsageDisplayItem>(), item => Assert.True(store.LoadUsagePreferences().IsVisible(item)));
     }
@@ -25,8 +25,8 @@ public sealed class UsagePreferencesMigrationTests
             """);
         var store = new UsageDisplayPreferencesStore(fixture.Paths);
         var preferences = store.LoadUsagePreferences();
-        Assert.False(preferences.FiveHour);
         Assert.True(preferences.CodexWeekly);
+        Assert.DoesNotContain("fiveHour", File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile), StringComparison.OrdinalIgnoreCase);
         using var migrated = JsonDocument.Parse(File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile));
         Assert.DoesNotContain(migrated.RootElement.EnumerateObject(), property => property.Name.StartsWith("spark", StringComparison.OrdinalIgnoreCase));
         Assert.Equal("unrelated nested data", migrated.RootElement.GetProperty("futureOption").GetProperty("SparkWeekly").GetString());
@@ -56,15 +56,15 @@ public sealed class UsagePreferencesMigrationTests
     public void RetiredOnlyMenuSelectionReceivesSupportedDefaults()
     {
         using var fixture = new Fixture();
-        File.WriteAllText(fixture.Paths.MenuBarUsagePreferencesFile, """{"items":["SparkFiveHour","sparkWeekly"]}""");
+        File.WriteAllText(fixture.Paths.MenuBarUsagePreferencesFile, """{"items":["FiveHour","SparkFiveHour","sparkWeekly"]}""");
         var preferences = new UsageDisplayPreferencesStore(fixture.Paths).LoadMenuPreferences();
-        Assert.Equal(new[] { UsageDisplayItem.FiveHour, UsageDisplayItem.CodexWeekly }, preferences.NormalizedItems());
+        Assert.Equal(new[] { UsageDisplayItem.CodexWeekly }, preferences.NormalizedItems());
         Assert.DoesNotContain("spark", File.ReadAllText(fixture.Paths.MenuBarUsagePreferencesFile), StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
     [InlineData("[]", 0)]
-    [InlineData("[\"codexWeekly\",\"fiveHour\"]", 2)]
+    [InlineData("[\"codexWeekly\"]", 1)]
     public void NonRetiredMenuSelectionsAreNotRewritten(string items, int count)
     {
         using var fixture = new Fixture();
@@ -80,11 +80,10 @@ public sealed class UsagePreferencesMigrationTests
     {
         var credentials = new ProfileCredentials(1, "synthetic-access", null, "synthetic-refresh", "synthetic-account", "test@example.invalid", null, "unused", false);
         var usage = UsageService.ParseUsagePayload("""
-            {"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000}},
+            {"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800}},
              "additional_rate_limits":[{"limit_name":"Spark","rate_limit":{"primary_window":{"used_percent":"retired-invalid-value"}}}]}
             """, credentials);
-        Assert.Equal(25, usage.Session!.UsedPercent);
-        Assert.Null(usage.Weekly);
+        Assert.Equal(25, usage.Weekly!.UsedPercent);
         Assert.DoesNotContain("spark", JsonSerializer.Serialize(usage), StringComparison.OrdinalIgnoreCase);
     }
 
@@ -101,10 +100,13 @@ public sealed class UsagePreferencesMigrationTests
             """);
         using var controller = new SyncBarController(fixture.Paths);
         var cached = controller.TryGetUsageSnapshot(1)!;
-        Assert.Equal(25, cached.Session!.UsedPercent);
         Assert.Equal(70, cached.Weekly!.UsedPercent);
         Assert.Equal(2, cached.ResetCredits);
         Assert.DoesNotContain("spark", JsonSerializer.Serialize(cached), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Session", JsonSerializer.Serialize(cached), StringComparison.OrdinalIgnoreCase);
+        var saved = File.ReadAllText(Path.Combine(fixture.Paths.StateRoot, "dashboard-usage.json"));
+        Assert.DoesNotContain("Session", saved, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Spark", saved, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -128,7 +130,7 @@ public sealed class UsagePreferencesMigrationTests
         {
             Paths = new WindowsPaths(Path.Combine(_root, "home"), Path.Combine(_root, "local"));
             Assert.Equal(Path.Combine(_root, "home", ".codex", "auth.json"), Paths.ActiveAuthFile);
-            Assert.Equal(Path.Combine(_root, "local", "CodexSyncBar"), Paths.StateRoot);
+            Assert.Equal(Path.Combine(_root, "local"), Path.GetDirectoryName(Paths.StateRoot));
             Paths.EnsureDirectories();
         }
         public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); }

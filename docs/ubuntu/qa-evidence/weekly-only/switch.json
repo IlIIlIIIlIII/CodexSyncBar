@@ -1,0 +1,25 @@
+{
+  "width": 1040,
+  "height": 760,
+  "mode": "isolated-demo",
+  "page": "switch",
+  "selectedProfileId": 2,
+  "operation": {
+    "id": "4fd12989e15b43aa9d48c4167c7dee58",
+    "kind": "refresh",
+    "profileId": null,
+    "state": "completed",
+    "message": "데모 상태를 새로고침했습니다.",
+    "targets": [],
+    "startedAt": "2026-10-06T06:24:36.0733615+00:00",
+    "finishedAt": "2026-10-06T06:24:36.0733615+00:00",
+    "result": null,
+    "errorCode": null,
+    "isComplete": true
+  },
+  "source": "GTK WidgetPaintable",
+  "gtkScaleFactor": 2,
+  "scrollValue": 0.0,
+  "scrollUpper": 637.0,
+  "scrollPageSize": 580.0
+}

@@ -1,0 +1,11 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  CodexSyncBar.Core -> /home/sunggu/Projects/Personal/CodexSyncBar/Shared/CodexSyncBar.Core/bin/Release/net10.0/CodexSyncBar.Core.dll
+  CodexSyncBar.Ubuntu.Backend -> /home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/CodexSyncBar.Ubuntu.Backend/bin/Release/net10.0/CodexSyncBar.Backend.dll
+  CodexSyncBar.Ubuntu.Tests -> /home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/CodexSyncBar.Ubuntu.Tests/bin/Release/net10.0/CodexSyncBar.Ubuntu.Tests.dll
+Test run for /home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/CodexSyncBar.Ubuntu.Tests/bin/Release/net10.0/CodexSyncBar.Ubuntu.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:15.87]     CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.LockedLogRemnantDoesNotBlockRecoveryAndIsRemovedOnLaterRetry [SKIP]
+  Skipped CodexSyncBar.Windows.Core.Tests.AuthRefreshTests.LockedLogRemnantDoesNotBlockRecoveryAndIsRemovedOnLaterRetry [1 ms]
+
+Passed!  - Failed:     0, Passed:   117, Skipped:     1, Total:   118, Duration: 16 s - CodexSyncBar.Ubuntu.Tests.dll (net10.0)

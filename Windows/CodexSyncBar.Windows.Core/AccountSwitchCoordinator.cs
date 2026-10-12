@@ -9,6 +9,7 @@ public interface IAccountTarget
     string DisplayName { get; }
     string ConfigurationFingerprint { get; }
     bool IsLocal { get; }
+    bool SkipOnFailure => false;
     Task<string> PrepareAsync(int profileId, CancellationToken cancellationToken);
     Task ApplyAsync(int profileId, CancellationToken cancellationToken);
     Task VerifyAsync(int profileId, CancellationToken cancellationToken);
@@ -32,6 +33,7 @@ public sealed class SwitchCheckpoint
     public string Value { get; set; } = "";
     public bool Attempted { get; set; }
     public bool Restored { get; set; }
+    public bool SkipOnFailure { get; set; }
 }
 
 /// <summary>Caller holds ControllerMutationLock for the entire operation, including recovery.</summary>
@@ -62,7 +64,7 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
     {
         var previous = ReadJournal();
         if (previous is not null && previous.Operation.State != "completed"
-            && previous.Checkpoints.Any(checkpoint => checkpoint.Attempted && !checkpoint.Restored))
+            && previous.Checkpoints.Any(checkpoint => checkpoint.Attempted && !checkpoint.Restored && !MaySkip(checkpoint, targets)))
             throw new CodexSyncBarException("이전 계정 전환의 복구를 먼저 완료해 주세요.");
         if (targets.Select(target => target.Id).Distinct(StringComparer.Ordinal).Count() != targets.Count)
             throw new CodexSyncBarException("중복된 계정 전환 대상입니다.");
@@ -85,6 +87,11 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                 cancellationToken.ThrowIfCancellationRequested();
                 string checkpoint;
                 try { checkpoint = await target.PrepareAsync(profileId, cancellationToken); }
+                catch (Exception) when (target.SkipOnFailure && !cancellationToken.IsCancellationRequested)
+                {
+                    SetTarget(journal, target.Id, "skipped", "연결 또는 현재 계정을 확인하지 못해 건너뛰었습니다. 다른 장치에는 계속 적용합니다.");
+                    return;
+                }
                 catch
                 {
                     SetTarget(journal, target.Id, "failed", "장치 사전 확인에 실패했습니다. 연결과 계정 설정을 확인해 주세요.");
@@ -92,13 +99,15 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                 }
                 lock (_journalGate)
                 {
-                    journal.Checkpoints.Add(new SwitchCheckpoint { Id = target.Id, Fingerprint = target.ConfigurationFingerprint, Value = checkpoint });
+                    journal.Checkpoints.Add(new SwitchCheckpoint { Id = target.Id, Fingerprint = target.ConfigurationFingerprint,
+                        Value = checkpoint, SkipOnFailure = target.SkipOnFailure });
                     SetTarget(journal, target.Id, "ready");
                 }
             }));
             SetState(journal, "applying", "선택한 계정을 적용하고 있습니다.");
+            var prepared = ordered.Where(target => journal.Checkpoints.Any(checkpoint => checkpoint.Id == target.Id)).ToArray();
             // WhenAll settles every in-flight write before the catch block can roll back.
-            await Task.WhenAll(ordered.Select(async target =>
+            await Task.WhenAll(prepared.Select(async target =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 lock (_journalGate)
@@ -107,6 +116,11 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                     SetTarget(journal, target.Id, "applying"); // durable intent precedes the first write
                 }
                 try { await target.ApplyAsync(profileId, cancellationToken); }
+                catch (Exception) when (target.SkipOnFailure && !cancellationToken.IsCancellationRequested)
+                {
+                    await SkipFailedTargetAsync(journal, target);
+                    return;
+                }
                 catch
                 {
                     SetTarget(journal, target.Id, "failed", "계정 적용을 완료하지 못했습니다.");
@@ -115,10 +129,16 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                 SetTarget(journal, target.Id, "applied");
             }));
             SetState(journal, "verifying", "적용 대상 장치의 결과를 확인하고 있습니다.");
-            await Task.WhenAll(ordered.Select(async target =>
+            var applied = prepared.Where(target => journal.Operation.Targets.Single(result => result.Id == target.Id).State == "applied").ToArray();
+            await Task.WhenAll(applied.Select(async target =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 try { await target.VerifyAsync(profileId, cancellationToken); }
+                catch (Exception) when (target.SkipOnFailure && !cancellationToken.IsCancellationRequested)
+                {
+                    await SkipFailedTargetAsync(journal, target);
+                    return;
+                }
                 catch
                 {
                     SetTarget(journal, target.Id, "failed", "적용된 계정을 확인하지 못했습니다.");
@@ -126,8 +146,11 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                 }
                 SetTarget(journal, target.Id, "verified");
             }));
-            SetState(journal, "completed", ordered.Length == 1
-                ? $"{ordered[0].DisplayName}에 계정을 적용했습니다." : "모든 대상 장치에 적용했습니다.", finished: true);
+            cancellationToken.ThrowIfCancellationRequested();
+            var skipped = journal.Operation.Targets.Where(target => target.State == "skipped").Select(target => target.DisplayName).ToArray();
+            SetState(journal, "completed", skipped.Length > 0
+                ? $"{journal.Operation.Targets.Count(target => target.State == "verified")}대에 적용했습니다. 건너뜀: {string.Join(", ", skipped)}"
+                : ordered.Length == 1 ? $"{ordered[0].DisplayName}에 계정을 적용했습니다." : "모든 대상 장치에 적용했습니다.", finished: true);
             await ReleaseAsync(journal, targets);
             return journal.Operation;
         }
@@ -138,6 +161,28 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
                 ? "계정 전환을 완료하지 못해 이전 상태로 복구했습니다." : "장치 사전 확인에 실패하여 계정은 변경하지 않았습니다.");
         }
     }
+
+    private async Task SkipFailedTargetAsync(SwitchJournal journal, IAccountTarget target)
+    {
+        var checkpoint = journal.Checkpoints.Single(value => value.Id == target.Id);
+        // A failed SSH call can have written credentials. Try to restore only this
+        // optional device; an unreachable tablet must not roll back other devices.
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await target.RestoreAsync(checkpoint.Value, deadline.Token);
+            checkpoint.Restored = true;
+            SetTarget(journal, target.Id, "skipped", "전환에 실패해 이 장치만 이전 계정으로 복구하고 건너뛰었습니다.");
+        }
+        catch (Exception)
+        {
+            SetTarget(journal, target.Id, "skipped", "전환과 복구를 확인하지 못해 건너뛰었습니다. 다시 연결한 뒤 현재 계정을 확인해 주세요.");
+        }
+    }
+
+    private static bool MaySkip(SwitchCheckpoint checkpoint, IReadOnlyList<IAccountTarget> targets) =>
+        checkpoint.SkipOnFailure || targets.Any(target => target.Id == checkpoint.Id
+            && target.ConfigurationFingerprint == checkpoint.Fingerprint && target.SkipOnFailure);
 
     public async Task<SwitchOperation?> RecoverAsync(IReadOnlyList<IAccountTarget> targets)
     {
@@ -161,17 +206,25 @@ public sealed class AccountSwitchCoordinator(WindowsPaths paths)
             try
             {
                 if (target is null) throw new CodexSyncBarException("장치 설정이 변경되었거나 삭제되어 자동 복구할 수 없습니다.");
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(MaySkip(checkpoint, targets) ? 10 : 90));
                 await target.RestoreAsync(checkpoint.Value, deadline.Token);
                 checkpoint.Restored = true;
                 SetTarget(journal, checkpoint.Id, "restored");
             }
             catch (Exception)
             {
+                if (MaySkip(checkpoint, targets))
+                {
+                    checkpoint.SkipOnFailure = true;
+                    SetTarget(journal, checkpoint.Id, "skipped", "복구를 확인하지 못해 건너뛰었습니다. 다시 연결한 뒤 현재 계정을 확인해 주세요.");
+                    continue;
+                }
                 errors.Add(checkpoint.Id);
                 SetTarget(journal, checkpoint.Id, "recoveryRequired", "장치 연결 또는 설정을 확인한 후 복구를 다시 시도해 주세요.");
             }
         }
+        var skipped = journal.Operation.Targets.Where(target => target.State == "skipped").Select(target => target.DisplayName).ToArray();
+        if (skipped.Length > 0) reason += $" 건너뜀: {string.Join(", ", skipped)}";
         SetState(journal, errors.Count == 0 ? "failed" : "recoveryRequired",
             errors.Count == 0 ? reason : $"{reason} 복구 확인 필요: {string.Join(", ", errors)}", finished: true);
         if (errors.Count == 0) await ReleaseAsync(journal, targets);

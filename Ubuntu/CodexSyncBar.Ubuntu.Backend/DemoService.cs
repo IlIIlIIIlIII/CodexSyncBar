@@ -25,7 +25,6 @@ public sealed class DemoService : IManagementService
     private bool _failApply;
     private bool _failRecovery;
     private bool _busy;
-    private bool _fiveHour = true;
     private bool _weekly = true;
     private bool _autostart;
     private string? _disabledDevice;
@@ -34,19 +33,18 @@ public sealed class DemoService : IManagementService
 
     public DemoService()
     {
-        DashboardUsage Usage(double session, double week, int credits) => new(
-            new(session, DateTimeOffset.Parse("2026-10-03T07:00:00Z"), 18000),
+        DashboardUsage Usage(double week, int credits) => new(
             new(week, DateTimeOffset.Parse("2026-10-06T00:00:00Z"), 604800), credits,
             [DateTimeOffset.Parse("2026-10-10T00:00:00Z")], DateTimeOffset.Parse("2026-10-03T03:40:00Z"));
         _accounts =
         [
-            new(1, "p***@example.com", "개인 계정", false, false, Usage(38, 54, 1)),
-            new(2, "w***@example.com", "업무 계정", false, false, Usage(28, 42, 3)),
+            new(1, "p***@example.com", "개인 계정", false, false, Usage(54, 1)),
+            new(2, "w***@example.com", "업무 계정", false, false, Usage(42, 3)),
         ];
     }
 
     private string Revision => "demo-" + _revision;
-    private object Settings => new { fiveHour = _fiveHour, codexWeekly = _weekly, launchAtLogin = _autostart, weekly = new { preferences = new { }, records = new { } }, isDemo = true };
+    private object Settings => new { codexWeekly = _weekly, launchAtLogin = _autostart, weekly = new { preferences = new { }, records = new { } }, isDemo = true };
     private string Label(int id) => _accounts.FirstOrDefault(a => a.Id == id)?.Alias ?? "알 수 없음";
     private IReadOnlyList<DeviceView> Devices => new DeviceView[]
     {
@@ -117,7 +115,6 @@ public sealed class DemoService : IManagementService
             case "operation": return _operations.GetValueOrDefault(Wire.Text(p, "operationId")) ?? _operation;
             case "settings.get": return Settings;
             case "settings.save":
-                _fiveHour = Wire.Flag(p, "fiveHour", _fiveHour);
                 _weekly = Wire.Flag(p, "codexWeekly", _weekly);
                 _autostart = Wire.Flag(p, "launchAtLogin", _autostart);
                 return Settings;

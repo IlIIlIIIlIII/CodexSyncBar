@@ -206,12 +206,6 @@
                             <Grid x:Name="UsageMetrics" ColumnSpacing="0" SizeChanged="UsageMetrics_SizeChanged">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="WeeklyMetricColumn" Width="0" /></Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                <StackPanel x:Name="FiveHourRow" Spacing="12" Visibility="Collapsed">
-                                    <TextBlock Text="5시간" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    <TextBlock x:Name="FiveHourValue" Text="—" Style="{StaticResource TitleTextBlockStyle}" />
-                                    <ProgressBar x:Name="FiveHourBar" Maximum="100" Visibility="Collapsed" AutomationProperties.Name="Codex 5시간 잔여 사용량" />
-                                    <TextBlock x:Name="FiveHourResetText" Style="{StaticResource MutedText}" TextWrapping="Wrap" />
-                                </StackPanel>
                                 <StackPanel x:Name="CodexWeeklyRow" Spacing="12">
                                     <TextBlock Text="주간" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                     <TextBlock x:Name="WeeklyValue" Text="—" Style="{StaticResource TitleTextBlockStyle}" />

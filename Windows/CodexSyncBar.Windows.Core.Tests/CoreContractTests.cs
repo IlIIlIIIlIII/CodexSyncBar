@@ -262,7 +262,7 @@ public sealed class CoreContractTests
     }
 
     [Fact]
-    public void UsagePayloadKeepsFiveHourAndWeeklyWindowsSeparated()
+    public void UsagePayloadKeepsOnlyWeeklyQuota()
     {
         var credentials = new ProfileCredentials(
             7,
@@ -301,7 +301,7 @@ public sealed class CoreContractTests
 
         Assert.Equal(7, snapshot.ProfileId);
         Assert.Equal("pro", snapshot.Plan);
-        Assert.Equal(35, snapshot.Session!.UsedPercent);
+        Assert.DoesNotContain("Session", JsonSerializer.Serialize(snapshot), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(80, snapshot.Weekly!.UsedPercent);
         Assert.Equal(2, snapshot.ResetCredits);
         Assert.Equal(12.5, snapshot.CreditBalance);
@@ -501,8 +501,7 @@ public sealed class CoreContractTests
             1,
             account.Email,
             "Pro",
-            new UsageWindow(95, DateTimeOffset.UtcNow.AddHours(1), 3600),
-            null,
+            new UsageWindow(95, DateTimeOffset.UtcNow.AddDays(1), 604800),
             null,
             false,
             null,
@@ -515,28 +514,50 @@ public sealed class CoreContractTests
                 account,
                 snapshot,
                 null,
-                [UsageDisplayItem.FiveHour],
+                [UsageDisplayItem.CodexWeekly],
                 false,
                 false));
 
         account.NeedsLogin = true;
         Assert.Equal(
             "Main 🔒",
-            MenuTitleFormatter.Title(account, snapshot, null, [UsageDisplayItem.FiveHour], false, false));
+            MenuTitleFormatter.Title(account, snapshot, null, [UsageDisplayItem.CodexWeekly], false, false));
     }
 
     [Fact]
-    public void MenuTitleOmitsUnavailableSessionWithoutChangingSelectedItems()
+    public void MenuTitleDistinguishesUnknownWeeklyQuotaFromEmptySelection()
     {
         var account = new AccountProfile { Id = 1, Email = "person@example.invalid", CustomAlias = "Work" };
-        var snapshot = new UsageSnapshot(1, account.Email, "Pro", null,
+        var snapshot = new UsageSnapshot(1, account.Email, "Pro",
             new UsageWindow(60, null, 604800), null, false, 0, [], DateTimeOffset.UtcNow);
-        var items = new[] { UsageDisplayItem.FiveHour, UsageDisplayItem.CodexWeekly };
+        var items = new[] { UsageDisplayItem.CodexWeekly };
         Assert.Equal("Work 40%", MenuTitleFormatter.Title(account, snapshot, null, items, false, false));
-        Assert.Equal(2, items.Length);
-        Assert.Equal("Work", MenuTitleFormatter.Title(account, snapshot, null, [UsageDisplayItem.FiveHour], false, false));
-        Assert.Equal("Work 70% · 40%", MenuTitleFormatter.Title(account,
-            snapshot with { Session = new UsageWindow(30, null, 18000) }, null, items, false, false));
+        Assert.Equal("Work —", MenuTitleFormatter.Title(account, snapshot with { Weekly = null }, null, items, false, false));
+        Assert.Equal("Work", MenuTitleFormatter.Title(account, snapshot, null, [], false, false));
+    }
+
+    [Theory]
+    [InlineData("primary_window")]
+    [InlineData("secondary_window")]
+    public void WeeklyQuotaIsRecognizedInEitherApiSlot(string slot)
+    {
+        var credentials = new ProfileCredentials(1, "access", null, "refresh", "account", "test@example.invalid", null, "unused", false);
+        var json = "{\"rate_limit\":{\"" + slot + "\":{\"used_percent\":25,\"limit_window_seconds\":604800}}}";
+        var snapshot = UsageService.ParseUsagePayload(json, credentials);
+        Assert.Equal(75, snapshot.Weekly!.RemainingPercent);
+    }
+
+    [Theory]
+    [InlineData(18000)]
+    [InlineData(86400)]
+    [InlineData(0)]
+    public void OtherDurationsNeverBecomeWeeklyQuota(int seconds)
+    {
+        var credentials = new ProfileCredentials(1, "access", null, "refresh", "account", "test@example.invalid", null, "unused", false);
+        var json = "{\"rate_limit\":{\"primary_window\":{\"used_percent\":\"ignored\",\"limit_window_seconds\":" + seconds + "}}}";
+        var snapshot = UsageService.ParseUsagePayload(json, credentials);
+        Assert.Null(snapshot.Weekly);
+        Assert.Null(snapshot.MenuRemainingPercent);
     }
 
     [Fact]

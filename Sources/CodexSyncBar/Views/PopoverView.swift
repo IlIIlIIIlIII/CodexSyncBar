@@ -51,23 +51,11 @@ struct PopoverView: View {
     private var visibleUsageMetrics: [UsageQuotaMetric] {
         let preferences = model.usageDisplayPreferences
         var metrics: [UsageQuotaMetric] = []
-        if preferences.isVisible(UsageDisplayItem.fiveHour) {
-            metrics.append(UsageQuotaMetric(
-                item: UsageDisplayItem.fiveHour,
-                window: snapshot?.session,
-                baseTint: AppTheme.cyan))
-        }
         if preferences.isVisible(UsageDisplayItem.codexWeekly) {
             metrics.append(UsageQuotaMetric(
                 item: UsageDisplayItem.codexWeekly,
                 window: snapshot?.weekly,
                 baseTint: AppTheme.cyan))
-        }
-        if preferences.isVisible(UsageDisplayItem.sparkFiveHour) {
-            metrics.append(UsageQuotaMetric(
-                item: UsageDisplayItem.sparkFiveHour,
-                window: snapshot?.sparkSession,
-                baseTint: AppTheme.blue))
         }
         if preferences.isVisible(UsageDisplayItem.sparkWeekly) {
             metrics.append(UsageQuotaMetric(

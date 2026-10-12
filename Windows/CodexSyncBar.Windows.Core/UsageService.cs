@@ -37,7 +37,7 @@ public sealed class UsageService
             credentials,
             cancellationToken);
 
-        var mainWindows = NormalizeWindows(payload.RateLimit);
+        var weekly = ReadWeeklyWindow(payload.RateLimit);
 
         return new UsageSnapshot(
             credentials.ProfileId,
@@ -45,8 +45,7 @@ public sealed class UsageService
             string.IsNullOrWhiteSpace(payload.PlanType)
                 ? "ChatGPT"
                 : CultureInfo.InvariantCulture.TextInfo.ToTitleCase(payload.PlanType.ToLowerInvariant()),
-            mainWindows.Session?.ToModel(),
-            mainWindows.Weekly?.ToModel(),
+            weekly?.ToModel(),
             payload.Credits?.BalanceValue,
             payload.Credits?.Unlimited ?? false,
             resetCredits?.AvailableCount,
@@ -118,14 +117,13 @@ public sealed class UsageService
     {
         var payload = JsonSerializer.Deserialize<UsagePayload>(json, JsonOptions)
             ?? throw new CodexSyncBarException("사용량 응답이 비어 있습니다.");
-        var mainWindows = NormalizeWindows(payload.RateLimit);
+        var weekly = ReadWeeklyWindow(payload.RateLimit);
 
         return new UsageSnapshot(
             credentials.ProfileId,
             credentials.Email,
             string.IsNullOrWhiteSpace(payload.PlanType) ? "ChatGPT" : payload.PlanType,
-            mainWindows.Session?.ToModel(),
-            mainWindows.Weekly?.ToModel(),
+            weekly?.ToModel(),
             payload.Credits?.BalanceValue,
             payload.Credits?.Unlimited ?? false,
             payload.RateLimitResetCredits?.AvailableCount,
@@ -178,36 +176,20 @@ public sealed class UsageService
         }
     }
 
-    private static (WindowPayload? Session, WindowPayload? Weekly) NormalizeWindows(RateLimitPayload? rateLimit)
+    private static WindowPayload? ReadWeeklyWindow(RateLimitPayload? rateLimit)
     {
-        if (rateLimit is null)
+        if (rateLimit is null) return null;
+        // The service may place the weekly quota in either API slot. Only a
+        // seven-day duration is a weekly quota; other windows are ignored.
+        foreach (var window in new[] { rateLimit.PrimaryWindow, rateLimit.SecondaryWindow })
         {
-            return (null, null);
+            if (window.ValueKind == JsonValueKind.Object
+                && window.TryGetProperty("limit_window_seconds", out var duration)
+                && duration.ValueKind == JsonValueKind.Number
+                && duration.TryGetInt32(out var seconds) && seconds == 604800)
+                return window.Deserialize<WindowPayload>(JsonOptions);
         }
-
-        var windows = new[] { rateLimit.PrimaryWindow, rateLimit.SecondaryWindow }
-            .Where(window => window is not null)
-            .Cast<WindowPayload>()
-            .ToArray();
-        if (windows.Length == 0)
-        {
-            return (null, null);
-        }
-
-        if (windows.Length == 1)
-        {
-            return windows[0].LimitWindowSeconds >= 86_400
-                ? (null, windows[0])
-                : (windows[0], null);
-        }
-
-        if (windows.All(window => window.LimitWindowSeconds.HasValue))
-        {
-            var sorted = windows.OrderBy(window => window.LimitWindowSeconds).ToArray();
-            return (sorted[0], sorted[^1]);
-        }
-
-        return (rateLimit.PrimaryWindow, rateLimit.SecondaryWindow);
+        return null;
     }
 
     private sealed class UsagePayload
@@ -228,10 +210,10 @@ public sealed class UsageService
     private sealed class RateLimitPayload
     {
         [JsonPropertyName("primary_window")]
-        public WindowPayload? PrimaryWindow { get; set; }
+        public JsonElement PrimaryWindow { get; set; }
 
         [JsonPropertyName("secondary_window")]
-        public WindowPayload? SecondaryWindow { get; set; }
+        public JsonElement SecondaryWindow { get; set; }
     }
 
     private sealed class WindowPayload

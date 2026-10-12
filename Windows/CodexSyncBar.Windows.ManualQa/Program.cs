@@ -38,7 +38,7 @@ try
     checks["access_only_export_omits_refresh_token"] = string.IsNullOrEmpty(store.CreateAccessOnlyCopy(1).Tokens.RefreshToken);
     var usage = await new UsageService().FetchAsync(credentials, cancellation.Token);
     checks["usage_api_responded"] = usage.UpdatedAt > DateTimeOffset.UtcNow.AddMinutes(-1);
-    checks["usage_has_at_least_one_limit"] = usage.Session is not null || usage.Weekly is not null;
+    checks["usage_has_at_least_one_limit"] = usage.Weekly is not null;
     Console.WriteLine("MANUAL_LOGIN_QA_SUCCEEDED");
     return checks.Values.All(value => value) ? 0 : 1;
 }

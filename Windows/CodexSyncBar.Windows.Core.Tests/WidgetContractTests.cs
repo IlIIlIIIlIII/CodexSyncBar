@@ -13,7 +13,7 @@ public sealed class WidgetContractTests
     {
         ConfigurationRevision = "rev-1", ActiveProfileId = 1,
         Accounts = [new(1, "개인", "p***@example.test", false,
-            new(new(15, DateTimeOffset.UtcNow.AddHours(1), 18000), new(62, null, 604800),
+            new(new(62, DateTimeOffset.UtcNow.AddDays(1), 604800),
                 3, [DateTimeOffset.UtcNow.AddDays(4)], DateTimeOffset.UtcNow)),
             new(2, "업무", "w***@example.test", false)],
         Devices = [new("windows", "Windows", "windows", 1, true), new("wsl:test", "Ubuntu", "wsl", 1, true)],
@@ -80,7 +80,6 @@ public sealed class WidgetContractTests
     {
         using var card = JsonDocument.Parse(WidgetTemplates.Render(Fixture(), true));
         var texts = TextValues(card.RootElement);
-        Assert.Contains("85%", texts);
         Assert.Contains("38%", texts);
         Assert.Contains("3개", texts);
         Assert.Contains("장치 적용 · 2/2 적용됨", texts);
@@ -118,11 +117,10 @@ public sealed class WidgetContractTests
         var fixture = Fixture();
         using var medium = JsonDocument.Parse(WidgetTemplates.Render(fixture, false));
         var texts = TextValues(medium.RootElement);
-        Assert.Contains("85%", texts);
-        Assert.Contains("5시간 남음", texts);
+        Assert.Contains("주간 남음", texts);
         Assert.Contains(texts, text => text.Contains("갱신"));
         Assert.Contains(texts, text => text.Contains("후 초기화"));
-        Assert.Contains(UsageFormatting.QuotaResetDate(fixture.Accounts[0].Usage!.Session!.ResetsAt), texts);
+        Assert.Contains(UsageFormatting.QuotaResetDate(fixture.Accounts[0].Usage!.Weekly!.ResetsAt), texts);
         using var large = JsonDocument.Parse(WidgetTemplates.Render(fixture, true));
         Assert.Contains(TextValues(large.RootElement), text => text.Contains("후 초기화"));
     }
@@ -135,7 +133,6 @@ public sealed class WidgetContractTests
         var old = account with { Usage = account.Usage! with { UpdatedAt = DateTimeOffset.UtcNow.AddDays(-1) } };
         using var card = JsonDocument.Parse(WidgetTemplates.Render(fixture with { Accounts = [old] }, false));
         var texts = TextValues(card.RootElement);
-        Assert.Contains("85%", texts);
         Assert.Contains(texts, text => text.Contains("마지막 확인 값") && text.Contains(old.Usage!.UpdatedAt.ToLocalTime().ToString("MM/dd")));
         Assert.DoesNotContain(texts, text => text.Contains("최신 사용량"));
     }
@@ -145,14 +142,16 @@ public sealed class WidgetContractTests
     {
         var fixture = Fixture();
         var account = fixture.Accounts[0];
-        var absent = account with { Usage = account.Usage! with { Session = null, Weekly = new(double.NaN, null, 604800) } };
+        var absent = account with { Usage = account.Usage! with { Weekly = new(double.NaN, null, 604800) } };
         using var missing = JsonDocument.Parse(WidgetTemplates.Render(fixture with { Accounts = [absent] }, false));
         Assert.Single(TextValues(missing.RootElement), text => text == "—");
         Assert.DoesNotContain("5시간 남음", TextValues(missing.RootElement));
         Assert.DoesNotContain("0%", TextValues(missing.RootElement));
-        var extreme = account with { Usage = account.Usage! with { Session = new(-10, null, 18000), Weekly = new(120, null, 604800) } };
+        var extreme = account with { Usage = account.Usage! with { Weekly = new(120, null, 604800) } };
         using var clamped = JsonDocument.Parse(WidgetTemplates.Render(fixture with { Accounts = [extreme] }, false));
-        Assert.Contains("100%", TextValues(clamped.RootElement));
+        var negative = account with { Usage = account.Usage! with { Weekly = new(-10, null, 604800) } };
+        using var full = JsonDocument.Parse(WidgetTemplates.Render(fixture with { Accounts = [negative] }, false));
+        Assert.Contains("100%", TextValues(full.RootElement));
         Assert.Contains("0%", TextValues(clamped.RootElement));
         Assert.DoesNotContain(Walk(clamped.RootElement), element => element.TryGetProperty("type", out var type)
             && type.GetString() is "ProgressBar" or "Image");
@@ -164,7 +163,7 @@ public sealed class WidgetContractTests
     public void WeeklyOnlyUsesOneFullWidthColumnWithoutFiveHourLabels(bool large)
     {
         var snapshot = Fixture();
-        var account = snapshot.Accounts[0] with { Usage = snapshot.Accounts[0].Usage! with { Session = null } };
+        var account = snapshot.Accounts[0];
         using var card = JsonDocument.Parse(WidgetTemplates.Render(snapshot with { Accounts = [account] }, large));
         var meter = Walk(card.RootElement).Single(e => e.TryGetProperty("type", out var type) && type.GetString() == "ColumnSet"
             && e.GetProperty("columns")[0].GetProperty("items")[0].TryGetProperty("text", out var label) && label.GetString() == "주간 남음");

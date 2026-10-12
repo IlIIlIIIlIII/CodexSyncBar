@@ -300,11 +300,10 @@ public sealed partial class TrayPopoverWindow : Window, IDisposable
         var snapshot = state.Usage;
         var windows = new Dictionary<UsageDisplayItem, UsageWindow?>
         {
-            [UsageDisplayItem.FiveHour] = snapshot?.Session,
             [UsageDisplayItem.CodexWeekly] = snapshot?.Weekly,
         };
         var visible = state.VisibleUsageItems
-            .Where(item => windows.ContainsKey(item) && (item != UsageDisplayItem.FiveHour || snapshot?.Session is not null)).ToArray();
+            .Where(item => windows.ContainsKey(item)).ToArray();
         foreach (var item in visible)
         {
             if (!windows.TryGetValue(item, out var window)) continue;

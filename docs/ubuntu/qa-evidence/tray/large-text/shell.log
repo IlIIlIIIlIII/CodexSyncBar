@@ -1,0 +1,126 @@
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.Daemon' requested by ':1.0' (uid=1000 pid=160794 comm="/usr/bin/gnome-extensions install --print-uuid /tm" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.Daemon'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.Metadata' requested by ':1.0' (uid=1000 pid=160794 comm="/usr/bin/gnome-extensions install --print-uuid /tm" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.Metadata'
+libmutter-Message: 15:55:20.781: Running GNOME Shell (using mutter 50.1) as a Wayland display server
+
+(gnome-shell:160819): libmutter-WARNING **: 15:55:20.781: Unknown experimental feature 'scale-monitor-framebuffer'
+
+(gnome-shell:160819): libmutter-WARNING **: 15:55:20.781: Unknown experimental feature 'xwayland-native-scaling'
+libmutter-Message: 15:55:20.819: Added device '/dev/dri/renderD129' (i915) using no mode setting.
+libmutter-Message: 15:55:20.887: Added device '/dev/dri/renderD128' (nvidia-drm) using no mode setting.
+libmutter-Message: 15:55:20.889: Created gbm renderer for '/dev/dri/renderD129'
+libmutter-Message: 15:55:20.892: Created gbm renderer for '/dev/dri/renderD128'
+libmutter-Message: 15:55:20.892: Boot VGA GPU /dev/dri/renderD129 selected as primary
+** Message: 15:55:20.894: Obtained a high priority EGL context
+libmutter-Message: 15:55:20.905: Added virtual monitor Meta-0
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.a11y.Bus' requested by ':1.5' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.a11y.Bus'
+libmutter-Message: 15:55:20.915: Using public X11 display :4, (using unix:/tmp/.X11-unix/X5 for managed services)
+libmutter-Message: 15:55:20.915: Using Wayland display name 'gnome-shell-test-display'
+dbus-daemon[160893]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160893]: Successfully activated service 'org.a11y.atspi.Registry'
+SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+GNOME Shell-Message: 15:55:21.090: Unset XDG_SESSION_ID, getCurrentSessionProxy() called outside a user session. Asking logind directly.
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.Shell.Screencast' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.Shell.CalendarServer' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.evolution.dataserver.Sources5' requested by ':1.11' (uid=1000 pid=161061 comm="/usr/libexec/gnome-shell-calendar-server" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.OnlineAccounts' requested by ':1.12' (uid=1000 pid=161077 comm="/usr/libexec/evolution-source-registry" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.evolution.dataserver.Sources5'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.evolution.dataserver.Calendar8' requested by ':1.11' (uid=1000 pid=161061 comm="/usr/libexec/gnome-shell-calendar-server" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.Shell.CalendarServer'
+GNOME Shell-Message: 15:55:21.157: Registering session with GDM
+goa-daemon-Message: 15:55:21.165: goa-daemon version 3.58.0 starting
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.Identity' requested by ':1.14' (uid=1000 pid=161087 comm="/usr/libexec/goa-daemon" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.OnlineAccounts'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.Identity'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.evolution.dataserver.Calendar8'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.evolution.dataserver.AddressBook10' requested by ':1.13' (uid=1000 pid=161093 comm="/usr/libexec/evolution-calendar-factory" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.evolution.dataserver.AddressBook10'
+GNOME Shell-Message: 15:55:21.224: Will monitor session 2
+GNOME Shell-Message: 15:55:21.230: Error looking up permission: GDBus.Error:org.freedesktop.portal.Error.NotFound: No entry for geolocation
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.UDisks2VolumeMonitor' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.UDisks2VolumeMonitor'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.AfcVolumeMonitor' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.AfcVolumeMonitor'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.GPhoto2VolumeMonitor' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.GPhoto2VolumeMonitor'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.GoaVolumeMonitor' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.GoaVolumeMonitor'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gtk.vfs.MTPVolumeMonitor' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.portal.IBus' requested by ':1.21' (uid=1000 pid=161524 comm="ibus-daemon --panel disable" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gtk.vfs.MTPVolumeMonitor'
+Not connected to the ibus bus
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activated service 'org.freedesktop.portal.IBus' failed: Process org.freedesktop.portal.IBus exited with status 1
+portal is not running: GDBus.Error:org.freedesktop.DBus.Error.Spawn.ChildExited: Process org.freedesktop.portal.IBus exited with status 1
+GNOME Shell-Message: 15:55:21.291: Failed to register AuthenticationAgent
+
+(gnome-shell:160819): libmutter-WARNING **: 15:55:21.320: Failed to load background 'file:///usr/share/backgrounds/gnome/adwaita-morning.jpg': Error opening file /usr/share/backgrounds/gnome/adwaita-morning.jpg: No such file or directory
+
+(gnome-shell:160819): libmutter-WARNING **: 15:55:21.320: Failed to load background 'file:///usr/share/backgrounds/gnome/adwaita-day.jpg': Error opening file /usr/share/backgrounds/gnome/adwaita-day.jpg: No such file or directory
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.gnome.Shell.Notifications' requested by ':1.4' (uid=1000 pid=160819 comm="/usr/bin/gnome-shell --automation-script /home/sun" label="chatgpt (unconfined)")
+GNOME Shell-Message: 15:55:21.324: GNOME Shell started at Tue Oct 06 2026 15:55:21 GMT+0900 (Korean Standard Time)
+GNOME Shell-Message: 15:55:21.324: Registering display with GDM
+
+(gnome-shell:160819): GnomeDesktop-WARNING **: 15:55:21.332: Could not create transient scope for PID 161701: GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner: Name "org.freedesktop.systemd1" does not exist
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.portal.Desktop' requested by ':1.26' (uid=1000 pid=161701 comm="/usr/libexec/gnome-shell-perf-helper" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.portal.Documents' requested by ':1.27' (uid=1000 pid=161777 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.Shell.Notifications'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.freedesktop.portal.Documents'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.gnome' requested by ':1.27' (uid=1000 pid=161777 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+
+** (xdg-desktop-portal-gnome:161801): WARNING **: 15:55:21.370: GDK backend forced via env var, portal dialogs will not work properly.
+Non-compatible display server, exposing settings only.
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.gnome'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.impl.portal.desktop.gtk' requested by ':1.27' (uid=1000 pid=161777 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+
+(gnome-shell:160819): Gjs-WARNING **: 15:55:21.385: Type GITypeInfo of property NM.Object::client does not match return type GITypeInfo of getter get_client. Falling back to slow path
+** Message: 15:55:21.392: Failed to start camera monitor
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.portal.IBus' requested by ':1.32' (uid=1000 pid=162317 comm="ibus-daemon --panel disable -r --xim" label="chatgpt (unconfined)")
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.desktop.gtk'
+Not connected to the ibus bus
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activated service 'org.freedesktop.portal.IBus' failed: Process org.freedesktop.portal.IBus exited with status 1
+portal is not running: GDBus.Error:org.freedesktop.DBus.Error.Spawn.ChildExited: Process org.freedesktop.portal.IBus exited with status 1
+
+(/usr/libexec/xdg-desktop-portal:161777): xdg-desktop-portal-WARNING **: 15:55:21.578: Failed to connect to PipeWire: Couldn't connect to PipeWire
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Activating service name='org.freedesktop.secrets' requested by ':1.27' (uid=1000 pid=161777 comm="/usr/libexec/xdg-desktop-portal" label="chatgpt (unconfined)")
+** Message: 15:55:21.583: couldn't access control socket: /tmp/syncbar-tray-qa-5qzkp_oj/runtime/keyring/control: No such file or directory
+discover_other_daemon: 0dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.freedesktop.secrets'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.freedesktop.portal.Desktop'
+dbus-daemon[160780]: [session uid=1000 pid=160780 pidfd=5] Successfully activated service 'org.gnome.Shell.Screencast'
+SYNCBAR_PASS extension enabled
+SYNCBAR_PASS native async socket reads accounts
+SYNCBAR_PASS tray opens native popup
+SYNCBAR_PASS switch shows pending synchronously
+SYNCBAR_PASS native button applies account B
+SYNCBAR_PASS tray switch leaves every SSH device unchanged
+SYNCBAR_PASS native button restores account A
+SYNCBAR_PASS refresh invokes weekly usage job
+SYNCBAR_PASS native quota meters have values and visible dimensions
+SYNCBAR_CAPTURE selected-design 743x585
+SYNCBAR_CAPTURE quota-extremes 743x585
+SYNCBAR_PASS active and re-login accounts have no switch button
+SYNCBAR_PASS failed switch stays inline without claiming success
+SYNCBAR_CAPTURE switch-error 743x625
+SYNCBAR_CAPTURE overflow-top 743x585
+SYNCBAR_PASS overflow accounts scroll
+SYNCBAR_CAPTURE overflow-bottom 743x585
+SYNCBAR_PASS footer stays on-screen
+SYNCBAR_CAPTURE empty 743x375
+SYNCBAR_PASS app button routes to launcher
+SYNCBAR_PASS disable removes tray
+SYNCBAR_PASS extension can enable again
+SYNCBAR_COMPLETE
+** Message: 15:55:25.323: Shutting down GNOME Shell
+libmutter-Message: 15:55:25.418: Removed virtual monitor Meta-0
+args: ['python3', '/home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/tests/tray/compositor.py', '/usr/bin/gnome-shell', '--automation-script', '/home/sunggu/Projects/Personal/CodexSyncBar/Ubuntu/tests/tray/scenes.js', '--headless', '--virtual-monitor', '1280x720', '--wayland-display', 'gnome-shell-test-display']
+------------------------------------------------------------
+------------------------------------------------------------
+A connection to the bus can't be made
+gnome-shell-calendar-server[161061]: Lost (or failed to acquire) the name org.gnome.Shell.CalendarServer - exiting
+
+(evolution-addressbook-factory:161127): libedbus-private-WARNING **: 15:55:25.472: Error setting property 'ConnectionStatus' on interface org.gnome.evolution.dataserver.Source: The connection is closed (g-io-error-quark, 18)
+
+(evolution-calendar-factory:161093): libedbus-private-WARNING **: 15:55:25.473: Error setting property 'ConnectionStatus' on interface org.gnome.evolution.dataserver.Source: The connection is closed (g-io-error-quark, 18)

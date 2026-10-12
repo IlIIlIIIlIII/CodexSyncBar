@@ -87,17 +87,15 @@ actor UsageService {
             let text = "\(item.limitName ?? "") \(item.meteredFeature ?? "")".lowercased()
             return text.contains("spark") || text.contains("bengalfox")
         })
-        let mainWindows = payload.rateLimit?.normalizedWindows
-        let sparkWindows = spark?.rateLimit?.normalizedWindows
+        let mainWeekly = payload.rateLimit?.weeklyWindow
+        let sparkWeekly = spark?.rateLimit?.weeklyWindow
 
         return UsageSnapshot(
             profileID: credentials.profileID,
             email: credentials.email,
             plan: payload.planType?.capitalized ?? "ChatGPT",
-            session: mainWindows?.session?.model,
-            weekly: mainWindows?.weekly?.model,
-            sparkSession: sparkWindows?.session?.model,
-            sparkWeekly: sparkWindows?.weekly?.model,
+            weekly: mainWeekly?.model,
+            sparkWeekly: sparkWeekly?.model,
             creditBalance: payload.credits?.balance,
             unlimitedCredits: payload.credits?.unlimited ?? false,
             resetCredits: resetCredits?.availableCount,
@@ -266,24 +264,10 @@ private struct RateLimitPayload: Decodable {
         case secondaryWindow = "secondary_window"
     }
 
-    /// The backend has used both primary/secondary semantics and a single
-    /// duration-labelled window. Map by duration so a seven-day primary window
-    /// is not accidentally presented as the five-hour allowance.
-    var normalizedWindows: (session: WindowPayload?, weekly: WindowPayload?) {
-        let windows = [primaryWindow, secondaryWindow].compactMap { $0 }
-        guard !windows.isEmpty else { return (nil, nil) }
-        if windows.count == 1, let only = windows.first {
-            if let seconds = only.limitWindowSeconds, seconds >= 86_400 {
-                return (nil, only)
-            }
-            return (only, nil)
-        }
-
-        if windows.allSatisfy({ $0.limitWindowSeconds != nil }) {
-            let sorted = windows.sorted { ($0.limitWindowSeconds ?? 0) < ($1.limitWindowSeconds ?? 0) }
-            return (sorted.first, sorted.last)
-        }
-        return (primaryWindow, secondaryWindow)
+    /// Only a seven-day window is a weekly quota, regardless of API slot.
+    var weeklyWindow: WindowPayload? {
+        [primaryWindow, secondaryWindow].compactMap { $0 }
+            .first { $0.limitWindowSeconds == 604800 }
     }
 }
 

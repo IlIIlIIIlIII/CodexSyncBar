@@ -574,6 +574,7 @@ public sealed class SshDeviceService
         public string DisplayName => device.DisplayLabel;
         public string ConfigurationFingerprint => EndpointFingerprint(device);
         public bool IsLocal => false;
+        public bool SkipOnFailure => device.SkipOnSwitchFailure;
 
         public async Task<string> PrepareAsync(int profileId, CancellationToken cancellationToken)
         {

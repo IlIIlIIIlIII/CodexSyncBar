@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "identityUnchanged": true,
+  "activeAccountUnchanged": true,
+  "weeklyPreferencePreserved": true,
+  "accountCount": 6,
+  "weeklyAvailable": 6,
+  "removedFromIpc": true,
+  "cleanedFiles": {
+    "usage-display.json": true,
+    "dashboard-usage.json": true
+  }
+}

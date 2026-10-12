@@ -23,6 +23,9 @@ def verify(package):
             assert (backend / 'Runtime' / name).stat().st_mode & 0o111, name
         assert (root / 'usr/lib/codex-syncbar/ui/codex_syncbar/__main__.py').is_file()
         assert (root / 'usr/lib/codex-syncbar/prepare-session.py').is_file()
+        tray = root / 'usr/share/gnome-shell/extensions/codex-syncbar@griplabs.io'
+        for name in ['metadata.json', 'extension.js', 'client.js', 'model.js', 'stylesheet.css', 'icon.png']:
+            assert (tray / name).is_file(), name
         assert (root / 'usr/bin/codex-syncbar').stat().st_mode & 0o111
         unit = (root / 'usr/lib/systemd/user/codex-syncbar.service').read_text()
         assert '[Install]\n' not in unit

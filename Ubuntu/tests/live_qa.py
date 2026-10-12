@@ -383,7 +383,7 @@ def gtk_apply(args, profile, targets):
         if observed.tzinfo is None or not -60 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 900:
             raise ValueError()
         windows = {}
-        for name in ("session", "weekly"):
+        for name in ("weekly",):
             value = usage["windows"].get(name)
             if value is None:
                 windows[name] = None

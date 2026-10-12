@@ -9,6 +9,7 @@ def main():
     parser.add_argument('--capture', help='이 앱 위젯만 PNG로 캡처하는 QA 모드')
     parser.add_argument('--width', type=int, default=1040)
     parser.add_argument('--height', type=int, default=760)
+    parser.add_argument('--page', choices=['usage', 'switch'], default='usage', help='처음 표시할 페이지')
     parser.add_argument('--scroll-end', action='store_true', help='데모 QA에서 본문 하단 캡처')
     parser.add_argument('--light', action='store_true', help='QA 인스턴스의 밝은 테마')
     parser.add_argument('--profile-id', type=int, help='데모 QA 시작 계정')

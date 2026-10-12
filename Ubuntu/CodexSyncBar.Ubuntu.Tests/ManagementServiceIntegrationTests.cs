@@ -10,6 +10,18 @@ namespace CodexSyncBar.Ubuntu.Tests;
 public sealed class ManagementServiceIntegrationTests
 {
     [Fact]
+    public async Task SettingsAndUsageIpcExposeOnlyWeeklyQuota()
+    {
+        await using var fixture = new Fixture(withRemote: false);
+        var settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
+        Assert.False(settings.TryGetProperty("fiveHour", out _));
+        Assert.True(settings.GetProperty("codexWeekly").GetBoolean());
+        await fixture.Call<object>("settings.save", new { fiveHour = true, codexWeekly = true });
+        settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
+        Assert.False(settings.TryGetProperty("fiveHour", out _));
+    }
+
+    [Fact]
     public async Task UbuntuAccountAndPreviewLabelsUseFullEmailWhenAliasIsAbsent()
     {
         await using var fixture = new Fixture(withRemote: false);
@@ -82,6 +94,65 @@ public sealed class ManagementServiceIntegrationTests
         Assert.Equal(3, result.ProfileId);
         Assert.Equal("fixture-account-1", fixture.Auth.ReadActiveAccountId());
         Assert.DoesNotContain(new ConfigurationStore(fixture.Paths).LoadOrCreate().Accounts, account => account.Id == 3);
+        Assert.False(new WeeklyAnchorStore(fixture.Paths).Load().Preferences.IsEnabled(3));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FirstSuccessfulRegistrationEnablesWeeklyMessagesAndReimportPreservesOptOut(bool existingPending)
+    {
+        await using var fixture = new Fixture(withRemote: false);
+        await fixture.Call<ManagementSnapshot>("snapshot");
+        var weekly = new WeeklyAnchorStore(fixture.Paths);
+        var state = weekly.Load();
+        state.Preferences.SetEnabled(2, true);
+        state.Records[2] = new() { LastSuccessAt = DateTimeOffset.UtcNow.AddDays(-1) };
+        weekly.Save(state);
+        if (existingPending)
+        {
+            var config = new ConfigurationStore(fixture.Paths);
+            Assert.Equal(3, config.ReserveAccount(config.LoadOrCreate()).Id);
+        }
+        var source = Path.Combine(fixture.Paths.LoginSessionsDirectory, "source-3.json");
+        var claims = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            email = "fixture3@example.invalid", exp = DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeSeconds(),
+        })).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        WindowsPathSafety.WritePrivateBytes(source, JsonSerializer.SerializeToUtf8Bytes(new CodexAuthFile
+        {
+            AuthMode = "chatgpt", Tokens = new() { AccountId = "fixture-account-3",
+                AccessToken = "header." + claims + ".signature", IdToken = "header." + claims + ".signature",
+                RefreshToken = "synthetic-refresh-3" },
+        }));
+        var parameters = existingPending ? (object)new { path = source, profileId = 3 } : new { path = source };
+        var result = await fixture.Wait(await fixture.Call<OperationView>("account.import", parameters));
+        Assert.True(result.State == "completed", result.Message);
+        var saved = weekly.Load();
+        Assert.Equal(new[] { 2, 3 }, saved.Preferences.EnabledProfileIds.Order());
+        Assert.Equal(state.Records[2].LastSuccessAt, saved.Records[2].LastSuccessAt);
+        Assert.False(new ConfigurationStore(fixture.Paths).LoadOrCreate().Accounts.Single(a => a.Id == 3).IsPending);
+        var settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
+        Assert.Contains(3, settings.GetProperty("weekly").GetProperty("preferences").GetProperty("enabledProfileIds")
+            .EnumerateArray().Select(id => id.GetInt32()));
+
+        Assert.Equal("completed", (await fixture.Wait(await fixture.Call<OperationView>("weekly.set",
+            new { profileId = 3, enabled = false }))).State);
+        Assert.Equal("completed", (await fixture.Wait(await fixture.Call<OperationView>("account.import",
+            new { path = source, profileId = 3 }))).State);
+        Assert.Equal(new[] { 2 }, weekly.Load().Preferences.EnabledProfileIds);
+        Assert.Equal("fixture-account-1", fixture.Auth.ReadActiveAccountId());
+    }
+
+    [Fact]
+    public async Task FailedImportDoesNotEnableWeeklyMessages()
+    {
+        await using var fixture = new Fixture(withRemote: false);
+        var source = Path.Combine(fixture.Paths.LoginSessionsDirectory, "invalid.json");
+        File.WriteAllText(source, "{}");
+        var result = await fixture.Wait(await fixture.Call<OperationView>("account.import", new { path = source }));
+        Assert.Equal("failed", result.State);
+        Assert.Empty(new WeeklyAnchorStore(fixture.Paths).Load().Preferences.EnabledProfileIds);
     }
 
     private static string Hash(string value) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -158,6 +229,55 @@ public sealed class ManagementServiceIntegrationTests
         Assert.Equal("#!/bin/sh\nexit 91\n", File.ReadAllText(fixture.RemoteHelper));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalOfflineDeviceDoesNotBlockPreviewOrBecomeAStalePreview(bool offlineBeforePreview)
+    {
+        await using var fixture = new Fixture(withRemote: true);
+        var devices = await fixture.Call<List<SshDeviceConfiguration>>("device.list");
+        var device = Assert.Single(devices);
+        device.SkipOnSwitchFailure = true;
+        var saved = await fixture.Call<SshDeviceConfiguration>("device.save", new { device });
+        Assert.True(saved.Enabled);
+        Assert.True(saved.SkipOnSwitchFailure);
+        Assert.True(Assert.Single(new ConfigurationStore(fixture.Paths).LoadOrCreate().Devices).SkipOnSwitchFailure);
+        if (offlineBeforePreview) File.WriteAllText(fixture.Offline, "offline");
+        var preview = await fixture.Call<SwitchPreview>("preview", new { profileId = 2 });
+        Assert.True(preview.CanApply, preview.BlockingReason);
+        var remote = Assert.Single(preview.Targets, target => target.Kind == "ssh");
+        Assert.True(remote.SkipOnSwitchFailure);
+        Assert.Equal(!offlineBeforePreview, remote.IsReachable);
+        File.WriteAllText(fixture.Offline, "offline");
+        var result = await fixture.Apply(preview);
+        Assert.Equal("completed", result.State);
+        Assert.Equal("fixture-account-2", fixture.Auth.ReadActiveAccountId());
+        Assert.Equal("fixture-account-1", fixture.RemoteAccount());
+        Assert.Equal("skipped", result.Targets.Single(target => target.Id == "ssh:fixture").State);
+        Assert.Equal("verified", result.Targets.Single(target => target.Id == "local").State);
+        // A new switch remains available, and required devices still block when offline.
+        Assert.True((await fixture.Call<SwitchPreview>("preview", new { profileId = 1 })).CanApply);
+        device.SkipOnSwitchFailure = false;
+        await fixture.Call<SshDeviceConfiguration>("device.save", new { device });
+        Assert.False((await fixture.Call<SwitchPreview>("preview", new { profileId = 1 })).CanApply);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalVerificationFailureRestoresOnlyRemoteAndLeavesLocalApplied(bool failRestore)
+    {
+        await using var fixture = new Fixture(withRemote: true, optionalRemote: true);
+        File.WriteAllText(fixture.FailVerification, "fail once");
+        if (failRestore) File.WriteAllText(fixture.FailRestore, "reject remote restore");
+        var result = await fixture.Apply(await fixture.Call<SwitchPreview>("preview", new { profileId = 2 }));
+        Assert.Equal("completed", result.State);
+        Assert.Equal("fixture-account-2", fixture.Auth.ReadActiveAccountId());
+        Assert.Equal("fixture-account-" + (failRestore ? 2 : 1), fixture.RemoteAccount());
+        Assert.Equal("skipped", result.Targets.Single(target => target.Id == "ssh:fixture").State);
+        Assert.True((await fixture.Call<SwitchPreview>("preview", new { profileId = 1 })).CanApply);
+    }
+
     [Fact]
     public async Task SingleSshAndLocalPreviewsChangeOnlyTheirExplicitTarget()
     {
@@ -172,6 +292,25 @@ public sealed class ManagementServiceIntegrationTests
         Assert.Equal("completed", (await fixture.Apply(preview)).State);
         Assert.Equal("fixture-account-2", fixture.Auth.ReadActiveAccountId());
         Assert.Equal("fixture-account-2", fixture.RemoteAccount());
+    }
+
+    [Fact]
+    public async Task ForegroundSwitchInterruptsBlockedBackgroundSyncBeforeLockTimeout()
+    {
+        await using var fixture = new Fixture(withRemote: true, blockBackgroundSync: true);
+        var preview = await fixture.Call<SwitchPreview>("preview", new { profileId = 2, deviceId = "local" });
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!File.Exists(fixture.SyncEntered))
+        {
+            Assert.True(DateTime.UtcNow < deadline, "Background sync did not reach the lock-holding phase.");
+            await Task.Delay(25);
+        }
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var result = await fixture.Apply(preview).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("completed", result.State);
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(10));
+        Assert.Equal("fixture-account-2", fixture.Auth.ReadActiveAccountId());
+        Assert.Equal("fixture-account-1", fixture.RemoteAccount());
     }
 
     [Theory]
@@ -256,10 +395,13 @@ public sealed class ManagementServiceIntegrationTests
         public string BlockVerification => Path.Combine(_root, "block-verification");
         public string VerificationEntered => BlockVerification + ".entered";
         public string FailRestore => Path.Combine(_root, "fail-restore");
+        public string Offline => Path.Combine(_root, "offline");
+        public string BlockSync => Path.Combine(_root, "block-sync");
+        public string SyncEntered => BlockSync + ".entered";
         public bool ShutdownRequested => _service.ShutdownRequested;
         public Task StopAsync() => _service.StopAsync();
 
-        public Fixture(bool withRemote, bool mixedCaseEmail = false)
+        public Fixture(bool withRemote, bool mixedCaseEmail = false, bool optionalRemote = false, bool blockBackgroundSync = false)
         {
             Paths = new(Path.Combine(_root, "home"), Path.Combine(_root, "data"), Path.Combine(_root, "runtime"));
             Paths.EnsureDirectories();
@@ -292,9 +434,10 @@ public sealed class ManagementServiceIntegrationTests
             if (withRemote)
             {
                 PrepareRemote();
-                configuration.Devices.Add(new() { Id = "fixture", DisplayName = "시험 서버", Host = "fixture.invalid", Username = "fixture", Authentication = "openSSHConfig", Enabled = true });
+                configuration.Devices.Add(new() { Id = "fixture", DisplayName = "시험 서버", Host = "fixture.invalid", Username = "fixture", Authentication = "openSSHConfig", Enabled = true, SkipOnSwitchFailure = optionalRemote });
             }
             new ConfigurationStore(Paths).Save(configuration);
+            if (blockBackgroundSync) File.WriteAllText(BlockSync, "pause background install-access");
             _service = new(Paths, new UsageService(new HttpClient(new UsageHandler())));
         }
 
@@ -315,7 +458,14 @@ public sealed class ManagementServiceIntegrationTests
                 #!/usr/bin/python3
                 import os, pathlib, shlex, subprocess, sys, time
                 remote = pathlib.Path(os.environ['SYNCBAR_FIXTURE_REMOTE'])
+                if pathlib.Path(os.environ['SYNCBAR_FIXTURE_OFFLINE']).exists():
+                    raise SystemExit(255)
                 command = sys.argv[-1]
+                blocked_sync = pathlib.Path(os.environ['SYNCBAR_FIXTURE_BLOCK_SYNC'])
+                if '__node install-access ' in command and blocked_sync.exists():
+                    pathlib.Path(str(blocked_sync) + '.entered').write_text('background sync entered')
+                    while blocked_sync.exists():
+                        time.sleep(0.025)
                 failure = pathlib.Path(os.environ['SYNCBAR_FIXTURE_FAIL'])
                 blocked = pathlib.Path(os.environ['SYNCBAR_FIXTURE_BLOCK_VERIFY'])
                 if command.endswith('__node verify 2') and blocked.exists():
@@ -357,6 +507,8 @@ public sealed class ManagementServiceIntegrationTests
             SetEnvironment("SYNCBAR_FIXTURE_STREAMED", StreamedStatus);
             SetEnvironment("SYNCBAR_FIXTURE_BLOCK_VERIFY", BlockVerification);
             SetEnvironment("SYNCBAR_FIXTURE_FAIL_RESTORE", FailRestore);
+            SetEnvironment("SYNCBAR_FIXTURE_OFFLINE", Offline);
+            SetEnvironment("SYNCBAR_FIXTURE_BLOCK_SYNC", BlockSync);
         }
         private static void Script(string path, string contents)
         {
@@ -416,7 +568,7 @@ public sealed class ManagementServiceIntegrationTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
             => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000}}}"""),
+                Content = new StringContent("""{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800}}}"""),
             });
     }
 }

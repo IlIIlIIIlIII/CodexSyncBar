@@ -111,7 +111,7 @@ def main():
     if first.get('isDemo') or first.get('isBusy') or first.get('error'):
         raise SystemExit('Production service is not ready for supervised GTK QA.')
     options = SimpleNamespace(socket=args.socket, demo=False, capture=None, width=1040, height=760,
-                              light=False, profile_id=None)
+                              light=False, profile_id=None, page='switch')
     app = SyncBarApplication(options)
     app.set_application_id('io.github.codexsyncbar.Ubuntu.LiveQA')
     app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)
@@ -193,7 +193,7 @@ def main():
                     if not usage or usage.get('error') or not usage.get('updatedAt'):
                         return finish('usage_not_verified', operation)
                     displays = {}
-                    for key, widget in [('session',app.session_quota),('weekly',app.weekly_quota)]:
+                    for key, widget in [('weekly',app.weekly_quota)]:
                         quota = usage.get(key)
                         if widget.get_visible() != bool(quota):
                             return finish('missing_usage_display_mismatch', operation)

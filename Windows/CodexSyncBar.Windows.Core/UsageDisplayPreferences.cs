@@ -5,29 +5,25 @@ namespace CodexSyncBar.Windows.Core;
 
 public enum UsageDisplayItem
 {
-    FiveHour,
-    CodexWeekly,
+    CodexWeekly = 1,
 }
 
 public static class UsageDisplayItemExtensions
 {
     public static string StorageName(this UsageDisplayItem item) => item switch
     {
-        UsageDisplayItem.FiveHour => "fiveHour",
         UsageDisplayItem.CodexWeekly => "codexWeekly",
         _ => throw new ArgumentOutOfRangeException(nameof(item)),
     };
 
     public static string Title(this UsageDisplayItem item) => item switch
     {
-        UsageDisplayItem.FiveHour => "5시간",
         UsageDisplayItem.CodexWeekly => "주간",
         _ => item.ToString(),
     };
 
     public static int? RemainingPercent(this UsageDisplayItem item, UsageSnapshot snapshot) => item switch
     {
-        UsageDisplayItem.FiveHour => snapshot.Session is null ? null : (int)Math.Round(snapshot.Session.RemainingPercent),
         UsageDisplayItem.CodexWeekly => snapshot.Weekly is null ? null : (int)Math.Round(snapshot.Weekly.RemainingPercent),
         _ => null,
     };
@@ -35,7 +31,6 @@ public static class UsageDisplayItemExtensions
 
 public sealed class UsageDisplayPreferences
 {
-    public bool FiveHour { get; set; } = true;
     public bool CodexWeekly { get; set; } = true;
 
     // Preserve unrelated settings written by other app versions while removing
@@ -45,7 +40,6 @@ public sealed class UsageDisplayPreferences
 
     public bool IsVisible(UsageDisplayItem item) => item switch
     {
-        UsageDisplayItem.FiveHour => FiveHour,
         UsageDisplayItem.CodexWeekly => CodexWeekly,
         _ => false,
     };
@@ -54,7 +48,6 @@ public sealed class UsageDisplayPreferences
     {
         switch (item)
         {
-            case UsageDisplayItem.FiveHour: FiveHour = visible; break;
             case UsageDisplayItem.CodexWeekly: CodexWeekly = visible; break;
         }
     }
@@ -62,10 +55,10 @@ public sealed class UsageDisplayPreferences
 
 public sealed class MenuBarUsagePreferences
 {
-    public const int MaximumItemCount = 2;
+    public const int MaximumItemCount = 1;
 
     public List<string> Items { get; set; } =
-        ["fiveHour", "codexWeekly"];
+        ["codexWeekly"];
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? AdditionalSettings { get; set; }
@@ -79,7 +72,6 @@ public sealed class MenuBarUsagePreferences
             {
                 parsed = raw switch
                 {
-                    "fiveHour" => UsageDisplayItem.FiveHour,
                     "codexWeekly" => UsageDisplayItem.CodexWeekly,
                     _ => (UsageDisplayItem)(-1),
                 };
@@ -108,8 +100,8 @@ public sealed class MenuBarUsagePreferences
         if (remaining.Count == Items.Count) return false;
         Items = remaining;
         // An intentional empty selection stays empty. A retired-only selection
-        // receives the two supported defaults so upgrading does not hide usage.
-        if (NormalizedItems().Count == 0) Items.InsertRange(0, ["fiveHour", "codexWeekly"]);
+        // receives the supported default so upgrading does not hide usage.
+        if (NormalizedItems().Count == 0) Items.InsertRange(0, ["codexWeekly"]);
         return true;
     }
 }
@@ -117,7 +109,8 @@ public sealed class MenuBarUsagePreferences
 internal static class RetiredQuotaPreferences
 {
     internal static bool IsRetired(string value) =>
-        string.Equals(value, "sparkFiveHour", StringComparison.OrdinalIgnoreCase)
+        string.Equals(value, "fiveHour", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "sparkFiveHour", StringComparison.OrdinalIgnoreCase)
         || string.Equals(value, "sparkWeekly", StringComparison.OrdinalIgnoreCase);
 
     internal static bool RemoveKeys(Dictionary<string, JsonElement>? settings)

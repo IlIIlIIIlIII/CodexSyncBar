@@ -482,19 +482,9 @@ struct SettingsView: View {
                 SettingsGroupTitle("사용량 표시")
                 VStack(spacing: 0) {
                     usageDisplayToggle(
-                        UsageDisplayItem.fiveHour,
-                        detail: "기본 Codex 단기 한도",
-                        identifier: "usage-display-five-hour-toggle")
-                    Divider().overlay(AppTheme.border)
-                    usageDisplayToggle(
                         UsageDisplayItem.codexWeekly,
                         detail: "기본 Codex 주간 한도",
                         identifier: "usage-display-codex-weekly-toggle")
-                    Divider().overlay(AppTheme.border)
-                    usageDisplayToggle(
-                        UsageDisplayItem.sparkFiveHour,
-                        detail: "Codex Spark 단기 한도",
-                        identifier: "usage-display-spark-five-hour-toggle")
                     Divider().overlay(AppTheme.border)
                     usageDisplayToggle(
                         UsageDisplayItem.sparkWeekly,

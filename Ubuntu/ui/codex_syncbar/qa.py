@@ -28,7 +28,7 @@ def main():
     client.close()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    options = SimpleNamespace(socket=args.socket, demo=True, capture=None, width=args.width, height=args.height, light=False, profile_id=2)
+    options = SimpleNamespace(socket=args.socket, demo=True, capture=None, width=args.width, height=args.height, light=False, profile_id=2, page='usage')
     app = SyncBarApplication(options)
     report = {'kind':'in-process GTK + real demo IPC integration; not native pointer/keyboard E2E', 'checks':[]}
     state = {'step':0,'deadline':time.monotonic()+20}
@@ -51,7 +51,27 @@ def main():
                 assert app.snapshot['activeProfileId'] == 1
                 assert app.selected_id == 2
                 assert all(t['currentProfileId'] == 1 for t in app.preview['targets'] if t['included'])
+                assert app.pages.get_visible_child_name() == 'usage'
+                assert len(app.overview.rows) == len(app.accounts)
+                overview_row = app.overview.rows[2]
+                assert overview_row.grab_focus()
+                app.render_overview()
+                assert app.overview.rows[2] is overview_row
+                record('weekly overview opens by default and preserves rows and keyboard focus across polling')
+                app.overview.list.emit('row-activated', overview_row)
+                assert app.pages.get_visible_child_name() == 'switch'
                 record('selecting an account leaves every active account unchanged')
+                assert app.weekly_quota.get_visible()
+                assert app.weekly_quota.value.get_text() == '58% 남음'
+                quota_widgets = []
+                child = app.quotas.get_first_child()
+                while child is not None:
+                    quota_widgets.append(child)
+                    child = child.get_next_sibling()
+                assert quota_widgets == [app.weekly_quota]
+                assert 'session' not in app.selected()['usage']
+                assert 'fiveHour' not in app.snapshot['settings']
+                record('only the weekly quota reaches the IPC response and rendered account details')
                 # Construct the production dialogs and their actual widgets, not a second demo UI.
                 for name in ['accounts','devices','cli','tokens','settings']:
                     dialog = ManagerDialog(app, name)
@@ -100,6 +120,20 @@ def main():
                 last_row = app.device_list.get_last_child()
                 assert last_row.grab_focus()
                 record('last device row accepts focus and the body scrolls to its end')
+                app.pages.set_visible_child_name('usage')
+                app.render_overview()
+                assert app.overview.rows[1].active.get_visible()
+                assert not app.overview.rows[2].active.get_visible()
+                app.overview.switch.emit('clicked')
+                assert app.pages.get_visible_child_name() == 'switch'
+                app.pages.set_visible_child_name('usage')
+                app.overview.refresh.emit('clicked')
+                assert not app.overview.refresh.get_sensitive()
+                record('overview reflects active-account changes, footer navigates, and refresh disables duplicate clicks')
+                state['step'] = 5
+            elif step == 5 and not app.busy and not app._refresh_requested and app.overview.refresh.get_sensitive():
+                assert app.snapshot['activeProfileId'] == 1
+                record('overview refresh completes through demo IPC without switching accounts')
                 return finish()
             return True
         except Exception as error:

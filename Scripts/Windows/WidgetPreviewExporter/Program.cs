@@ -21,7 +21,7 @@ if (scenario == "stress")
             DisplayName = new string('장', 70),
             Usage = account.Usage is null ? null : account.Usage with
             {
-                Session = new(92, now.AddHours(1), 18000), ResetCredits = 4,
+                ResetCredits = 4,
                 ResetCreditExpirations = [now.AddHours(3).AddMinutes(20), expiry, expiry, now.AddDays(14)],
             },
         }).ToArray(),
@@ -37,7 +37,7 @@ else if (scenario == "error") snapshot = snapshot with
 };
 else if (scenario == "weekly") snapshot = snapshot with { Accounts = snapshot.Accounts.Select(a => a with
 {
-    Usage = a.Usage is null ? null : a.Usage with { Session = null, ResetCredits = 0, ResetCreditExpirations = [] },
+    Usage = a.Usage is null ? null : a.Usage with { ResetCredits = 0, ResetCreditExpirations = [] },
 }).ToArray() };
 else if (scenario is "credits-multiple" or "credits-zero" or "credits-unknown")
     snapshot = snapshot with { Accounts = snapshot.Accounts.Select(a => a with

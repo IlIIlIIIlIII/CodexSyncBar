@@ -30,14 +30,8 @@
                             <Button x:Name="ApplyButton" Content="모든 장치에 적용" Click="ApplyButton_Click" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="DemoApply" />
                             <TextBlock x:Name="UpdatedText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             <Grid ColumnSpacing="20">
-                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition /></Grid.ColumnDefinitions>
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="5시간" />
-                                    <TextBlock x:Name="SessionValue" FontSize="24" FontWeight="SemiBold" Foreground="#67C76B" />
-                                    <ProgressBar x:Name="SessionBar" Maximum="100" Foreground="#67C76B" AutomationProperties.Name="5시간 잔여 사용량" />
-                                    <TextBlock Text="3시간 후 초기화" FontSize="12" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="8">
                                     <TextBlock Text="주간" />
                                     <TextBlock x:Name="WeeklyValue" FontSize="24" FontWeight="SemiBold" Foreground="#60CDFF" />
                                     <ProgressBar x:Name="WeeklyBar" Maximum="100" AutomationProperties.Name="주간 잔여 사용량" />
@@ -76,7 +70,6 @@
                 <StackPanel Spacing="10">
                     <TextBlock Text="시작 및 사용량 표시" FontSize="20" />
                     <CheckBox Content="Windows 로그인 시 자동 시작" />
-                    <CheckBox Content="5시간 사용량 표시" IsChecked="True" />
                     <CheckBox Content="주간 사용량 표시" IsChecked="True" />
                     <TextBlock Text="트레이에 있어도 사용량은 약 5분마다 갱신됩니다." TextWrapping="Wrap" />
                 </StackPanel>
@@ -87,7 +80,6 @@
                     <TextBlock Text="계정별로 켤 수 있으며 기본값은 꺼짐입니다. 주간 한도가 초기화된 후 아직 사용하지 않은 계정에 짧은 확인 메시지를 전송합니다." TextWrapping="Wrap" />
                     <CheckBox Content="개인 계정" />
                     <CheckBox Content="작업용 계정" />
-                    <TextBlock Text="5시간 한도 초기화는 자동 전송 대상이 아닙니다." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
             </Border>
             <TextBlock Text="Windows 위젯 보드에서 ‘Codex 사용량 및 계정’을 추가하면 사용량 확인과 계정 전환을 함께 사용할 수 있습니다." TextWrapping="Wrap" />

@@ -37,6 +37,8 @@ public sealed class SyncBarController : IDisposable
     private DateTimeOffset _lastUsageRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastDeviceRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastMaintenance = DateTimeOffset.MinValue;
+    private CancellationTokenSource? _maintenanceCancellation;
+    private int _maintenancePauses;
     private string? _error;
 
     public SyncBarController(WindowsPaths paths, UsageService? usageService = null)
@@ -74,8 +76,15 @@ public sealed class SyncBarController : IDisposable
             try
             {
                 WindowsPathSafety.EnsureFile(cachePath, "대시보드 사용량 캐시");
-                foreach (var pair in JsonSerializer.Deserialize<Dictionary<int, DashboardUsage>>(File.ReadAllText(cachePath)) ?? [])
+                var cacheJson = File.ReadAllText(cachePath);
+                foreach (var pair in JsonSerializer.Deserialize<Dictionary<int, DashboardUsage>>(cacheJson) ?? [])
                     _usageCache[pair.Key] = pair.Value;
+                using var document = JsonDocument.Parse(cacheJson);
+                if (document.RootElement.EnumerateObject().Any(account =>
+                    account.Value.ValueKind == JsonValueKind.Object && account.Value.EnumerateObject().Any(field =>
+                        field.Name.Equals("Session", StringComparison.OrdinalIgnoreCase)
+                        || field.Name.StartsWith("Spark", StringComparison.OrdinalIgnoreCase))))
+                    SaveCache();
             }
             catch (JsonException) { /* A disposable usage cache must not block recovery. */ }
         }
@@ -91,7 +100,7 @@ public sealed class SyncBarController : IDisposable
         {
             if (_snapshots.TryGetValue(profileId, out var current)) return current;
             if (!_usageCache.TryGetValue(profileId, out var cached) || cached.UpdatedAt == DateTimeOffset.MinValue) return null;
-            return new UsageSnapshot(profileId, "", "Codex", cached.Session, cached.Weekly,
+            return new UsageSnapshot(profileId, "", "Codex", cached.Weekly,
                 null, false, cached.ResetCredits, cached.ResetCreditExpirations, cached.UpdatedAt);
         }
     }
@@ -102,6 +111,28 @@ public sealed class SyncBarController : IDisposable
     }
 
     private string CachePath => Path.Combine(_paths.StateRoot, "dashboard-usage.json");
+
+    /// <summary>Let foreground mutations acquire the lock instead of waiting for every remote profile sync.</summary>
+    public IDisposable PauseBackgroundAuthMaintenance()
+    {
+        lock (_gate)
+        {
+            _maintenancePauses++;
+            _maintenanceCancellation?.Cancel();
+            return new AuthMaintenancePause(this);
+        }
+    }
+
+    private sealed class AuthMaintenancePause(SyncBarController owner) : IDisposable
+    {
+        private SyncBarController? _owner = owner;
+        public void Dispose()
+        {
+            var controller = Interlocked.Exchange(ref _owner, null);
+            if (controller is not null)
+                lock (controller._gate) controller._maintenancePauses--;
+        }
+    }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default, bool recoverStoppedWsl = false)
     {
@@ -237,7 +268,7 @@ public sealed class SyncBarController : IDisposable
                     {
                         _error = "일부 계정 사용량을 갱신하지 못했습니다. 마지막 정상 값을 표시합니다.";
                         var cached = _usageCache.GetValueOrDefault(account.Id)
-                            ?? new DashboardUsage(null, null, null, [], DateTimeOffset.MinValue);
+                            ?? new DashboardUsage(null, null, [], DateTimeOffset.MinValue);
                         _usageCache[account.Id] = cached with { Error = error is AuthenticationRequiredException ? "재로그인이 필요합니다." : "사용량 갱신 실패" };
                     }
                 }
@@ -438,13 +469,25 @@ public sealed class SyncBarController : IDisposable
                 if (DateTimeOffset.UtcNow - _lastMaintenance >= TimeSpan.FromHours(1)) await MaintainAuthAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) { /* Foreground account work takes priority; retry on the next tick. */ }
             catch (Exception) { lock (_gate) _error = "백그라운드 갱신에 실패했습니다. 다음 주기에 다시 시도합니다."; }
         } while (await timer.WaitForNextTickAsync(cancellationToken));
     }
 
     private async Task MaintainAuthAsync(CancellationToken cancellationToken)
     {
-        lock (_gate) { if (_switchRunning || _operation?.State == "recoveryRequired" || _wsl.HasPendingBootstrap) return; }
+        using var maintenanceCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        lock (_gate)
+        {
+            if (_maintenancePauses > 0 || _switchRunning || _operation?.State == "recoveryRequired" || _wsl.HasPendingBootstrap) return;
+            _maintenanceCancellation = maintenanceCancellation;
+        }
+        try { await MaintainAuthCoreAsync(maintenanceCancellation.Token); }
+        finally { lock (_gate) _maintenanceCancellation = null; }
+    }
+
+    private async Task MaintainAuthCoreAsync(CancellationToken cancellationToken)
+    {
         using var mutation = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: cancellationToken);
         EnsureRefreshRecoveryComplete();
         var configuration = _configurationStore.LoadOrCreate();
@@ -508,7 +551,7 @@ public sealed class SyncBarController : IDisposable
         return email[..1] + "***" + email[at..];
     }
 
-    private static DashboardUsage ToDashboardUsage(UsageSnapshot usage) => new(usage.Session, usage.Weekly,
+    private static DashboardUsage ToDashboardUsage(UsageSnapshot usage) => new(usage.Weekly,
         usage.ResetCredits, usage.ResetCreditExpirations, usage.UpdatedAt);
 
     private void SaveCache()

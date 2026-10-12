@@ -29,7 +29,7 @@ public sealed record AccountIdentityHash(int ProfileId, string AccountIdSha256, 
 public sealed record AccountIdentityHashes(IReadOnlyList<AccountIdentityHash> Profiles, string ConfigurationRevision, string CodexHomeSha256);
 public sealed record DeviceView(string Id, string DisplayName, string Kind, bool Enabled, bool IsReachable,
     int? CurrentProfileId, string CurrentAccountLabel, DateTimeOffset? ObservedAt, string Status,
-    string? Detail = null, bool ReconnectionRequired = false);
+    string? Detail = null, bool ReconnectionRequired = false, bool SkipOnSwitchFailure = false);
 public sealed record PreviewTarget(DeviceView Device, int TargetProfileId, string TargetAccountLabel, string Action, bool Included)
 {
     public string Id => Device.Id;
@@ -43,6 +43,7 @@ public sealed record PreviewTarget(DeviceView Device, int TargetProfileId, strin
     public string Status => Device.Status;
     public string? Detail => Device.Detail;
     public bool ReconnectionRequired => Device.ReconnectionRequired;
+    public bool SkipOnSwitchFailure => Device.SkipOnSwitchFailure;
 }
 public sealed record SwitchPreview(string PreviewId, int ProfileId, string ConfigurationRevision,
     DateTimeOffset CreatedAt, bool CanApply, string? BlockingReason, IReadOnlyList<PreviewTarget> Targets);

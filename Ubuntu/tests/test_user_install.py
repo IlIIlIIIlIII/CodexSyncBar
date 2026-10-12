@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+import shutil
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('install_user', ROOT / 'Ubuntu/packaging/install_user.py')
@@ -72,6 +73,18 @@ class UserInstallTests(unittest.TestCase):
         result = self.install()
         self.assertEqual('fixture backend v2', (Path(result['application']) / 'backend/CodexSyncBar.Backend').read_text())
         self.assertEqual('fixture backend v1', (Path(result['previousApplication']) / 'backend/CodexSyncBar.Backend').read_text())
+
+    def test_tray_install_upgrade_and_unmanaged_protection(self):
+        shutil.copytree(ROOT / 'Ubuntu/gnome', self.source / 'gnome')
+        result = self.install()
+        tray = Path(result['trayExtension'])
+        self.assertTrue((tray / 'extension.js').is_file())
+        self.assertTrue((Path(result['application']) / 'gnome/icon.png').is_file())
+        self.install()
+        (tray / '.syncbar-managed').unlink()
+        with self.assertRaisesRegex(RuntimeError, 'unmanaged tray'):
+            self.install()
+        self.assertTrue((tray / 'extension.js').is_file())
 
 
 if __name__ == '__main__':

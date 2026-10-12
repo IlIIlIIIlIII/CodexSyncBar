@@ -44,15 +44,12 @@ public static class MenuTitleFormatter
             return $"{label} — ⏱{(hasDeviceMismatch ? " !" : string.Empty)}";
         }
 
-        var availableItems = selectedItems.Where(item => item != UsageDisplayItem.FiveHour || snapshot.Session is not null).ToArray();
-        if (availableItems.Length == 0)
-            return $"{label}{(hasDeviceMismatch ? " !" : string.Empty)}";
-        var fragments = availableItems
+        var fragments = selectedItems
             .Select(item => item.RemainingPercent(snapshot) is { } remaining
                 ? $"{remaining}%"
                 : "—")
             .ToArray();
-        var needsWarning = availableItems
+        var needsWarning = selectedItems
             .Select(item => item.RemainingPercent(snapshot))
             .OfType<int>()
             .Any(remaining => remaining <= 10);

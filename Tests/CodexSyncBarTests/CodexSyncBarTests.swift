@@ -51,14 +51,14 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(
             fixture.usageStates[2]?.snapshot?.weekly?.remainingPercent,
             42)
-        let sessionReset = try XCTUnwrap(
-            fixture.usageStates[1]?.snapshot?.session?.resetsAt)
+        let weeklyReset = try XCTUnwrap(
+            fixture.usageStates[1]?.snapshot?.weekly?.resetsAt)
         XCTAssertGreaterThanOrEqual(
-            sessionReset.timeIntervalSince(createdAfter),
-            2 * 60 * 60 + 34 * 60)
+            weeklyReset.timeIntervalSince(createdAfter),
+            5 * 24 * 60 * 60 + 4 * 60 * 60 - 60)
         XCTAssertLessThanOrEqual(
-            sessionReset.timeIntervalSince(createdAfter),
-            2 * 60 * 60 + 36 * 60)
+            weeklyReset.timeIntervalSince(createdAfter),
+            5 * 24 * 60 * 60 + 4 * 60 * 60 + 60)
         XCTAssertEqual(fixture.configuredDevices.map(\.displayName), ["작업 서버", "빌드 서버"])
         XCTAssertEqual(fixture.configuredDevices.map(\.host), [
             "workstation.example.net",
@@ -1249,9 +1249,7 @@ final class CodexSyncBarTests: XCTestCase {
             profileID: 2,
             email: "sub@example.com",
             plan: "Pro",
-            session: nil,
             weekly: nil,
-            sparkSession: nil,
             sparkWeekly: nil,
             creditBalance: nil,
             unlimitedCredits: false,
@@ -1310,9 +1308,7 @@ final class CodexSyncBarTests: XCTestCase {
         let profile = AccountProfile(id: 1, email: "first@example.com", alias: "업무")
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         func snapshot(
-            sessionUsed: Double = 20,
             weeklyUsed: Double = 1,
-            sparkSessionUsed: Double? = 40,
             sparkWeeklyUsed: Double = 5,
             updatedAt: Date? = nil) -> UsageSnapshot
         {
@@ -1320,11 +1316,7 @@ final class CodexSyncBarTests: XCTestCase {
                 profileID: 1,
                 email: profile.email,
                 plan: "Pro",
-                session: UsageWindow(usedPercent: sessionUsed, resetsAt: nil, durationSeconds: nil),
                 weekly: UsageWindow(usedPercent: weeklyUsed, resetsAt: nil, durationSeconds: nil),
-                sparkSession: sparkSessionUsed.map {
-                    UsageWindow(usedPercent: $0, resetsAt: nil, durationSeconds: nil)
-                },
                 sparkWeekly: UsageWindow(usedPercent: sparkWeeklyUsed, resetsAt: nil, durationSeconds: nil),
                 creditBalance: nil,
                 unlimitedCredits: false,
@@ -1363,13 +1355,6 @@ final class CodexSyncBarTests: XCTestCase {
             now: now), "업무 !")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
-            state: .loaded(snapshot()),
-            items: [.fiveHour, .sparkFiveHour],
-            isRefreshing: false,
-            hasDeviceMismatch: false,
-            now: now), "업무 80% · 60%")
-        XCTAssertEqual(MenuTitleFormatter.title(
-            profile: profile,
             state: .loaded(snapshot(weeklyUsed: 95)),
             items: [.codexWeekly, .sparkWeekly],
             isRefreshing: false,
@@ -1377,29 +1362,22 @@ final class CodexSyncBarTests: XCTestCase {
             now: now), "⚠ 업무 5% · 95%")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
-            state: .loaded(snapshot(sparkSessionUsed: nil)),
-            items: [.sparkFiveHour, .fiveHour],
-            isRefreshing: false,
-            hasDeviceMismatch: false,
-            now: now), "업무 — · 80%")
-        XCTAssertEqual(MenuTitleFormatter.title(
-            profile: profile,
             state: .loaded(snapshot()),
-            items: [.fiveHour, .codexWeekly],
+            items: [.codexWeekly, .sparkWeekly],
             isRefreshing: false,
             hasDeviceMismatch: true,
-            now: now), "업무 80% · 99% !")
+            now: now), "업무 99% · 95% !")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .idle,
-            items: [.fiveHour, .codexWeekly],
+            items: [.codexWeekly, .sparkWeekly],
             isRefreshing: true,
             hasDeviceMismatch: false,
             now: now), "업무 ···")
         XCTAssertEqual(MenuTitleFormatter.title(
             profile: profile,
             state: .failed(previous: nil, message: "expired", loginRequired: true),
-            items: [.fiveHour, .codexWeekly],
+            items: [.codexWeekly, .sparkWeekly],
             isRefreshing: false,
             hasDeviceMismatch: false,
             now: now), "업무 🔒")
@@ -1426,9 +1404,7 @@ final class CodexSyncBarTests: XCTestCase {
             profileID: 1,
             email: "fixture@example.com",
             plan: "Pro",
-            session: nil,
             weekly: nil,
-            sparkSession: nil,
             sparkWeekly: nil,
             creditBalance: nil,
             unlimitedCredits: false,
@@ -1998,9 +1974,9 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertTrue(popover.contains("accessibilityIdentifier(\"quit-button\")"))
         XCTAssertFalse(popover.contains("sessionForDisplay"))
         XCTAssertTrue(popover.contains("visibleUsageMetrics"))
-        XCTAssertTrue(popover.contains("window: snapshot?.session"))
+        XCTAssertFalse(popover.contains("window: snapshot?.session"))
         XCTAssertTrue(popover.contains("window: snapshot?.weekly"))
-        XCTAssertTrue(popover.contains("window: snapshot?.sparkSession"))
+        XCTAssertFalse(popover.contains("window: snapshot?.sparkSession"))
         XCTAssertTrue(popover.contains("window: snapshot?.sparkWeekly"))
         XCTAssertTrue(popover.contains("QuotaUsageRow("))
         XCTAssertFalse(popover.contains("miniUsage("))
@@ -2031,9 +2007,9 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertTrue(settings.contains("장치 추가"))
         XCTAssertTrue(settings.contains("모두 새로고침"))
         XCTAssertTrue(settings.contains("SettingsGroupTitle(\"사용량 표시\")"))
-        XCTAssertTrue(settings.contains("usage-display-five-hour-toggle"))
+        XCTAssertFalse(settings.contains("usage-display-five-hour-toggle"))
         XCTAssertTrue(settings.contains("usage-display-codex-weekly-toggle"))
-        XCTAssertTrue(settings.contains("usage-display-spark-five-hour-toggle"))
+        XCTAssertFalse(settings.contains("usage-display-spark-five-hour-toggle"))
         XCTAssertTrue(settings.contains("usage-display-spark-weekly-toggle"))
         XCTAssertTrue(settings.contains("SettingsGroupTitle(\"주간 주기 고정\")"))
         XCTAssertTrue(settings.contains("weekly-anchor-toggle-"))
@@ -2213,9 +2189,9 @@ final class CodexSyncBarTests: XCTestCase {
 
         XCTAssertEqual(store.load().items, [.codexWeekly, .sparkWeekly])
 
-        let chosen = MenuBarUsagePreferences(items: [.fiveHour, .sparkFiveHour])
+        let chosen = MenuBarUsagePreferences(items: [.codexWeekly, .sparkWeekly])
         store.save(chosen)
-        XCTAssertEqual(store.load().items, [.fiveHour, .sparkFiveHour])
+        XCTAssertEqual(store.load().items, [.codexWeekly, .sparkWeekly])
 
         store.save(MenuBarUsagePreferences(items: [.sparkWeekly]))
         XCTAssertEqual(store.load().items, [.sparkWeekly])
@@ -2224,22 +2200,22 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertEqual(store.load().items, [])
 
         defaults.set(
-            [UsageDisplayItem.fiveHour.rawValue, "unknown", UsageDisplayItem.fiveHour.rawValue],
+            [UsageDisplayItem.codexWeekly.rawValue, "unknown", UsageDisplayItem.codexWeekly.rawValue],
             forKey: "menuBarUsage.items.v1")
         let repaired = store.load()
-        XCTAssertEqual(repaired.items, [.fiveHour])
+        XCTAssertEqual(repaired.items, [.codexWeekly])
 
         let startingWithNone = MenuBarUsagePreferences(items: [])
         XCTAssertEqual(startingWithNone.settingItemCount(0).items, [])
         XCTAssertEqual(startingWithNone.settingItemCount(1).items, [.codexWeekly])
         XCTAssertEqual(startingWithNone.settingItemCount(2).items, [.codexWeekly, .sparkWeekly])
-        XCTAssertEqual(startingWithNone.item(at: 1, fallback: .sparkFiveHour), .sparkFiveHour)
+        XCTAssertEqual(startingWithNone.item(at: 1, fallback: .sparkWeekly), .sparkWeekly)
 
-        let startingWithOne = MenuBarUsagePreferences(items: [.fiveHour])
+        let startingWithOne = MenuBarUsagePreferences(items: [.codexWeekly])
         XCTAssertEqual(startingWithOne.settingItemCount(0).items, [])
-        XCTAssertEqual(startingWithOne.settingItemCount(1).items, [.fiveHour])
-        XCTAssertEqual(startingWithOne.settingItemCount(2).items, [.fiveHour, .codexWeekly])
-        XCTAssertEqual(startingWithOne.item(at: 0, fallback: .sparkFiveHour), .fiveHour)
+        XCTAssertEqual(startingWithOne.settingItemCount(1).items, [.codexWeekly])
+        XCTAssertEqual(startingWithOne.settingItemCount(2).items, [.codexWeekly, .sparkWeekly])
+        XCTAssertEqual(startingWithOne.item(at: 0, fallback: .sparkWeekly), .codexWeekly)
 
         XCTAssertEqual(
             MenuBarUsagePreferences(items: [.codexWeekly, .sparkWeekly])
@@ -2247,7 +2223,7 @@ final class CodexSyncBarTests: XCTestCase {
             [.sparkWeekly, .codexWeekly])
     }
 
-    func testUsageDisplaySettingsDriveFourSharedQuotaBarsAndUpToTwoMenuItems() throws {
+    func testUsageDisplaySettingsDriveOnlyWeeklyQuotaBarsAndUpToTwoMenuItems() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -2258,19 +2234,19 @@ final class CodexSyncBarTests: XCTestCase {
             .appendingPathComponent("Sources/CodexSyncBar/Views/SettingsView.swift"), encoding: .utf8)
 
         XCTAssertTrue(popover.contains("QuotaUsageRow("))
-        XCTAssertTrue(popover.contains("UsageDisplayItem.fiveHour"))
+        XCTAssertFalse(popover.contains("UsageDisplayItem.fiveHour"))
         XCTAssertTrue(popover.contains("UsageDisplayItem.codexWeekly"))
-        XCTAssertTrue(popover.contains("UsageDisplayItem.sparkFiveHour"))
+        XCTAssertFalse(popover.contains("UsageDisplayItem.sparkFiveHour"))
         XCTAssertTrue(popover.contains("UsageDisplayItem.sparkWeekly"))
-        XCTAssertTrue(popover.contains("window: snapshot?.session"))
+        XCTAssertFalse(popover.contains("window: snapshot?.session"))
         XCTAssertTrue(popover.contains("window: snapshot?.weekly"))
-        XCTAssertTrue(popover.contains("window: snapshot?.sparkSession"))
+        XCTAssertFalse(popover.contains("window: snapshot?.sparkSession"))
         XCTAssertTrue(popover.contains("window: snapshot?.sparkWeekly"))
         XCTAssertFalse(popover.contains("miniUsage("))
         XCTAssertTrue(settings.contains("SettingsGroupTitle(\"사용량 표시\")"))
-        XCTAssertTrue(settings.contains("usage-display-five-hour-toggle"))
+        XCTAssertFalse(settings.contains("usage-display-five-hour-toggle"))
         XCTAssertTrue(settings.contains("usage-display-codex-weekly-toggle"))
-        XCTAssertTrue(settings.contains("usage-display-spark-five-hour-toggle"))
+        XCTAssertFalse(settings.contains("usage-display-spark-five-hour-toggle"))
         XCTAssertTrue(settings.contains("usage-display-spark-weekly-toggle"))
         XCTAssertTrue(settings.contains("SettingsGroupTitle(\"상단 메뉴바\")"))
         XCTAssertTrue(settings.contains("menu-bar-item-count-picker"))

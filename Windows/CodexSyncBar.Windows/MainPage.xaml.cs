@@ -453,7 +453,6 @@ public sealed partial class MainPage : Page
             if (_lastUsageSnapshot is { } snapshot && snapshot.ProfileId == _selectedProfileId)
             {
                 RenderResetCredits(snapshot);
-                RenderQuota(snapshot.Session, FiveHourBar, FiveHourValue, FiveHourResetText);
                 RenderQuota(snapshot.Weekly, WeeklyBar, WeeklyValue, WeeklyResetText);
                 NotifyTrayStateChanged();
             }
@@ -850,26 +849,19 @@ public sealed partial class MainPage : Page
 
     private void UpdateQuotaLayout()
     {
-        var showSession = FiveHourRow.Visibility == Visibility.Visible;
-        var showWeekly = CodexWeeklyRow.Visibility == Visibility.Visible;
-        var paired = showSession && showWeekly && UsageMetrics.ActualWidth >= 520;
-        UsageMetrics.Visibility = showSession || showWeekly ? Visibility.Visible : Visibility.Collapsed;
-        WeeklyMetricColumn.Width = paired ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        UsageMetrics.ColumnSpacing = paired ? 24 : 0;
-        Grid.SetColumn(CodexWeeklyRow, paired ? 1 : 0);
-        Grid.SetRow(CodexWeeklyRow, showSession && !paired ? 1 : 0);
-        CodexWeeklyRow.Margin = showSession && !paired ? new Thickness(0, 24, 0, 0) : new Thickness(0);
+        UsageMetrics.Visibility = CodexWeeklyRow.Visibility;
+        WeeklyMetricColumn.Width = new GridLength(0);
+        UsageMetrics.ColumnSpacing = 0;
+        Grid.SetColumn(CodexWeeklyRow, 0);
+        Grid.SetRow(CodexWeeklyRow, 0);
+        CodexWeeklyRow.Margin = new Thickness(0);
     }
 
     private void RenderUsage(UsageSnapshot snapshot)
     {
-        FiveHourRow.Visibility = snapshot.Session is not null && _usageDisplayPreferences.IsVisible(UsageDisplayItem.FiveHour)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
         CodexWeeklyRow.Visibility = _usageDisplayPreferences.IsVisible(UsageDisplayItem.CodexWeekly)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        RenderQuota(snapshot.Session, FiveHourBar, FiveHourValue, FiveHourResetText);
         RenderQuota(snapshot.Weekly, WeeklyBar, WeeklyValue, WeeklyResetText);
         UpdateQuotaLayout();
 
@@ -990,22 +982,21 @@ public sealed partial class MainPage : Page
     private void ResetUsageView()
     {
         _lastUsageSnapshot = null;
-        foreach (var bar in new[] { FiveHourBar, WeeklyBar })
+        foreach (var bar in new[] { WeeklyBar })
         {
             bar.Value = 0;
             bar.Opacity = 0.25;
             bar.Visibility = Visibility.Collapsed;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(bar, "한도 정보 없음");
         }
-        foreach (var text in new[] { FiveHourValue, WeeklyValue })
+        foreach (var text in new[] { WeeklyValue })
         {
             text.Text = "—";
         }
-        foreach (var text in new[] { FiveHourResetText, WeeklyResetText })
+        foreach (var text in new[] { WeeklyResetText })
         {
             text.Text = string.Empty;
         }
-        FiveHourRow.Visibility = Visibility.Collapsed;
         CodexWeeklyRow.Visibility = _usageDisplayPreferences.IsVisible(UsageDisplayItem.CodexWeekly)
             ? Visibility.Visible : Visibility.Collapsed;
         UpdateQuotaLayout();
@@ -2398,7 +2389,6 @@ public sealed partial class MainPage : Page
             var selected = menuItems.ToList();
             foreach (var item in new[]
                      {
-                         UsageDisplayItem.FiveHour,
                          UsageDisplayItem.CodexWeekly,
                      }.Concat(Enum.GetValues<UsageDisplayItem>()))
             {

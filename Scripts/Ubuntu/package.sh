@@ -14,12 +14,14 @@ mkdir -p "$stage/DEBIAN" "$stage/usr/lib/codex-syncbar" "$stage/usr/bin" \
     "$stage/usr/share/applications" "$stage/usr/lib/systemd/user" \
     "$stage/usr/share/icons/hicolor/256x256/apps" "$stage/usr/share/doc/codex-syncbar"
 cp -a "$SYNCBAR_OUTPUT/backend" "$SYNCBAR_OUTPUT/ui" "$stage/usr/lib/codex-syncbar/"
+mkdir -p "$stage/usr/share/gnome-shell/extensions/codex-syncbar@griplabs.io"
+cp -a "$SYNCBAR_OUTPUT/gnome/." "$stage/usr/share/gnome-shell/extensions/codex-syncbar@griplabs.io/"
 install -m 755 "$SYNCBAR_OUTPUT/prepare-session.py" "$stage/usr/lib/codex-syncbar/prepare-session.py"
 find "$stage" -type d -name __pycache__ -prune -exec rm -rf {} +
 install -m 755 "$SYNCBAR_REPO/Ubuntu/packaging/codex-syncbar" "$stage/usr/bin/codex-syncbar"
 install -m 644 "$SYNCBAR_REPO/Ubuntu/packaging/codex-syncbar.desktop" "$stage/usr/share/applications/io.github.codexsyncbar.Ubuntu.desktop"
 install -m 644 "$SYNCBAR_REPO/Ubuntu/packaging/codex-syncbar.service" "$stage/usr/lib/systemd/user/"
-install -m 644 "$SYNCBAR_REPO/Resources/AppIcon.png" "$stage/usr/share/icons/hicolor/256x256/apps/codex-syncbar.png"
+install -m 644 "$SYNCBAR_REPO/Ubuntu/resources/codex-syncbar.png" "$stage/usr/share/icons/hicolor/256x256/apps/codex-syncbar.png"
 cat >"$stage/DEBIAN/control" <<EOF
 Package: codex-syncbar
 Version: $version
@@ -37,6 +39,8 @@ Built for Ubuntu 26.04 amd64 with GTK 4 and libadwaita.
 Launch Codex SyncBar from the applications menu or run codex-syncbar.
 The backend user service starts only when the application is explicitly opened.
 No login autostart is installed or enabled by this package.
+On GNOME 50, enable codex-syncbar@griplabs.io in Extensions after logging in again
+to use the weekly-usage tray popup. Opening it starts the backend on demand.
 codex-syncbar --demo runs a separate synthetic demo without the real service.
 Removal leaves account, browser and configuration data intact.
 EOF

@@ -102,9 +102,6 @@ public static class WidgetTemplates
     private static JsonObject Meters(DashboardUsage? usage, bool large)
     {
         var columns = new JsonArray();
-        // A missing five-hour window means the API did not report that limit;
-        // do not imply a second quota exists by drawing an empty placeholder.
-        if (usage?.Session is { } session) columns.Add(Meter("5시간 남음", session, large));
         columns.Add(Meter("주간 남음", usage?.Weekly, large, "Accent"));
         return new JsonObject { ["type"] = "ColumnSet", ["spacing"] = "Small", ["columns"] = columns };
     }
