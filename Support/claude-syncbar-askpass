@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set +x
+set -euo pipefail
+
+credential_id="${CLAUDE_SYNCBAR_CREDENTIAL_ID:-${CLAUDE_SYNCBAR_DEVICE_ID:-}}"
+secret_kind="${CLAUDE_SYNCBAR_SECRET_KIND:-}"
+security_bin="${CLAUDE_SYNCBAR_SECURITY_BIN:-/usr/bin/security}"
+
+case "$credential_id" in ''|*[!A-Za-z0-9-]*|-*) exit 1 ;; esac
+case "$secret_kind" in password|passphrase) ;; *) exit 1 ;; esac
+
+exec "$security_bin" find-generic-password \
+  -s com.sunggu.claudesyncbar.ssh \
+  -a "$credential_id.$secret_kind" \
+  -w

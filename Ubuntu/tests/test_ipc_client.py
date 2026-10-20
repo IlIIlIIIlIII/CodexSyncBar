@@ -13,7 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'Ubuntu/ui'))
-from codex_syncbar.ipc import Client, ServiceError
+from claude_syncbar.ipc import Client, ServiceError
 
 
 class ReplyServer:
@@ -104,12 +104,12 @@ class LauncherContractTests(unittest.TestCase):
             shutil.copy2(ROOT / 'Ubuntu/packaging/prepare_session.py', root / 'prepare-session.py')
             environment = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
                                SYNCBAR_SYSTEMCTL_LOG=str(log), SYNCBAR_APP_DIR=str(root), XDG_RUNTIME_DIR=str(root),
-                               CODEX_HOME=str(root / 'synthetic-codex'))
+                               CLAUDE_CONFIG_DIR=str(root / 'synthetic-claude'))
             environment.pop('SYNCBAR_DEV', None)
-            result = subprocess.run(['bash', str(ROOT / 'Ubuntu/packaging/codex-syncbar'), '--background'],
+            result = subprocess.run(['bash', str(ROOT / 'Ubuntu/packaging/claude-syncbar'), '--background'],
                                     env=environment, capture_output=True, text=True, timeout=5)
             self.assertEqual(0, result.returncode, result.stderr)
-            self.assertEqual('--user start codex-syncbar.service', log.read_text().strip())
+            self.assertEqual('--user start claude-syncbar.service', log.read_text().strip())
 
 
 if __name__ == '__main__':

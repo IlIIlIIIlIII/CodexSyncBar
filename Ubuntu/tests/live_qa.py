@@ -5,7 +5,7 @@ Run from a supervisor that survives Codex desktop restart. --expected is JSON ke
 by registered profile ID, each containing accountIdSha256 and emailSha256. Obtain
 these hashes from the canonical credentials independently before running this test.
 Only --execute permits service apply. The evidence journal contains hashes only.
-Execution requires a separate systemd user unit named codex-syncbar-live-qa-*.service.
+Execution requires a separate systemd user unit named claude-syncbar-live-qa-*.service.
 The baseline is taken after provisioning; this tool does not restore bootstrap changes
 or original token bytes, and never performs bootstrap itself.
 """
@@ -64,7 +64,7 @@ def safe_gtk_diagnostics(response):
 
 def ensure_independent_supervisor(cgroup_path="/proc/self/cgroup"):
     groups = Path(cgroup_path).read_text()
-    match = re.search(r"/(codex-syncbar-live-qa-[A-Za-z0-9_.-]+\.service)(?:/|$)", groups, re.MULTILINE)
+    match = re.search(r"/(claude-syncbar-live-qa-[A-Za-z0-9_.-]+\.service)(?:/|$)", groups, re.MULTILINE)
     if not match:
         raise Failure("execute_requires_dedicated_systemd_user_service")
     return match.group(1)
@@ -227,7 +227,7 @@ def run():
     tokens = auth.get("tokens") or {}
     if auth.get("auth_mode") != "chatgpt" or auth.get("OPENAI_API_KEY") or not tokens.get("account_id"):
         raise RuntimeError()
-    if os.environ.get("CODEX_SYNCBAR_QA_ACCESS_ONLY")=="1" and tokens.get("refresh_token"):
+    if os.environ.get("CLAUDE_SYNCBAR_QA_ACCESS_ONLY")=="1" and tokens.get("refresh_token"):
         raise ProbeFailure("remote_baseline_contains_refresh_token")
     cli = shutil.which("codex")
     if not cli and pathlib.Path("/usr/lib/chatgpt/resources/codex").is_file():
@@ -322,7 +322,7 @@ def probe(target, devices, codex_home):
     environment = dict(os.environ)
     environment["CODEX_HOME"] = codex_home
     command = ["/usr/bin/python3", "-I", "-c", PROBE] if target == "local" else ssh_command(devices[target[4:]])
-    remote_probe = 'import os; os.environ["CODEX_SYNCBAR_QA_ACCESS_ONLY"]="1"\n' + PROBE
+    remote_probe = 'import os; os.environ["CLAUDE_SYNCBAR_QA_ACCESS_ONLY"]="1"\n' + PROBE
     result = subprocess.run(command, input=None if target == "local" else remote_probe.encode(), env=environment,
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=100)
     try:

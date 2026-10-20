@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ui'))
-from codex_syncbar.ssh_config import list_hosts, device_from_host
+from claude_syncbar.ssh_config import list_hosts, device_from_host
 
 
 class SshConfigTests(unittest.TestCase):
@@ -42,13 +42,13 @@ class SshConfigTests(unittest.TestCase):
             self.assertNotIn('id', draft)
 
     def test_options_cannot_be_host(self):
-        with patch('codex_syncbar.ssh_config.subprocess.run') as run:
+        with patch('claude_syncbar.ssh_config.subprocess.run') as run:
             with self.assertRaises(ValueError):
                 device_from_host('-oProxyCommand=bad')
             run.assert_not_called()
 
     def test_failed_resolution_has_actionable_error(self):
-        with patch('codex_syncbar.ssh_config.subprocess.run', side_effect=OSError):
+        with patch('claude_syncbar.ssh_config.subprocess.run', side_effect=OSError):
             with self.assertRaisesRegex(ValueError, 'OpenSSH'):
                 device_from_host('example')
 

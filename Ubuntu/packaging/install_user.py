@@ -11,8 +11,8 @@ import tempfile
 import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
-MARKER = 'Codex SyncBar managed'
-TRAY_UUID = 'codex-syncbar@griplabs.io'
+MARKER = 'Claude SyncBar managed'
+TRAY_UUID = 'claude-syncbar@griplabs.io'
 
 
 def systemd_quote(value):
@@ -51,14 +51,14 @@ def write_managed(path, text, mode):
 def install(source, user_root, node=None, reload=True):
     source = source.resolve(strict=True)
     user_root = user_root.absolute()
-    executable = source / 'backend/CodexSyncBar.Backend'
-    if not executable.is_file() or not (source / 'ui/codex_syncbar/__main__.py').is_file():
+    executable = source / 'backend/ClaudeSyncBar.Backend'
+    if not executable.is_file() or not (source / 'ui/claude_syncbar/__main__.py').is_file():
         raise RuntimeError('Build the Ubuntu application before installing it.')
-    app = user_root / '.local/share/codex-syncbar/app'
-    launcher = user_root / '.local/bin/codex-syncbar'
-    desktop = user_root / '.local/share/applications/io.github.codexsyncbar.Ubuntu.desktop'
-    unit = user_root / '.config/systemd/user/codex-syncbar.service'
-    icon = user_root / '.local/share/icons/hicolor/256x256/apps/codex-syncbar.png'
+    app = user_root / '.local/share/claude-syncbar/app'
+    launcher = user_root / '.local/bin/claude-syncbar'
+    desktop = user_root / '.local/share/applications/io.github.claudesyncbar.Ubuntu.desktop'
+    unit = user_root / '.config/systemd/user/claude-syncbar.service'
+    icon = user_root / '.local/share/icons/hicolor/256x256/apps/claude-syncbar.png'
     tray = user_root / '.local/share/gnome-shell/extensions' / TRAY_UUID
     has_tray = (source / 'gnome/metadata.json').is_file()
     for destination in (app, launcher, desktop, unit, icon, tray):
@@ -86,7 +86,7 @@ def install(source, user_root, node=None, reload=True):
         shutil.copytree(source / 'ui', stage / 'ui', ignore=shutil.ignore_patterns('__pycache__'))
         if has_tray:
             shutil.copytree(source / 'gnome', stage / 'gnome')
-        shutil.copy2(ROOT / 'Ubuntu/packaging/codex-syncbar', stage / 'launch')
+        shutil.copy2(ROOT / 'Ubuntu/packaging/claude-syncbar', stage / 'launch')
         shutil.copy2(ROOT / 'Ubuntu/packaging/prepare_session.py', stage / 'prepare-session.py')
         (stage / 'launch').chmod(0o755)
         if node:
@@ -110,18 +110,18 @@ def install(source, user_root, node=None, reload=True):
                          + 'export PATH=' + shlex.quote(runtime_path) + ':"$PATH"\n'
                          + 'exec /bin/bash ' + shlex.quote(str(app / 'launch')) + ' "$@"\n')
         write_managed(launcher, launcher_text, 0o755)
-        desktop_text = (ROOT / 'Ubuntu/packaging/codex-syncbar.desktop').read_text()
-        desktop_text = desktop_text.replace('Exec=codex-syncbar', 'Exec=' + desktop_quote(launcher))
+        desktop_text = (ROOT / 'Ubuntu/packaging/claude-syncbar.desktop').read_text()
+        desktop_text = desktop_text.replace('Exec=claude-syncbar', 'Exec=' + desktop_quote(launcher))
         write_managed(desktop, '# ' + MARKER + ' desktop entry\n' + desktop_text, 0o644)
-        unit_text = ('# ' + MARKER + ' user unit\n[Unit]\nDescription=Codex SyncBar account controller\n'
+        unit_text = ('# ' + MARKER + ' user unit\n[Unit]\nDescription=Claude SyncBar account controller\n'
                      'After=graphical-session.target\n\n[Service]\nType=simple\n'
-                     'ExecStart=' + systemd_quote(app / 'backend/CodexSyncBar.Backend') + '\n'
-                     'EnvironmentFile=-%t/codex-syncbar/session.env\n'
+                     'ExecStart=' + systemd_quote(app / 'backend/ClaudeSyncBar.Backend') + '\n'
+                     'EnvironmentFile=-%t/claude-syncbar/session.env\n'
                      'Environment=' + systemd_quote('PATH=' + runtime_path) + '\n'
                      'Restart=on-failure\nRestartSec=3\nTimeoutStopSec=5min\nUMask=0077\n')
         write_managed(unit, unit_text, 0o644)
         private_parents(icon.parent)
-        shutil.copy2(ROOT / 'Ubuntu/resources/codex-syncbar.png', icon)
+        shutil.copy2(ROOT / 'Ubuntu/resources/claude-syncbar.png', icon)
         if has_tray:
             private_parents(tray.parent)
             tray_stage = Path(tempfile.mkdtemp(prefix='.syncbar-tray-', dir=app.parent))

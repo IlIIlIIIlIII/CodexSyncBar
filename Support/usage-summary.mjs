@@ -2,28 +2,31 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 import crypto from "node:crypto";
 
 const SCHEMA_VERSION = 6;
 const ROLLING_WINDOW_DAYS = 30;
 const ROLLING_WINDOW_MS = ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+// Some models bill a prompt above this size on a higher rate card.
+const LONG_CONTEXT_TOKENS = 100_000;
 const TOKEN_KEYS = [
   "inputTokens",
   "cachedInputTokens",
   "cacheWriteInputTokens",
+  "cacheWriteOneHourInputTokens",
   "outputTokens",
   "reasoningOutputTokens",
   "totalTokens",
 ];
-const sessionsRoot = path.resolve(process.argv[2] ?? path.join(process.env.HOME ?? "", ".codex/sessions"));
-const cachePath = path.resolve(process.argv[3] ?? path.join(process.env.HOME ?? "", ".local/share/gpt-switch/usage-cache.json"));
+const transcriptsRoot = path.resolve(process.argv[2] ?? path.join(process.env.HOME ?? "", ".claude/projects"));
+const cachePath = path.resolve(process.argv[3] ?? path.join(process.env.HOME ?? "", ".local/share/claude-switch/usage-cache.json"));
 
 function emptyTokens() {
   return {
     inputTokens: 0,
     cachedInputTokens: 0,
     cacheWriteInputTokens: 0,
+    cacheWriteOneHourInputTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
     totalTokens: 0,
@@ -34,126 +37,61 @@ function safeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-function tokensFrom(value) {
+// Claude reports uncached, cache-read and cache-write prompt tokens apart.
+// The summary's inputTokens is the whole prompt, with the cached parts as
+// subsets of it, which is what the cost estimate expects. Cache writes kept
+// for an hour cost more than the default five minutes, so they are split out.
+function tokensFrom(usage) {
+  const cached = safeInteger(usage?.cache_read_input_tokens);
+  const cacheWrite = safeInteger(usage?.cache_creation_input_tokens);
+  const input = safeInteger(usage?.input_tokens) + cached + cacheWrite;
+  const output = safeInteger(usage?.output_tokens);
   return {
-    inputTokens: safeInteger(value?.input_tokens),
-    cachedInputTokens: safeInteger(value?.cached_input_tokens),
-    cacheWriteInputTokens: safeInteger(value?.cache_write_input_tokens),
-    outputTokens: safeInteger(value?.output_tokens),
-    reasoningOutputTokens: safeInteger(value?.reasoning_output_tokens),
-    totalTokens: safeInteger(value?.total_tokens),
+    inputTokens: input,
+    cachedInputTokens: cached,
+    cacheWriteInputTokens: cacheWrite,
+    cacheWriteOneHourInputTokens: Math.min(cacheWrite, safeInteger(usage?.cache_creation?.ephemeral_1h_input_tokens)),
+    outputTokens: output,
+    reasoningOutputTokens: Math.min(output, safeInteger(usage?.output_tokens_details?.thinking_tokens)),
+    totalTokens: input + output,
   };
 }
 
 function addTokens(target, value) {
-  for (const key of TOKEN_KEYS) target[key] += value[key];
+  for (const key of TOKEN_KEYS) target[key] += safeInteger(value[key]);
 }
 
-function deltaTokens(current, previous) {
-  const delta = emptyTokens();
-  let reset = false;
-  for (const key of Object.keys(delta)) {
-    if (current[key] < previous[key]) reset = true;
-  }
-  for (const key of Object.keys(delta)) {
-    delta[key] = reset ? current[key] : current[key] - previous[key];
-  }
-  return delta;
+function serviceTierFrom(usage) {
+  if (usage?.speed === "fast") return "fast";
+  const tier = usage?.service_tier;
+  return typeof tier === "string" && tier && tier !== "standard" ? tier : "default";
 }
 
-function tokenFingerprint(current, last) {
-  // Token events do not expose a stable ID. Hash every field from both counters;
-  // matching is still restricted to a child's direct-parent replay below.
-  const serialized = [...TOKEN_KEYS.map((key) => current[key]), ...TOKEN_KEYS.map((key) => last[key])].join(":");
-  return crypto.createHash("sha256").update(serialized).digest().subarray(0, 12).toString("base64url");
+function responseKey(event) {
+  const id = event.message?.id;
+  if (typeof id !== "string" || !id) return null;
+  const request = typeof event.requestId === "string" ? event.requestId : "";
+  return crypto.createHash("sha256").update(`${id}\u001f${request}`).digest().subarray(0, 9).toString("base64url");
 }
 
-function normalizedMetadata(value) {
-  const payload = value && typeof value === "object" ? value : {};
-  return {
-    id: typeof payload.id === "string" && payload.id ? payload.id : null,
-    sessionId: typeof payload.session_id === "string" && payload.session_id ? payload.session_id : null,
-    forkedFromId: typeof payload.forked_from_id === "string" && payload.forked_from_id
-      ? payload.forked_from_id
-      : null,
-  };
-}
-
-async function readSessionMetadata(file) {
-  const handle = await fs.promises.open(file, "r");
-  const chunks = [];
-  let position = 0;
-  try {
-    while (position < 1024 * 1024) {
-      const buffer = Buffer.alloc(64 * 1024);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
-      if (bytesRead <= 0) break;
-      const chunk = buffer.subarray(0, bytesRead);
-      const lineEnd = chunk.indexOf(0x0a);
-      chunks.push(lineEnd >= 0 ? chunk.subarray(0, lineEnd) : chunk);
-      if (lineEnd >= 0) break;
-      position += bytesRead;
-    }
-  } finally {
-    await handle.close();
-  }
-  try {
-    const event = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (event?.type === "session_meta") return normalizedMetadata(event.payload);
-  } catch {
-    // Sessions without valid leading metadata are aggregated independently.
-  }
-  return normalizedMetadata(null);
-}
-
-function emptyFileState(stat, metadata) {
+function emptyFileState(stat) {
   return {
     dev: String(stat.dev),
     ino: String(stat.ino),
     offset: 0,
     size: stat.size,
     mtimeMs: stat.mtimeMs,
-    model: "unknown",
-    serviceTier: "default",
-    cumulative: emptyTokens(),
-    hasCumulative: false,
-    metadata,
-    tokenFingerprints: [],
-    inheritance: {
-      active: Boolean(metadata.forkedFromId),
-      initialized: false,
-      candidates: [],
-    },
+    responses: {},
     buckets: {},
   };
 }
 
-function normalizeState(value, stat, metadata) {
+function normalizeState(value, stat) {
   if (!value || value.dev !== String(stat.dev) || value.ino !== String(stat.ino)
       || !Number.isSafeInteger(value.offset) || value.offset < 0 || value.offset > stat.size) {
-    return emptyFileState(stat, metadata);
+    return emptyFileState(stat);
   }
-  value.model = typeof value.model === "string" && value.model ? value.model : "unknown";
-  value.serviceTier = typeof value.serviceTier === "string" && value.serviceTier ? value.serviceTier : "default";
-  value.cumulative = { ...emptyTokens(), ...(value.cumulative ?? {}) };
-  value.hasCumulative = value.hasCumulative === true;
-  value.metadata = metadata;
-  value.tokenFingerprints = Array.isArray(value.tokenFingerprints)
-    ? value.tokenFingerprints.filter((item) => typeof item === "string")
-    : [];
-  if (!value.inheritance || typeof value.inheritance !== "object") {
-    value.inheritance = {
-      active: Boolean(metadata.forkedFromId),
-      initialized: false,
-      candidates: [],
-    };
-  }
-  value.inheritance.active = value.inheritance.active === true && Boolean(metadata.forkedFromId);
-  value.inheritance.initialized = value.inheritance.initialized === true;
-  value.inheritance.candidates = Array.isArray(value.inheritance.candidates)
-    ? value.inheritance.candidates.filter((candidate) =>
-      typeof candidate?.relative === "string" && Array.isArray(candidate.positions))
-    : [];
+  value.responses = value.responses && typeof value.responses === "object" ? value.responses : {};
   value.buckets = value.buckets && typeof value.buckets === "object" ? value.buckets : {};
   return value;
 }
@@ -162,20 +100,15 @@ function minuteStart(eventTimeMs) {
   return new Date(Math.floor(eventTimeMs / 60_000) * 60_000).toISOString();
 }
 
-function eventTimeMs(event, fallbackTimeMs) {
-  const parsed = Date.parse(event?.timestamp ?? "");
-  return Number.isFinite(parsed) ? parsed : fallbackTimeMs;
-}
-
-function bucketFor(state, eventTime, isLongContext) {
+function bucketFor(state, eventTime, model, serviceTier, isLongContext) {
   const startedAt = minuteStart(eventTime);
-  const key = `${startedAt}\u001f${state.model}\u001f${state.serviceTier}\u001f${isLongContext}`;
+  const key = `${startedAt}\u001f${model}\u001f${serviceTier}\u001f${isLongContext}`;
   if (!state.buckets[key]) {
     state.buckets[key] = {
       startedAt,
       isLongContext,
-      model: state.model,
-      serviceTier: state.serviceTier,
+      model,
+      serviceTier,
       ...emptyTokens(),
       requests: 0,
     };
@@ -183,136 +116,78 @@ function bucketFor(state, eventTime, isLongContext) {
   return state.buckets[key];
 }
 
-function isInheritedToken(state, fingerprint, ancestors) {
-  if (!state.inheritance.active) return false;
-
-  // A resumed/forked log can begin at any point inside its parent's token
-  // history. Only suppress the initial contiguous match; the first mismatch
-  // permanently starts the child's own usage, even if later values coincide.
-  let candidates;
-  if (!state.inheritance.initialized) {
-    candidates = [];
-    for (const ancestor of ancestors) {
-      const positions = [];
-      const sequence = ancestor.state.tokenFingerprints ?? [];
-      for (let index = 0; index < sequence.length; index += 1) {
-        if (sequence[index] === fingerprint) positions.push(index + 1);
-      }
-      if (positions.length > 0) candidates.push({ relative: ancestor.relative, positions });
-    }
-    state.inheritance.initialized = true;
-  } else {
-    const states = new Map(ancestors.map((ancestor) => [ancestor.relative, ancestor.state]));
-    candidates = [];
-    for (const candidate of state.inheritance.candidates) {
-      const sequence = states.get(candidate.relative)?.tokenFingerprints ?? [];
-      const positions = candidate.positions
-        .filter((position) => position < sequence.length && sequence[position] === fingerprint)
-        .map((position) => position + 1);
-      if (positions.length > 0) candidates.push({ relative: candidate.relative, positions });
-    }
-  }
-
-  state.inheritance.candidates = candidates;
-  if (candidates.length > 0) return true;
-  state.inheritance.active = false;
-  return false;
-}
-
-function updateCumulativeBaseline(state, current) {
-  if (current.totalTokens <= 0) return;
-  state.cumulative = current;
-  state.hasCumulative = true;
-}
-
-function processEvent(state, event, fallbackTimeMs, cutoffMs, ancestors) {
-  if (event?.type === "event_msg" && event.payload?.type === "thread_settings_applied") {
-    const settings = event.payload.thread_settings;
-    if (typeof settings?.model === "string" && settings.model) state.model = settings.model;
-    if (typeof settings?.service_tier === "string" && settings.service_tier) {
-      state.serviceTier = settings.service_tier;
-    }
-    return;
-  }
-  if (event?.type === "turn_context") {
-    if (typeof event.payload?.model === "string" && event.payload.model) state.model = event.payload.model;
-    if (typeof event.payload?.service_tier === "string" && event.payload.service_tier) {
-      state.serviceTier = event.payload.service_tier;
-    }
-    return;
-  }
-  if (event?.type !== "event_msg" || event.payload?.type !== "token_count" || !event.payload.info) return;
-
-  const current = tokensFrom(event.payload.info.total_token_usage);
-  const last = tokensFrom(event.payload.info.last_token_usage);
-  const fingerprint = tokenFingerprint(current, last);
-  state.tokenFingerprints.push(fingerprint);
-  if (isInheritedToken(state, fingerprint, ancestors)) {
-    updateCumulativeBaseline(state, current);
-    return;
-  }
-  if (state.model === "unknown") {
-    updateCumulativeBaseline(state, current);
-    return;
-  }
-  let increment;
-  if (current.totalTokens > 0) {
-    if (state.hasCumulative) {
-      increment = deltaTokens(current, state.cumulative);
-    } else {
-      // Forked/sub-agent logs can inherit a very large parent cumulative total.
-      // Only the first request's last usage belongs to this new session file.
-      increment = last.totalTokens > 0 ? last : current;
-      state.hasCumulative = true;
-    }
-    state.cumulative = current;
-  } else {
-    increment = last;
-  }
-  if (increment.totalTokens <= 0) return;
-  const occurredAt = eventTimeMs(event, fallbackTimeMs);
+function processEvent(state, relative, event, fallbackTimeMs, cutoffMs, owners) {
+  if (event?.type !== "assistant") return;
+  const usage = event.message?.usage;
+  const model = event.message?.model;
+  // Locally generated notices carry a placeholder model and no real usage.
+  if (!usage || typeof usage !== "object" || typeof model !== "string" || !model || model === "<synthetic>") return;
+  const key = responseKey(event);
+  if (!key) return;
+  // One response is written as several lines, and a resumed session copies
+  // earlier responses into its new file. Each response counts once.
+  if (owners.has(key)) return;
+  const parsed = Date.parse(event.timestamp ?? "");
+  const occurredAt = Number.isFinite(parsed) ? parsed : fallbackTimeMs;
   if (occurredAt < cutoffMs) return;
-  const bucket = bucketFor(state, occurredAt, (last.inputTokens || increment.inputTokens) > 272_000);
-  addTokens(bucket, increment);
+  owners.set(key, relative);
+  state.responses[key] = occurredAt;
+  const tokens = tokensFrom(usage);
+  if (tokens.totalTokens <= 0) return;
+  const bucket = bucketFor(state, occurredAt, model, serviceTierFrom(usage), tokens.inputTokens > LONG_CONTEXT_TOKENS);
+  addTokens(bucket, tokens);
   bucket.requests += 1;
 }
 
-function pruneBuckets(state, cutoffMs) {
+function prune(state, cutoffMs) {
   for (const [key, bucket] of Object.entries(state.buckets)) {
     if (Date.parse(bucket.startedAt ?? "") < cutoffMs) delete state.buckets[key];
   }
+  for (const [key, occurredAt] of Object.entries(state.responses)) {
+    if (!(occurredAt >= cutoffMs)) delete state.responses[key];
+  }
 }
 
-async function scanFile(file, previous, cutoffMs, metadata, ancestors) {
+async function scanFile(file, relative, previous, cutoffMs, owners) {
   const stat = await fs.promises.stat(file);
-  let state = normalizeState(previous, stat, metadata);
+  let state = normalizeState(previous, stat);
   if (state.offset === stat.size && state.mtimeMs === stat.mtimeMs) {
-    pruneBuckets(state, cutoffMs);
+    prune(state, cutoffMs);
     return state;
   }
-  if (state.offset === stat.size && state.mtimeMs !== stat.mtimeMs) state = emptyFileState(stat, metadata);
+  if (state.offset === stat.size && state.mtimeMs !== stat.mtimeMs) state = emptyFileState(stat);
+  if (state.offset === 0) {
+    // The file is read again from the start; forget what it claimed before.
+    for (const [key, owner] of owners) if (owner === relative) owners.delete(key);
+  }
 
-  const stream = fs.createReadStream(file, { start: state.offset, encoding: "utf8" });
-  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const stream = fs.createReadStream(file, { start: state.offset });
+  let pending = Buffer.alloc(0);
   let consumed = state.offset;
-  for await (const line of lines) {
-    consumed += Buffer.byteLength(line, "utf8") + 1;
-    if (!line.includes('"token_count"') && !line.includes('"turn_context"')
-        && !line.includes('"thread_settings_applied"')) continue;
-    try {
-      processEvent(state, JSON.parse(line), stat.mtimeMs, cutoffMs, ancestors);
-    } catch {
-      // A single malformed/incomplete event must not discard the rest of a session.
+  for await (const chunk of stream) {
+    pending = pending.length === 0 ? chunk : Buffer.concat([pending, chunk]);
+    let lineEnd;
+    while ((lineEnd = pending.indexOf(0x0a)) >= 0) {
+      const line = pending.subarray(0, lineEnd).toString("utf8");
+      pending = pending.subarray(lineEnd + 1);
+      consumed += lineEnd + 1;
+      if (!line.includes('"assistant"') || !line.includes('"usage"')) continue;
+      try {
+        processEvent(state, relative, JSON.parse(line), stat.mtimeMs, cutoffMs, owners);
+      } catch {
+        // A single malformed event must not discard the rest of a session.
+      }
     }
   }
+  // A line still being written stays unread until its newline arrives.
   state.offset = Math.min(consumed, stat.size);
   state.size = stat.size;
   state.mtimeMs = stat.mtimeMs;
-  pruneBuckets(state, cutoffMs);
+  prune(state, cutoffMs);
   return state;
 }
 
-async function sessionFiles(root) {
+async function transcriptFiles(root) {
   const result = [];
   async function visit(directory) {
     let entries;
@@ -330,50 +205,6 @@ async function sessionFiles(root) {
   }
   await visit(root);
   return result.sort();
-}
-
-function registerUnique(mapping, id, relative) {
-  if (!id) return;
-  if (!mapping.has(id)) mapping.set(id, relative);
-  else if (mapping.get(id) !== relative) mapping.set(id, null);
-}
-
-function buildHierarchy(relatives, metadataByFile) {
-  const byId = new Map();
-  const bySessionId = new Map();
-  for (const relative of relatives) {
-    const metadata = metadataByFile.get(relative);
-    registerUnique(byId, metadata.id, relative);
-    registerUnique(bySessionId, metadata.sessionId, relative);
-  }
-
-  const parentByFile = new Map();
-  for (const relative of relatives) {
-    const forkedFromId = metadataByFile.get(relative).forkedFromId;
-    const parent = byId.get(forkedFromId) ?? bySessionId.get(forkedFromId) ?? null;
-    if (parent && parent !== relative) parentByFile.set(relative, parent);
-  }
-
-  const ordered = [];
-  const visited = new Set();
-  const visiting = new Set();
-  function visit(relative) {
-    if (visited.has(relative)) return;
-    if (visiting.has(relative)) return;
-    visiting.add(relative);
-    const parent = parentByFile.get(relative);
-    if (parent) visit(parent);
-    visiting.delete(relative);
-    visited.add(relative);
-    ordered.push(relative);
-  }
-  for (const relative of relatives) visit(relative);
-  return { ordered, parentByFile };
-}
-
-function parentStates(relative, parentByFile, states) {
-  const parent = parentByFile.get(relative);
-  return parent && states[parent] ? [{ relative: parent, state: states[parent] }] : [];
 }
 
 async function loadCache() {
@@ -398,37 +229,27 @@ async function main() {
   const generatedAt = new Date();
   const cutoffMs = generatedAt.getTime() - ROLLING_WINDOW_MS;
   const cache = await loadCache();
-  const files = await sessionFiles(sessionsRoot);
-  const relatives = files.map((file) => path.relative(sessionsRoot, file));
-  const filesByRelative = new Map(relatives.map((relative, index) => [relative, files[index]]));
-  const metadataByFile = new Map();
-  for (const relative of relatives) {
-    try {
-      metadataByFile.set(relative, await readSessionMetadata(filesByRelative.get(relative)));
-    } catch {
-      metadataByFile.set(relative, normalizedMetadata(null));
+  const files = await transcriptFiles(transcriptsRoot);
+  const relatives = files.map((file) => path.relative(transcriptsRoot, file));
+  const active = new Set(relatives);
+  for (const relative of Object.keys(cache.files)) {
+    if (!active.has(relative)) delete cache.files[relative];
+  }
+  const owners = new Map();
+  for (const [relative, state] of Object.entries(cache.files)) {
+    for (const key of Object.keys(state?.responses ?? {})) {
+      if (!owners.has(key)) owners.set(key, relative);
     }
   }
-  const hierarchy = buildHierarchy(relatives, metadataByFile);
-  const active = new Set();
+
   const errors = [];
-  for (const relative of hierarchy.ordered) {
-    const file = filesByRelative.get(relative);
-    active.add(relative);
+  for (let index = 0; index < files.length; index += 1) {
+    const relative = relatives[index];
     try {
-      cache.files[relative] = await scanFile(
-        file,
-        cache.files[relative],
-        cutoffMs,
-        metadataByFile.get(relative),
-        parentStates(relative, hierarchy.parentByFile, cache.files),
-      );
+      cache.files[relative] = await scanFile(files[index], relative, cache.files[relative], cutoffMs, owners);
     } catch (error) {
       errors.push(`${relative}: ${error?.message ?? String(error)}`);
     }
-  }
-  for (const relative of Object.keys(cache.files)) {
-    if (!active.has(relative)) delete cache.files[relative];
   }
   await saveCache(cache);
 
@@ -436,9 +257,6 @@ async function main() {
   for (const state of Object.values(cache.files)) {
     for (const bucket of Object.values(state.buckets ?? {})) {
       if (Date.parse(bucket.startedAt ?? "") < cutoffMs) continue;
-      // Filter at output time so existing caches remain usable. Keep Cursor
-      // counters internally for correct deltas and parent replay detection.
-      if (/cursor/i.test(bucket.model)) continue;
       const key = `${bucket.model}\u001f${bucket.serviceTier}\u001f${bucket.isLongContext}`;
       if (!merged[key]) {
         merged[key] = {

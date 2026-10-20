@@ -1,7 +1,7 @@
 {
-  "uuid": "codex-syncbar@griplabs.io",
-  "name": "Codex SyncBar",
-  "description": "계정별 주간 잔여량 확인과 이 PC의 Codex 계정 전환",
+  "uuid": "claude-syncbar@griplabs.io",
+  "name": "Claude SyncBar",
+  "description": "계정별 5시간·주간 잔여량 확인과 이 PC의 Claude 계정 전환",
   "shell-version": ["50"],
   "version": 1
 }

@@ -9,7 +9,7 @@ gi.require_version('Rsvg', '2.0')
 from gi.repository import Rsvg
 
 root = Path(__file__).resolve().parents[2]
-source = root / 'Ubuntu/resources/codex-syncbar.svg'
+source = root / 'Ubuntu/resources/claude-syncbar.svg'
 surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 256, 256)
 handle = Rsvg.Handle.new_from_file(str(source))
 viewport = Rsvg.Rectangle()

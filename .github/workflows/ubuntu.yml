@@ -1,7 +1,7 @@
 name: Ubuntu isolated integration and package
 on:
   push:
-    branches: [main, 'codex/ubuntu-*']
+    branches: [main, claude, 'codex/ubuntu-*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -26,7 +26,7 @@ jobs:
         run: bash Scripts/Ubuntu/test.sh
       - name: Test real OpenSSH transport with generated loopback keys
         env:
-          CODEX_SYNCBAR_SSH_QA_REPORT: dist/ubuntu/tests/ssh-loopback-smoke.json
+          CLAUDE_SYNCBAR_SSH_QA_REPORT: dist/ubuntu/tests/ssh-loopback-smoke.json
         run: bash Tests/ssh-loopback-smoke.sh
       - name: Build and inspect the Ubuntu 26.04 package without installing it
         run: bash Scripts/Ubuntu/package.sh --no-build

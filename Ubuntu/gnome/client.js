@@ -3,7 +3,7 @@ import GLib from 'gi://GLib';
 
 // Asynchronous, bounded transport: never block the GNOME Shell main thread.
 export class Client {
-    constructor(path = GLib.build_filenamev([GLib.get_user_runtime_dir(), 'codex-syncbar', 'control.sock'])) {
+    constructor(path = GLib.build_filenamev([GLib.get_user_runtime_dir(), 'claude-syncbar', 'control.sock'])) {
         this.path = path;
         this.pending = new Set();
     }

@@ -6,10 +6,13 @@ Ubuntu를 기본이자 유일한 신규 개발 대상으로 삼습니다. 계정
 
 | 대상 | 상태 | 방침 |
 | --- | --- | --- |
-| Ubuntu / `main` | 활성 | 신규 기능·검증·배포의 기준 |
+| Ubuntu / `main` | 활성 | Codex 버전. 신규 기능·검증·배포의 기준 |
+| Ubuntu / `claude` | 활성 | 같은 앱의 Claude Code 버전. 식별자가 `claude-syncbar`로 달라 함께 설치 가능 |
 | Windows / `codex/windows-winui-widgets` | Deprecated | 신규 개발·정기 검증·자동 배포 중단, 이력 보존 |
 | macOS / 보관된 Swift 소스 | Deprecated | 신규 개발·정기 검증·자동 배포 중단, 이력 보존 |
 | 그 외 Ubuntu를 대상으로 하지 않는 브랜치 | Deprecated | 보관용, 신규 작업의 기준으로 사용하지 않음 |
+
+`claude` 브랜치는 Ubuntu 구현과 그것이 참조하는 공통 코어만 Claude Code용으로 옮겼습니다. 그 브랜치의 macOS·Windows 앱 소스와 Windows 전용 공통 파일은 Codex 버전 그대로이며 빌드되지 않습니다.
 
 Deprecated는 브랜치나 기존 릴리즈를 삭제한다는 뜻이 아닙니다. 명시적인 유지보수 요청이 있을 때만 레거시 플랫폼을 수정합니다. Ubuntu가 참조하는 공통 소스는 계속 유지합니다.
 

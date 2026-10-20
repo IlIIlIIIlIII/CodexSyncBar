@@ -19,9 +19,9 @@ class UserInstallTests(unittest.TestCase):
         self.source = self.root / 'source'
         self.user = self.root / 'user'
         (self.source / 'backend').mkdir(parents=True)
-        (self.source / 'backend/CodexSyncBar.Backend').write_text('fixture backend v1')
-        (self.source / 'ui/codex_syncbar').mkdir(parents=True)
-        (self.source / 'ui/codex_syncbar/__main__.py').write_text('# fixture UI\n')
+        (self.source / 'backend/ClaudeSyncBar.Backend').write_text('fixture backend v1')
+        (self.source / 'ui/claude_syncbar').mkdir(parents=True)
+        (self.source / 'ui/claude_syncbar/__main__.py').write_text('# fixture UI\n')
         self.user.mkdir()
 
     def tearDown(self):
@@ -31,7 +31,7 @@ class UserInstallTests(unittest.TestCase):
         return installer.install(self.source, self.user, reload=False)
 
     def test_fresh_install_is_private_and_startup_stays_off(self):
-        sentinel = self.user / '.codex/auth.json'
+        sentinel = self.user / '.claude/.credentials.json'
         sentinel.parent.mkdir()
         sentinel.write_text('unchanged synthetic auth')
         result = self.install()
@@ -43,16 +43,16 @@ class UserInstallTests(unittest.TestCase):
         self.assertEqual('unchanged synthetic auth', sentinel.read_text())
 
     def test_existing_unmanaged_launcher_is_preserved(self):
-        launcher = self.user / '.local/bin/codex-syncbar'
+        launcher = self.user / '.local/bin/claude-syncbar'
         launcher.parent.mkdir(parents=True)
         launcher.write_text('my own utility')
         with self.assertRaisesRegex(RuntimeError, 'unmanaged'):
             self.install()
         self.assertEqual('my own utility', launcher.read_text())
-        self.assertFalse((self.user / '.local/share/codex-syncbar/app').exists())
+        self.assertFalse((self.user / '.local/share/claude-syncbar/app').exists())
 
     def test_existing_unmanaged_app_is_preserved(self):
-        app = self.user / '.local/share/codex-syncbar/app'
+        app = self.user / '.local/share/claude-syncbar/app'
         app.mkdir(parents=True)
         (app / 'mine').write_text('preserve')
         with self.assertRaisesRegex(RuntimeError, 'unmanaged'):
@@ -69,10 +69,10 @@ class UserInstallTests(unittest.TestCase):
 
     def test_managed_upgrade_keeps_old_application_for_recovery(self):
         self.install()
-        (self.source / 'backend/CodexSyncBar.Backend').write_text('fixture backend v2')
+        (self.source / 'backend/ClaudeSyncBar.Backend').write_text('fixture backend v2')
         result = self.install()
-        self.assertEqual('fixture backend v2', (Path(result['application']) / 'backend/CodexSyncBar.Backend').read_text())
-        self.assertEqual('fixture backend v1', (Path(result['previousApplication']) / 'backend/CodexSyncBar.Backend').read_text())
+        self.assertEqual('fixture backend v2', (Path(result['application']) / 'backend/ClaudeSyncBar.Backend').read_text())
+        self.assertEqual('fixture backend v1', (Path(result['previousApplication']) / 'backend/ClaudeSyncBar.Backend').read_text())
 
     def test_tray_install_upgrade_and_unmanaged_protection(self):
         shutil.copytree(ROOT / 'Ubuntu/gnome', self.source / 'gnome')

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);SYNCBAR_LINUX</DefineConstants>
+    <AssemblyName>ClaudeSyncBar.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Windows/ClaudeSyncBar.Windows.Core/*.cs"
+      Exclude="../../Windows/ClaudeSyncBar.Windows.Core/WindowsPaths.cs;../../Windows/ClaudeSyncBar.Windows.Core/WindowsSecretStore.cs;../../Windows/ClaudeSyncBar.Windows.Core/WindowsPathSafety.cs;../../Windows/ClaudeSyncBar.Windows.Core/BrowserLoginService.cs;../../Windows/ClaudeSyncBar.Windows.Core/LocalSwitchService.cs;../../Windows/ClaudeSyncBar.Windows.Core/ClaudeCliLocator.cs;../../Windows/ClaudeSyncBar.Windows.Core/ClaudeDesktopLifecycle.cs;../../Windows/ClaudeSyncBar.Windows.Core/CliManagementService.cs;../../Windows/ClaudeSyncBar.Windows.Core/WslDeviceService.cs;../../Windows/ClaudeSyncBar.Windows.Core/ClaudeProcessScope.cs"
+      Link="Core/%(Filename)%(Extension)" />
+    <Compile Remove="../../Windows/ClaudeSyncBar.Windows.Core/WslDesktopAccountTarget.cs" />
+    <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Platform/*.cs" Link="Platform/%(Filename)%(Extension)" />
+    <InternalsVisibleTo Include="ClaudeSyncBar.Backend" />
+    <InternalsVisibleTo Include="ClaudeSyncBar.Ubuntu.Tests" />
+    <InternalsVisibleTo Include="ClaudeSyncBar.Windows.Core.Tests" />
+  </ItemGroup>
+</Project>

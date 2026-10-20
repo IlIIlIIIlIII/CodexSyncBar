@@ -26,11 +26,18 @@ def quote(value):
     return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`') + '"'
 
 
-def codex_home(environment):
-    value = environment.get('CODEX_HOME') or str(Path(environment.get('HOME') or str(Path.home())) / '.codex')
+def claude_config_dir(environment):
+    """The directory the user pointed Claude Code at, or None for its default layout.
+
+    The default is not written out as an explicit path: with CLAUDE_CONFIG_DIR set,
+    Claude Code keeps its global config inside that directory instead of in HOME.
+    """
+    value = environment.get('CLAUDE_CONFIG_DIR')
+    if not value:
+        return None
     path = Path(value)
     if not path.is_absolute():
-        raise RuntimeError('CODEX_HOME must be an absolute directory path.')
+        raise RuntimeError('CLAUDE_CONFIG_DIR must be an absolute directory path.')
     return str(path.resolve())
 
 
@@ -45,7 +52,7 @@ def start(environment=None, runner=subprocess.run, read_running=running_environm
     if not runtime.is_absolute():
         raise RuntimeError('XDG_RUNTIME_DIR must be an absolute directory path.')
     private(runtime, directory=True)
-    directory = runtime / 'codex-syncbar'
+    directory = runtime / 'claude-syncbar'
     try:
         directory.mkdir(mode=0o700)
     except FileExistsError:
@@ -59,13 +66,15 @@ def start(environment=None, runner=subprocess.run, read_running=running_environm
         private(directory / '.session.lock')
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         context = {key: environment[key] for key in VARIABLES if key in environment}
-        context['CODEX_HOME'] = codex_home(environment)
+        config_dir = claude_config_dir(environment)
+        if config_dir:
+            context['CLAUDE_CONFIG_DIR'] = config_dir
         text = ''.join(key + '=' + quote(value) + '\n' for key, value in context.items())
-        status = runner(['systemctl', '--user', 'show', 'codex-syncbar.service', '-p', 'MainPID', '--value'],
+        status = runner(['systemctl', '--user', 'show', 'claude-syncbar.service', '-p', 'MainPID', '--value'],
                         capture_output=True, text=True, check=True)
         pid = int(status.stdout.strip() or '0')
-        if pid and codex_home(read_running(pid)) != context['CODEX_HOME']:
-            raise RuntimeError('Codex SyncBar is already using another CODEX_HOME. Finish its operation '
+        if pid and claude_config_dir(read_running(pid)) != config_dir:
+            raise RuntimeError('Claude SyncBar is already using another CLAUDE_CONFIG_DIR. Finish its operation '
                                'and stop its user service before opening a different account directory.')
         if not pid:
             handle, temporary = tempfile.mkstemp(prefix='.session-', dir=directory)
@@ -75,7 +84,7 @@ def start(environment=None, runner=subprocess.run, read_running=running_environm
                 os.replace(temporary, target)
             finally:
                 Path(temporary).unlink(missing_ok=True)
-        runner(['systemctl', '--user', 'start', 'codex-syncbar.service'], check=True)
+        runner(['systemctl', '--user', 'start', 'claude-syncbar.service'], check=True)
     finally:
         os.close(descriptor)
 
@@ -85,5 +94,5 @@ if __name__ == '__main__':
         start()
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         # No environment values, process environments or credentials are printed.
-        print(str(error) if isinstance(error, RuntimeError) else 'Codex SyncBar could not prepare its user service.', file=sys.stderr)
+        print(str(error) if isinstance(error, RuntimeError) else 'Claude SyncBar could not prepare its user service.', file=sys.stderr)
         raise SystemExit(1)

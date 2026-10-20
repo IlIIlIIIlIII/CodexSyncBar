@@ -14,22 +14,22 @@ def verify(package):
         assert 'Architecture: amd64' in metadata
         for dependency in ['python3-gi', 'gir1.2-gtk-4.0', 'gir1.2-adw-1', 'libsecret-tools', 'nodejs']:
             assert dependency in metadata, dependency
-        backend = root / 'usr/lib/codex-syncbar/backend'
-        for name in ['CodexSyncBar.Backend', 'libcoreclr.so', 'libhostfxr.so', 'libhostpolicy.so']:
+        backend = root / 'usr/lib/claude-syncbar/backend'
+        for name in ['ClaudeSyncBar.Backend', 'libcoreclr.so', 'libhostfxr.so', 'libhostpolicy.so']:
             assert (backend / name).is_file(), name
-        for name in ['gpt-switch', 'usage-summary.mjs', 'codex-syncbar-askpass', 'codex-syncbar-linux-askpass',
-                     'codex-syncbar-secret-tool']:
+        for name in ['claude-switch', 'usage-summary.mjs', 'claude-syncbar-askpass', 'claude-syncbar-linux-askpass',
+                     'claude-syncbar-secret-tool']:
             assert (backend / 'Runtime' / name).is_file(), name
             assert (backend / 'Runtime' / name).stat().st_mode & 0o111, name
-        assert (root / 'usr/lib/codex-syncbar/ui/codex_syncbar/__main__.py').is_file()
-        assert (root / 'usr/lib/codex-syncbar/prepare-session.py').is_file()
-        tray = root / 'usr/share/gnome-shell/extensions/codex-syncbar@griplabs.io'
+        assert (root / 'usr/lib/claude-syncbar/ui/claude_syncbar/__main__.py').is_file()
+        assert (root / 'usr/lib/claude-syncbar/prepare-session.py').is_file()
+        tray = root / 'usr/share/gnome-shell/extensions/claude-syncbar@griplabs.io'
         for name in ['metadata.json', 'extension.js', 'client.js', 'model.js', 'stylesheet.css', 'icon.png']:
             assert (tray / name).is_file(), name
-        assert (root / 'usr/bin/codex-syncbar').stat().st_mode & 0o111
-        unit = (root / 'usr/lib/systemd/user/codex-syncbar.service').read_text()
+        assert (root / 'usr/bin/claude-syncbar').stat().st_mode & 0o111
+        unit = (root / 'usr/lib/systemd/user/claude-syncbar.service').read_text()
         assert '[Install]\n' not in unit
-        assert 'EnvironmentFile=-%t/codex-syncbar/session.env' in unit
+        assert 'EnvironmentFile=-%t/claude-syncbar/session.env' in unit
         assert not list(root.glob('**/autostart/*'))
         control = subprocess.check_output(['dpkg-deb', '--ctrl-tarfile', package])
         # There are no maintainer scripts that could enable/start a service.

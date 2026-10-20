@@ -11,9 +11,9 @@ import unittest
 from unittest.mock import patch
 
 
-ENTRY = Path(__file__).resolve().parents[1] / "CodexSyncBar.Ubuntu.Platform/Runtime/codex-syncbar-secret-tool"
-LOOKUP = ["lookup", "application", "codex-syncbar", "purpose", "vault-key-v1"]
-STORE = ["store", "--label=Codex SyncBar vault", *LOOKUP[1:]]
+ENTRY = Path(__file__).resolve().parents[1] / "ClaudeSyncBar.Ubuntu.Platform/Runtime/claude-syncbar-secret-tool"
+LOOKUP = ["lookup", "application", "claude-syncbar", "purpose", "vault-key-v1"]
+STORE = ["store", "--label=Claude SyncBar vault", *LOOKUP[1:]]
 
 
 class SecretToolTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class SecretToolTests(unittest.TestCase):
 
     def lookup(self, schema, attributes, cancellable):
         self.called += 1
-        self.assertEqual({"application": "codex-syncbar", "purpose": "vault-key-v1"}, attributes)
+        self.assertEqual({"application": "claude-syncbar", "purpose": "vault-key-v1"}, attributes)
         if self.fail:
             raise RuntimeError("sensitive diagnostic must be suppressed")
         return self.value

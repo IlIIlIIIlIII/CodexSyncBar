@@ -26,17 +26,17 @@ class BackendIpcTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory(prefix='syncbar-ipc-')
         cls.root = Path(cls.temporary.name)
         cls.socket_path = cls.root / 'run/control.sock'
-        for name in ('run', 'home', 'state', 'codex'):
+        for name in ('run', 'home', 'state', 'claude'):
             (cls.root / name).mkdir(mode=0o700)
-        cls.marker = cls.root / 'codex/auth.json'
+        cls.marker = cls.root / 'claude/.credentials.json'
         cls.marker.write_text('{"synthetic_sentinel":"unchanged"}')
         cls.marker.chmod(0o600)
         cls.environment = dict(os.environ, HOME=str(cls.root / 'home'),
                                XDG_DATA_HOME=str(cls.root / 'home/data'),
                                XDG_CONFIG_HOME=str(cls.root / 'home/config'),
                                XDG_RUNTIME_DIR=str(cls.root / 'run'),
-                               CODEX_HOME=str(cls.root / 'codex'),
-                               CODEX_SYNCBAR_STATE_ROOT=str(cls.root / 'state'))
+                               CLAUDE_CONFIG_DIR=str(cls.root / 'claude'),
+                               CLAUDE_SYNCBAR_STATE_ROOT=str(cls.root / 'state'))
         cls.log = (cls.root / 'backend.log').open('w+')
         cls.process = subprocess.Popen([BACKEND, '--demo', '--socket', str(cls.socket_path)],
                                        env=cls.environment, stdout=cls.log, stderr=cls.log)

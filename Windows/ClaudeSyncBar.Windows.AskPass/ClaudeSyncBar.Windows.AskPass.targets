@@ -1,0 +1,26 @@
+<Project>
+  <!--
+    Imported by the projects that carry the SSH askpass helper: publishes
+    ClaudeSyncBar.AskPass.exe for the importing project's runtime and copies it to
+    Runtime\, where WindowsPaths.BundledWindowsAskPass looks for it. The helper is
+    restored and published on its own, so a project that is not self-contained
+    (the tests) still gets the same self-contained exe the app ships.
+  -->
+  <Target Name="PublishAskPassHelper" BeforeTargets="AssignTargetPaths" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_AskPassProject>$(MSBuildThisFileDirectory)ClaudeSyncBar.Windows.AskPass.csproj</_AskPassProject>
+      <_AskPassRuntimeIdentifier>$(RuntimeIdentifier)</_AskPassRuntimeIdentifier>
+      <_AskPassRuntimeIdentifier Condition="'$(_AskPassRuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</_AskPassRuntimeIdentifier>
+      <_AskPassProperties>Configuration=$(Configuration);RuntimeIdentifier=$(_AskPassRuntimeIdentifier)</_AskPassProperties>
+    </PropertyGroup>
+    <!-- A distinct property set makes the publish below evaluate the restored project afresh. -->
+    <MSBuild Projects="$(_AskPassProject)" Targets="Restore" Properties="$(_AskPassProperties);_AskPassRestore=true" />
+    <MSBuild Projects="$(_AskPassProject)" Targets="PublishAskPass" Properties="$(_AskPassProperties)">
+      <Output TaskParameter="TargetOutputs" ItemName="_AskPassExecutable" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_AskPassExecutable)" Link="Runtime\ClaudeSyncBar.AskPass.exe"
+            CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+</Project>

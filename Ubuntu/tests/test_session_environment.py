@@ -20,9 +20,10 @@ class SessionEnvironmentTests(unittest.TestCase):
         self.calls = []
         self.pid = 0
         self.environment = {'XDG_RUNTIME_DIR': str(self.root), 'HOME': str(self.root / 'home'),
-                            'CODEX_HOME': str(self.root / 'custom codex'), 'DISPLAY': ':8',
+                            'CLAUDE_CONFIG_DIR': str(self.root / 'custom claude'), 'DISPLAY': ':8',
                             'WAYLAND_DISPLAY': 'wayland-fixture', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/fixture',
-                            'OPENAI_API_KEY': 'synthetic-secret-must-never-pass'}
+                            'ANTHROPIC_API_KEY': 'synthetic-secret-must-never-pass',
+                            'CLAUDE_CODE_OAUTH_TOKEN': 'synthetic-secret-must-never-pass'}
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -36,28 +37,40 @@ class SessionEnvironmentTests(unittest.TestCase):
 
     def test_passes_only_allowlisted_context_to_private_app_file(self):
         self.start()
-        directory = self.root / 'codex-syncbar'
+        directory = self.root / 'claude-syncbar'
         target = directory / 'session.env'
         self.assertEqual(0o700, directory.stat().st_mode & 0o777)
         self.assertEqual(0o600, target.stat().st_mode & 0o777)
         text = target.read_text()
         self.assertIn('WAYLAND_DISPLAY="wayland-fixture"', text)
-        self.assertIn('CODEX_HOME="' + self.environment['CODEX_HOME'] + '"', text)
-        self.assertNotIn('OPENAI_API_KEY', text)
+        self.assertIn('CLAUDE_CONFIG_DIR="' + self.environment['CLAUDE_CONFIG_DIR'] + '"', text)
+        self.assertNotIn('ANTHROPIC_API_KEY', text)
+        self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', text)
         self.assertNotIn('synthetic-secret', text)
-        self.assertEqual(['systemctl', '--user', 'start', 'codex-syncbar.service'], self.calls[-1])
+        self.assertEqual(['systemctl', '--user', 'start', 'claude-syncbar.service'], self.calls[-1])
         self.assertFalse(any('set-environment' in command for command in self.calls))
 
     def test_running_backend_with_different_home_is_not_restarted(self):
         self.pid = 12345
-        with self.assertRaisesRegex(RuntimeError, 'another CODEX_HOME'):
-            self.start({'HOME': str(self.root), 'CODEX_HOME': str(self.root / 'different')})
+        with self.assertRaisesRegex(RuntimeError, 'another CLAUDE_CONFIG_DIR'):
+            self.start({'HOME': str(self.root), 'CLAUDE_CONFIG_DIR': str(self.root / 'different')})
         self.assertEqual(1, len(self.calls))
-        self.assertFalse((self.root / 'codex-syncbar/session.env').exists())
+        self.assertFalse((self.root / 'claude-syncbar/session.env').exists())
+
+    def test_default_layout_is_never_written_as_an_explicit_directory(self):
+        # An explicit CLAUDE_CONFIG_DIR moves Claude Code's global config into that
+        # directory, so the default must stay unset rather than become "~/.claude".
+        del self.environment['CLAUDE_CONFIG_DIR']
+        self.start()
+        self.assertNotIn('CLAUDE_CONFIG_DIR', (self.root / 'claude-syncbar/session.env').read_text())
+        self.pid = 12345
+        self.start({'HOME': self.environment['HOME']})
+        with self.assertRaisesRegex(RuntimeError, 'another CLAUDE_CONFIG_DIR'):
+            self.start({'HOME': self.environment['HOME'], 'CLAUDE_CONFIG_DIR': str(self.root / 'home/.claude')})
 
     def test_running_backend_same_home_reuses_existing_context(self):
         self.start()
-        target = self.root / 'codex-syncbar/session.env'
+        target = self.root / 'claude-syncbar/session.env'
         before = target.read_bytes()
         self.pid = 12345
         self.environment['DISPLAY'] = ':9'
@@ -65,7 +78,7 @@ class SessionEnvironmentTests(unittest.TestCase):
         self.assertEqual(before, target.read_bytes())
 
     def test_symbolic_link_and_insecure_directory_are_rejected(self):
-        directory = self.root / 'codex-syncbar'
+        directory = self.root / 'claude-syncbar'
         directory.symlink_to(self.root / 'elsewhere')
         with self.assertRaises(RuntimeError):
             self.start()
@@ -77,7 +90,7 @@ class SessionEnvironmentTests(unittest.TestCase):
         self.assertEqual([], self.calls)
 
     def test_control_characters_fail_before_service_call(self):
-        self.environment['DISPLAY'] = ':0\nOPENAI_API_KEY=invalid'
+        self.environment['DISPLAY'] = ':0\nANTHROPIC_API_KEY=invalid'
         with self.assertRaises(RuntimeError):
             self.start()
         self.assertEqual([], self.calls)

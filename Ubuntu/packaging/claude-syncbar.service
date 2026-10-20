@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude SyncBar account controller
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/claude-syncbar/backend/ClaudeSyncBar.Backend
+EnvironmentFile=-%t/claude-syncbar/session.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5min
+UMask=0077
+
+# Deliberately no [Install] section: installing never enables it. The enabled GNOME
+# extension starts it with the session; without the extension, login autostart is opt-in in the UI.

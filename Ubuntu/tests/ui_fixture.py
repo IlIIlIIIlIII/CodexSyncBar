@@ -2,7 +2,7 @@
 """Synthetic visual fixture only; this is not the production integration backend."""
 import argparse
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -15,13 +15,17 @@ SCENARIO = 'default'
 UPDATED = '2026-10-03T03:40:00Z'
 
 
+def in_hours(hours):
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+
+
 def snapshot():
     accounts = []
-    for identity, alias, weekly in [(1, '개인 계정', 39), (2, '업무 계정', 58)]:
+    for identity, alias, weekly, five_hour in [(1, '개인 계정', 39, 81), (2, '업무 계정', 58, 22)]:
         accounts.append({'id': identity, 'email': 'p***@example.com' if identity == 1 else 'w***@example.com', 'alias': alias,
                          'isPending': False, 'needsLogin': False,
                          'usage': {'weekly': {'usedPercent': 100-weekly, 'resetsAt': '2026-10-06T00:00:00Z'},
-                                   'resetCredits': 3, 'resetCreditExpirations': ['2026-10-10T03:40:00Z'],
+                                   'fiveHour': {'usedPercent': 100-five_hour, 'resetsAt': '2026-10-03T06:10:00Z'},
                                    'updatedAt': UPDATED}})
     devices = [{'id': key, 'displayName': title, 'kind': kind, 'enabled': True, 'isReachable': True,
                 'currentProfileId': 1, 'currentAccountLabel': '개인 계정', 'observedAt': UPDATED, 'status': 'ready'}
@@ -31,28 +35,32 @@ def snapshot():
         accounts[1]['alias'] = '아주 긴 계정 표시 이름을 사용하는 업무 계정'
         accounts[1]['email'] = 'long-account-name***@department.example.com'
         devices += [dict(devices[1], id=f'ssh:qa-{i}', displayName=f'장치 {i} · 아주 긴 개발 서버 이름', currentAccountLabel='다른 계정 · 확인 필요') for i in range(4, 25)]
-    if SCENARIO in ('weekly', 'weekly-overflow', 'weekly-empty'):
+    if SCENARIO in ('usage', 'usage-overflow', 'usage-empty'):
         accounts = []
-        for identity, alias, email, remaining, reset_day in [
-            (1, '개인 계정', 'main@example.com', 68, 8),
-            (2, '업무 계정', 'work@example.com', 24, 11),
-            (3, '실험 계정', 'lab@example.com', 5, 12),
-            (4, '보조 계정', 'backup@example.com', None, None),
+        for identity, alias, email, remaining, reset_day, five_hour, five_hour_reset in [
+            (1, '개인 계정', 'main@example.com', 68, 2.3, 72, 1.7),
+            (2, '업무 계정', 'work@example.com', 24, 4.6, 9, .6),
+            (3, '실험 계정', 'lab@example.com', 5, 5.2, 100, None),
+            (4, '보조 계정', 'backup@example.com', None, None, None, None),
         ]:
             usage = None if remaining is None else {
-                'weekly': {'usedPercent': 100 - remaining, 'resetsAt': f'2026-10-{reset_day:02}T00:00:00Z'},
+                'weekly': {'usedPercent': 100 - remaining, 'resetsAt': in_hours(reset_day * 24)},
+                'fiveHour': {'usedPercent': 100 - five_hour, 'resetsAt': None if five_hour_reset is None else in_hours(five_hour_reset)},
                 'updatedAt': datetime.now(timezone.utc).isoformat()}
-            accounts.append({'id': identity, 'alias': alias, 'email': email,
+            accounts.append({'id': identity, 'alias': alias, 'email': email, 'plan': 'Max 5x' if identity == 3 else 'Max 20x',
                              'needsLogin': remaining is None, 'isPending': False, 'usage': usage})
-        if SCENARIO == 'weekly-overflow':
+        if SCENARIO == 'usage-overflow':
             accounts[1]['alias'] = '아주 긴 계정 표시 이름을 사용하는 업무 계정'
             accounts[1]['email'] = 'long-account-name@department.example.com'
             accounts += [dict(accounts[0], id=i, alias=f'테스트 계정 {i}', email=f'account-{i}@example.com') for i in range(5, 17)]
-        if SCENARIO == 'weekly-empty':
+        if SCENARIO == 'usage-empty':
             accounts = []
     return {'schemaVersion': 1, 'accounts': accounts, 'devices': devices, 'activeProfileId': 1,
             'isBusy': False, 'operation': None, 'configurationRevision': 'visual-fixture-1',
-            'updatedAt': UPDATED, 'error': None, 'settings': {'codexWeekly': True},
+            'updatedAt': UPDATED, 'error': None, 'settings': {'claudeFiveHour': True, 'claudeWeekly': True, 'autoSwitchEnabled': True, 'autoResumeEnabled': True,
+                         'autoResumeLast': {'at': UPDATED, 'succeeded': True, 'message': '한도로 멈춘 세션 1개를 이어서 실행했습니다: CodexSyncBar'},
+                         'autoSwitchLast': {'at': UPDATED, 'fromProfileId': 2, 'toProfileId': 1, 'succeeded': True,
+                                            'message': '업무 계정의 5시간 한도가 소진되어 개인 계정(으)로 자동 전환했습니다.'}},
             'isDemo': True}
 
 
@@ -82,7 +90,7 @@ class Handler(socketserver.StreamRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--socket', required=True)
-    parser.add_argument('--scenario', choices=['default', 'overflow', 'weekly', 'weekly-overflow', 'weekly-empty'], default='default')
+    parser.add_argument('--scenario', choices=['default', 'overflow', 'usage', 'usage-overflow', 'usage-empty'], default='default')
     arguments = parser.parse_args()
     SCENARIO = arguments.scenario
     path = Path(arguments.socket)

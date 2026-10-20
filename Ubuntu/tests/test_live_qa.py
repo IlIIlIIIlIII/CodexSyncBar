@@ -74,7 +74,7 @@ class SupervisorTests(unittest.TestCase):
 
     def invoke(self, probe=None):
         with patch.object(live_qa, "rpc", side_effect=self.rpc), patch.object(live_qa, "probe", side_effect=probe or self.probe), \
-                patch.object(live_qa, "ensure_independent_supervisor", return_value="codex-syncbar-live-qa-fixture.service"), \
+                patch.object(live_qa, "ensure_independent_supervisor", return_value="claude-syncbar-live-qa-fixture.service"), \
                 patch.object(live_qa, "desktop_state", return_value={"/usr/lib/chatgpt/ChatGPT": 1}), \
                 patch.object(live_qa, "desktop_processes", side_effect=self.desktop_processes), \
                 patch.object(live_qa, "wait_for_desktop_state", return_value=True), contextlib.redirect_stdout(io.StringIO()):
@@ -228,8 +228,8 @@ class SupervisorTests(unittest.TestCase):
         cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-codex.scope\n")
         with self.assertRaisesRegex(live_qa.Failure, "execute_requires_dedicated_systemd_user_service"):
             live_qa.ensure_independent_supervisor(str(cgroup))
-        cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/codex-syncbar-live-qa-fixture.service\n")
-        self.assertEqual("codex-syncbar-live-qa-fixture.service", live_qa.ensure_independent_supervisor(str(cgroup)))
+        cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/claude-syncbar-live-qa-fixture.service\n")
+        self.assertEqual("claude-syncbar-live-qa-fixture.service", live_qa.ensure_independent_supervisor(str(cgroup)))
 
     def test_desktop_observer_only_counts_same_home_root_processes(self):
         proc = self.root / "proc"
@@ -271,7 +271,7 @@ class SupervisorTests(unittest.TestCase):
                 patch.object(live_qa, "desktop_state", return_value={executable: 1}), \
                 patch.object(live_qa, "desktop_processes", side_effect=processes), \
                 patch.object(live_qa, "wait_for_desktop_state", return_value=True), \
-                patch.object(live_qa, "ensure_independent_supervisor", return_value="codex-syncbar-live-qa-fixture.service"), \
+                patch.object(live_qa, "ensure_independent_supervisor", return_value="claude-syncbar-live-qa-fixture.service"), \
                 contextlib.redirect_stdout(io.StringIO()):
             live_qa.run(self.args)
         events = json.loads((self.root / "evidence.json").read_text())["events"]
@@ -298,7 +298,7 @@ class SupervisorTests(unittest.TestCase):
                 patch.object(live_qa, "desktop_state", side_effect=lambda _home: dict(desktop)), \
                 patch.object(live_qa, "desktop_processes", return_value={"/usr/lib/chatgpt/ChatGPT": [{"pid": 100, "startTimeTicks": 1, "identitySha256": "a"*64}]}), \
                 patch.object(live_qa, "wait_for_desktop_state", side_effect=lambda _home, expected: desktop == expected), \
-                patch.object(live_qa, "ensure_independent_supervisor", return_value="codex-syncbar-live-qa-fixture.service"), \
+                patch.object(live_qa, "ensure_independent_supervisor", return_value="claude-syncbar-live-qa-fixture.service"), \
                 contextlib.redirect_stdout(io.StringIO()), \
                 self.assertRaisesRegex(live_qa.Failure, "live_sequence_failed_originals_restored"):
             live_qa.run(self.args)
@@ -418,7 +418,7 @@ for line in sys.stdin:
             self.assertNotIn(raw_value, result.stdout + result.stderr)
         cli.write_text("#!/usr/bin/python3\nfrom pathlib import Path\nPath(" + repr(str(self.root / "cli-started")) + ").touch()\n")
         rejected = subprocess.run(["/usr/bin/python3", "-I", "-c", live_qa.PROBE],
-            env={**os.environ, "CODEX_HOME": str(home), "CODEX_SYNCBAR_QA_ACCESS_ONLY": "1", "PATH": str(bin_path) + ":/usr/bin:/bin"},
+            env={**os.environ, "CODEX_HOME": str(home), "CLAUDE_SYNCBAR_QA_ACCESS_ONLY": "1", "PATH": str(bin_path) + ":/usr/bin:/bin"},
             capture_output=True, timeout=10, text=True)
         self.assertEqual(1, rejected.returncode)
         self.assertEqual("remote_baseline_contains_refresh_token", json.loads(rejected.stdout)["error"])

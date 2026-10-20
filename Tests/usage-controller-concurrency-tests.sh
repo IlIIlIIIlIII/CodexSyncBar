@@ -10,13 +10,13 @@ cleanup() {
 }
 trap cleanup EXIT
 STATE="$TEST_ROOT/state"
-CODEX="$TEST_ROOT/codex"
-HELPER="$TEST_ROOT/gpt-switch"
-mkdir -p "$STATE" "$CODEX/sessions"
-cp "$ROOT/Support/gpt-switch" "$HELPER"
-cp "$ROOT/Support/codex-syncbar-askpass" "$TEST_ROOT/askpass"
+CLAUDE="$TEST_ROOT/claude"
+HELPER="$TEST_ROOT/claude-switch"
+mkdir -p "$STATE" "$CLAUDE/projects"
+cp "$ROOT/Support/claude-switch" "$HELPER"
+cp "$ROOT/Support/claude-syncbar-askpass" "$TEST_ROOT/askpass"
 cp "$ROOT/Support/usage-summary.mjs" "$TEST_ROOT/usage-summary.mjs"
-chmod 700 "$HELPER" "$STATE" "$CODEX"
+chmod 700 "$HELPER" "$STATE" "$CLAUDE"
 chmod 700 "$TEST_ROOT/askpass"
 chmod 700 "$TEST_ROOT/usage-summary.mjs"
 sed '$d' "$HELPER" >"$TEST_ROOT/functions.sh"
@@ -44,18 +44,18 @@ case " $* " in
   *" __node version "*) printf '2.1.3\n' ;;
   *" __node usage-summary "*)
     if [ "${TEST_DISABLE_DEVICE:-0}" = 1 ]; then
-      jq '.devices[0].enabled = false' "$GPT_SWITCH_CONFIG_FILE" >"$GPT_SWITCH_CONFIG_FILE.tmp"
-      chmod 600 "$GPT_SWITCH_CONFIG_FILE.tmp"
-      mv "$GPT_SWITCH_CONFIG_FILE.tmp" "$GPT_SWITCH_CONFIG_FILE"
+      jq '.devices[0].enabled = false' "$CLAUDE_SWITCH_CONFIG_FILE" >"$CLAUDE_SWITCH_CONFIG_FILE.tmp"
+      chmod 600 "$CLAUDE_SWITCH_CONFIG_FILE.tmp"
+      mv "$CLAUDE_SWITCH_CONFIG_FILE.tmp" "$CLAUDE_SWITCH_CONFIG_FILE"
     fi
-    if [ "${TEST_REMOVE_CONFIGURATION:-0}" = 1 ]; then rm -f "$GPT_SWITCH_CONFIG_FILE"; fi
+    if [ "${TEST_REMOVE_CONFIGURATION:-0}" = 1 ]; then rm -f "$CLAUDE_SWITCH_CONFIG_FILE"; fi
     schema=${TEST_REMOTE_SCHEMA:-6}
     [ ! -f "$TEST_ROOT/installed" ] || schema=6
     printf '{"schemaVersion":%s,"totalTokens":20,"buckets":[],"errors":[]}\n' "$schema"
     ;;
-  *" __node status "*) printf 'active=1 fingerprint=test mode=600 auth_mode=chatgpt cli=logged-in\n' ;;
+  *" __node status "*) printf 'active=1 fingerprint=test mode=600 auth_mode=claudeai cli=logged-in\n' ;;
   *".bootstrap."*)
-    [ -f "$GPT_SWITCH_STATE_ROOT/.controller-lock" ] || exit 73
+    [ -f "$CLAUDE_SWITCH_STATE_ROOT/.controller-lock" ] || exit 73
     cat >/dev/null
     touch "$TEST_ROOT/installed"
     printf 'bootstrap=installed\n'
@@ -65,12 +65,12 @@ esac
 SH
 chmod 700 "$TEST_ROOT/node" "$TEST_ROOT/ssh"
 common_env=(
-  GPT_SWITCH_STATE_ROOT="$STATE" CODEX_HOME="$CODEX"
-  GPT_SWITCH_CONFIG_FILE="$STATE/config.json"
-  GPT_SWITCH_NODE_BIN="$TEST_ROOT/node"
-  GPT_SWITCH_USAGE_HELPER="$TEST_ROOT/usage-summary.mjs"
-  GPT_SWITCH_ASKPASS_HELPER="$TEST_ROOT/askpass"
-  GPT_SWITCH_SSH_BIN="$TEST_ROOT/ssh" TEST_ROOT="$TEST_ROOT"
+  CLAUDE_SWITCH_STATE_ROOT="$STATE" CLAUDE_CONFIG_DIR="$CLAUDE"
+  CLAUDE_SWITCH_CONFIG_FILE="$STATE/config.json"
+  CLAUDE_SWITCH_NODE_BIN="$TEST_ROOT/node"
+  CLAUDE_SWITCH_USAGE_HELPER="$TEST_ROOT/usage-summary.mjs"
+  CLAUDE_SWITCH_ASKPASS_HELPER="$TEST_ROOT/askpass"
+  CLAUDE_SWITCH_SSH_BIN="$TEST_ROOT/ssh" TEST_ROOT="$TEST_ROOT"
 )
 wait_for_file() {
   for i in {1..500}; do
@@ -106,7 +106,7 @@ if ! env "${common_env[@]}" "$HELPER" usage-summary >"$TEST_ROOT/usage.jsonl" 2>
 fi
 jq -es 'length == 2 and all(.[]; .isReachable and .summary.totalTokens == 20)' "$TEST_ROOT/usage.jsonl" >/dev/null
 cmp "$STATE/.controller-lock" "$TEST_ROOT/lock-before"
-env "${common_env[@]}" GPT_SWITCH_NODE_BIN=missing-node-runtime "$HELPER" usage-summary >"$TEST_ROOT/fallback.jsonl"
+env "${common_env[@]}" CLAUDE_SWITCH_NODE_BIN=missing-node-runtime "$HELPER" usage-summary >"$TEST_ROOT/fallback.jsonl"
 jq -es 'length == 2 and all(.[]; .isReachable)' "$TEST_ROOT/fallback.jsonl" >/dev/null
 [ -f "$STATE/.swap-building.usage-test/manifest" ]
 
@@ -158,7 +158,7 @@ TEST_PIDS=()
 mkdir -p "$STATE/.login-building.1.test"
 printf 'pending-auth-transaction\n' >"$STATE/.login-building.1.test/manifest"
 for runtime in "$TEST_ROOT/node" missing-node-runtime; do
-  env "${common_env[@]}" GPT_SWITCH_NODE_BIN="$runtime" "$HELPER" usage-summary >"$TEST_ROOT/pending.jsonl"
+  env "${common_env[@]}" CLAUDE_SWITCH_NODE_BIN="$runtime" "$HELPER" usage-summary >"$TEST_ROOT/pending.jsonl"
   jq -es 'length == 2 and all(.[]; .isReachable)' "$TEST_ROOT/pending.jsonl" >/dev/null
   [ "$(cat "$STATE/.login-building.1.test/manifest")" = pending-auth-transaction ]
 done

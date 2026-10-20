@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The program ssh.exe runs for a stored SSH password or key passphrase. It is
+    published as one self-contained exe so it starts without an installed .NET
+    runtime; ClaudeSyncBar.Windows.AskPass.targets copies it into Runtime\.
+    It reads the secret through the same platform files the service writes it with.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ClaudeSyncBar.AskPass</AssemblyName>
+    <RootNamespace>ClaudeSyncBar.Windows.AskPass</RootNamespace>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ClaudeSyncBar.Windows.Platform/WindowsPaths.cs" Link="Platform/WindowsPaths.cs" />
+    <Compile Include="../ClaudeSyncBar.Windows.Platform/WindowsPathSafety.cs" Link="Platform/WindowsPathSafety.cs" />
+    <Compile Include="../ClaudeSyncBar.Windows.Platform/WindowsSecretStore.cs" Link="Platform/WindowsSecretStore.cs" />
+    <Compile Include="../ClaudeSyncBar.Windows.Core/Models.cs" Link="Core/Models.cs" />
+  </ItemGroup>
+  <!-- Publishes the exe and returns its full path to the project that ships it. -->
+  <Target Name="PublishAskPass" DependsOnTargets="Publish" Returns="$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(PublishDir)', '$(TargetName).exe'))" />
+</Project>

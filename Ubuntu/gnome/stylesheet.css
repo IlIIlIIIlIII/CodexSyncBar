@@ -1,41 +1,56 @@
-.cs-menu { color: #f5f5f3; }
-.cs-menu .popup-menu-content { background-color: #242424; border: 1px solid #484844; border-radius: 16px; padding: 8px; }
-.cs-content { width: 580px; }
-.cs-header { padding: 16px 16px 22px; spacing: 18px; }
-.cs-titles { spacing: 6px; }
-.cs-title { font-size: 1.7em; font-weight: 700; }
-.cs-subtitle { color: #b8b8b6; }
-.cs-heading { font-size: 1.45em; font-weight: 700; padding: 0 16px 16px; }
-.cs-button { background-color: #30302f; border: 1px solid #50504c; border-radius: 10px; padding: 9px 16px; font-weight: 600; color: #f5f5f3; }
-.cs-button:hover { background-color: #42443a; }
-.cs-button:focus { border-color: #a3c557; box-shadow: inset 0 0 0 1px #a3c557; }
-.cs-button:active { background-color: #505740; }
-.cs-button:insensitive { color: #999994; background-color: #2b2b29; }
-.cs-refresh { padding: 12px; }
-.cs-account { padding: 21px 12px; spacing: 14px; min-height: 58px; border: 1px solid transparent; }
-.cs-divider { height: 1px; background-color: #41413d; margin: 0 12px; }
-.cs-active { background-color: #373d29; border: 1px solid #51563b; border-radius: 8px; }
-.cs-avatar { background-color: #3b3c39; color: #f4f4f2; border-radius: 30px; padding: 12px; }
-.cs-active .cs-avatar { background-color: #293716; color: #a6d45d; }
-.cs-identity { width: 10em; spacing: 7px; }
-.cs-alias { font-size: 1.25em; font-weight: 700; }
-.cs-email { font-size: 0.94em; color: #b8b8b6; }
-.cs-usage { spacing: 8px; }
-.cs-meter { spacing: 10px; }
-.cs-track { height: 12px; -barlevel-height: 12px; -barlevel-background-color: #4b4b48; -barlevel-active-background-color: #88ba39; -barlevel-overdrive-color: #88ba39; -barlevel-overdrive-separator-width: 0; }
-.cs-warning .cs-track { -barlevel-active-background-color: #edbc54; }
-.cs-muted .cs-track { -barlevel-active-background-color: #858780; }
-.cs-unknown { height: 1px; border-top: 1px dashed #858580; background-color: transparent; border-radius: 0; }
-.cs-percent { width: 3.25em; font-size: 1.45em; font-weight: 700; color: #a1ce56; }
-.cs-warning .cs-percent { color: #edbc54; }
-.cs-muted .cs-percent { color: #b5b6b0; }
-.cs-reset { color: #b8b8b6; font-size: 0.88em; }
-.cs-action { width: 5.1em; }
-.cs-current { spacing: 5px; color: #a8cf60; font-size: 0.85em; }
-.cs-switch { padding: 8px 14px; }
-.cs-footer { border-top: 1px solid #41413d; padding: 16px 10px 6px; margin-top: 16px; spacing: 12px; }
-.cs-updated { font-size: 0.8em; color: #b8b8b6; }
-.cs-open-content { spacing: 10px; }
-.cs-open { padding: 13px 26px; font-size: 1.05em; }
-.cs-message { padding: 8px 16px; color: #e4c37a; font-size: 0.86em; }
-.cs-empty { padding: 30px 16px; color: #c5c5bf; }
+/* Every extension's stylesheet applies to the whole shell: these names carry the clsb- prefix so that
+   another extension, such as the Codex SyncBar one, can neither restyle this popup nor be restyled by it. */
+.clsb-menu { color: #f5f5f3; }
+.clsb-menu .popup-menu-content { background-color: #242424; border: 1px solid #484844; border-radius: 16px; padding: 8px; }
+.clsb-content { width: 580px; }
+.clsb-header { padding: 16px 16px 20px; spacing: 18px; }
+.clsb-titles { spacing: 6px; }
+.clsb-title { font-size: 1.7em; font-weight: 700; }
+.clsb-subtitle { color: #b8b8b6; }
+.clsb-heading { font-size: 1.3em; font-weight: 700; padding: 0 16px 12px; }
+.clsb-button { background-color: #30302f; border: 1px solid #50504c; border-radius: 10px; padding: 9px 16px; font-weight: 600; color: #f5f5f3; }
+.clsb-button:hover { background-color: #3d3d3b; }
+.clsb-button:focus { border-color: -st-accent-color; box-shadow: inset 0 0 0 1px -st-accent-color; }
+.clsb-button:active { background-color: #4a4a47; }
+.clsb-button:insensitive { color: #999994; background-color: #2b2b29; }
+.clsb-refresh { padding: 12px; }
+.clsb-smart { padding: 10px 14px; background-color: st-transparentize(-st-accent-color, 0.75); border-color: st-transparentize(-st-accent-color, 0.45); }
+.clsb-smart:hover { background-color: st-transparentize(-st-accent-color, 0.62); }
+.clsb-smart-content { spacing: 8px; }
+/* One account: identity and action on top, one line per quota below. */
+.clsb-account { padding: 16px 12px 18px; spacing: 14px; border: 1px solid transparent; }
+.clsb-account-top { spacing: 14px; }
+.clsb-divider { height: 1px; background-color: #41413d; margin: 0 12px; }
+.clsb-active { background-color: st-transparentize(-st-accent-color, 0.86); border: 1px solid st-transparentize(-st-accent-color, 0.6); border-radius: 10px; }
+.clsb-avatar { background-color: #3b3c39; color: #f4f4f2; border-radius: 30px; padding: 12px; }
+.clsb-active .clsb-avatar { background-color: st-transparentize(-st-accent-color, 0.7); color: st-lighten(-st-accent-color, 25%); }
+.clsb-identity { spacing: 5px; }
+.clsb-alias { font-size: 1.2em; font-weight: 700; }
+.clsb-email { font-size: 0.92em; color: #b8b8b6; }
+.clsb-status { font-size: 0.85em; font-weight: 600; }
+.clsb-status-warning { color: #edbc54; }
+.clsb-status-muted { color: #b5b6b0; }
+/* Aligned with the account name: avatar 54px + spacing 14px. */
+.clsb-quotas { margin-left: 68px; spacing: 10px; }
+.clsb-quota { spacing: 12px; }
+.clsb-quota-name { width: 3.1em; font-size: 0.9em; font-weight: 600; color: #c5c5bf; }
+/* Quota colors say how much is left and never follow the accent color, which can itself be orange or red. */
+.clsb-track { height: 10px; -barlevel-height: 10px; -barlevel-background-color: #4b4b48; -barlevel-active-background-color: #88ba39; -barlevel-overdrive-color: #88ba39; -barlevel-overdrive-separator-width: 0; }
+.clsb-warning .clsb-track { -barlevel-active-background-color: #edbc54; -barlevel-overdrive-color: #edbc54; }
+.clsb-critical .clsb-track { -barlevel-active-background-color: #e66b5b; -barlevel-overdrive-color: #e66b5b; }
+.clsb-muted .clsb-track { -barlevel-active-background-color: #858780; -barlevel-overdrive-color: #858780; }
+.clsb-unknown { height: 1px; border-top: 1px dashed #858580; background-color: transparent; border-radius: 0; }
+.clsb-percent { width: 3em; font-size: 1.15em; font-weight: 700; color: #a1ce56; }
+.clsb-warning .clsb-percent { color: #edbc54; }
+.clsb-critical .clsb-percent { color: #f08a7e; }
+.clsb-muted .clsb-percent { color: #b5b6b0; }
+.clsb-reset { width: 7.8em; color: #b8b8b6; font-size: 0.86em; }
+.clsb-action { min-width: 5.1em; }
+.clsb-current { spacing: 5px; color: st-lighten(-st-accent-color, 25%); font-size: 0.88em; font-weight: 600; }
+.clsb-switch { padding: 8px 16px; }
+.clsb-footer { border-top: 1px solid #41413d; padding: 16px 10px 6px; margin-top: 12px; spacing: 12px; }
+.clsb-updated { font-size: 0.8em; color: #b8b8b6; }
+.clsb-open-content { spacing: 10px; }
+.clsb-open { padding: 13px 26px; font-size: 1.05em; }
+.clsb-message { padding: 8px 16px; color: #e4c37a; font-size: 0.86em; }
+.clsb-empty { padding: 30px 16px; color: #c5c5bf; }

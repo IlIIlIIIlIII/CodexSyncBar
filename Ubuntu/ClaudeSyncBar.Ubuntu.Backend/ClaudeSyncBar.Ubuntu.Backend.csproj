@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ClaudeSyncBar.Backend</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ClaudeSyncBar.Ubuntu.Tests" />
+    <ProjectReference Include="../../Shared/ClaudeSyncBar.Core/ClaudeSyncBar.Core.csproj" />
+    <None Include="../../Support/claude-switch" Link="Runtime/claude-switch" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Support/claude-syncbar-askpass" Link="Runtime/claude-syncbar-askpass" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../ClaudeSyncBar.Ubuntu.Platform/Runtime/claude-syncbar-linux-askpass" Link="Runtime/claude-syncbar-linux-askpass" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../ClaudeSyncBar.Ubuntu.Platform/Runtime/claude-syncbar-secret-tool" Link="Runtime/claude-syncbar-secret-tool" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Support/usage-summary.mjs" Link="Runtime/usage-summary.mjs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

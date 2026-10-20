@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The Windows app's account service: the shared core, the Windows platform
+    files and the management service the Ubuntu backend uses, compiled together.
+    SYNCBAR_LINUX selects the Claude-port branches of the shared core (its #else
+    branches are the retired Codex-era Windows code); SYNCBAR_WINDOWS marks the
+    few places where Windows itself differs.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);SYNCBAR_LINUX;SYNCBAR_WINDOWS</DefineConstants>
+    <AssemblyName>ClaudeSyncBar.Service</AssemblyName>
+    <RootNamespace>ClaudeSyncBar.Windows.Service</RootNamespace>
+    <!-- Shared files carry the Ubuntu warnings as they are; this project adds none of its own. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ClaudeSyncBar.Windows.Core/*.cs"
+      Exclude="../ClaudeSyncBar.Windows.Core/WindowsPaths.cs;../ClaudeSyncBar.Windows.Core/WindowsSecretStore.cs;../ClaudeSyncBar.Windows.Core/WindowsPathSafety.cs;../ClaudeSyncBar.Windows.Core/BrowserLoginService.cs;../ClaudeSyncBar.Windows.Core/LocalSwitchService.cs;../ClaudeSyncBar.Windows.Core/ClaudeCliLocator.cs;../ClaudeSyncBar.Windows.Core/ClaudeDesktopLifecycle.cs;../ClaudeSyncBar.Windows.Core/CliManagementService.cs;../ClaudeSyncBar.Windows.Core/WslDeviceService.cs;../ClaudeSyncBar.Windows.Core/ClaudeProcessScope.cs;../ClaudeSyncBar.Windows.Core/WslDesktopAccountTarget.cs"
+      Link="Core/%(Filename)%(Extension)" />
+    <!-- WSL devices are not part of the Claude port yet; the same inert hooks as on Ubuntu. -->
+    <Compile Include="../../Shared/ClaudeSyncBar.Core/WslCompatibility.cs" Link="Core/WslCompatibility.cs" />
+    <Compile Include="../ClaudeSyncBar.Windows.Platform/*.cs" Link="Platform/%(Filename)%(Extension)" />
+    <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Backend/Contracts.cs" Link="Backend/Contracts.cs" />
+    <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Backend/ManagementService.cs" Link="Backend/ManagementService.cs" />
+    <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Backend/AutoSwitch.cs" Link="Backend/AutoSwitch.cs" />
+    <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Backend/AutoResume.cs" Link="Backend/AutoResume.cs" />
+    <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Backend/DemoService.cs" Link="Backend/DemoService.cs" />
+    <InternalsVisibleTo Include="ClaudeSyncBar" />
+    <InternalsVisibleTo Include="ClaudeSyncBar.Windows.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../Support/claude-switch" Link="Runtime/claude-switch" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Support/claude-syncbar-askpass" Link="Runtime/claude-syncbar-askpass" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../Support/usage-summary.mjs" Link="Runtime/usage-summary.mjs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

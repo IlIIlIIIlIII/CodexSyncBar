@@ -17,8 +17,8 @@ import gi
 gi.require_version("Graphene", "1.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GLib, Gio, Graphene, GdkPixbuf
-from codex_syncbar.app import SyncBarApplication, Gtk, Gsk
-from codex_syncbar.ipc import Client
+from claude_syncbar.app import SyncBarApplication, Gtk, Gsk
+from claude_syncbar.ipc import Client
 
 
 def capture_window(window, destination, profile_id, diagnostics=None):
@@ -100,7 +100,7 @@ def main():
     if args.capture_stress and not args.capture_only:
         parser.error('--capture-stress requires --capture-only.')
     # A desktop restart must not kill the process responsible for restoring auth.
-    if not args.capture_only and not any('codex-syncbar-live-qa-' in line and '.service' in line for line in Path('/proc/self/cgroup').read_text().splitlines()):
+    if not args.capture_only and not any('claude-syncbar-live-qa-' in line and '.service' in line for line in Path('/proc/self/cgroup').read_text().splitlines()):
         parser.error('Run only as a child of the dedicated live QA supervisor user service.')
     targets = set(json.loads(args.expected_targets))
     if not args.capture_only and not targets:
@@ -113,7 +113,7 @@ def main():
     options = SimpleNamespace(socket=args.socket, demo=False, capture=None, width=1040, height=760,
                               light=False, profile_id=None, page='switch')
     app = SyncBarApplication(options)
-    app.set_application_id('io.github.codexsyncbar.Ubuntu.LiveQA')
+    app.set_application_id('io.github.claudesyncbar.Ubuntu.LiveQA')
     app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)
     state = {'step':0, 'deadline':time.monotonic()+args.timeout, 'ok':False, 'captureState':{}}
 
@@ -135,7 +135,7 @@ def main():
         return False
 
     def capture_settled_frame():
-        destination = Path(os.environ.get('SYNCBAR_LIVE_QA_CAPTURE_DIR', '/tmp/codex-syncbar-live-qa-captures'))
+        destination = Path(os.environ.get('SYNCBAR_LIVE_QA_CAPTURE_DIR', '/tmp/claude-syncbar-live-qa-captures'))
         return capture_window(app.window, destination, args.profile_id, state['captureState'])
 
     def tick():

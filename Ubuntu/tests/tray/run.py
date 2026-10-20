@@ -12,6 +12,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=ROOT / 'docs/ubuntu/qa-evidence/tray/native')
 parser.add_argument('--size', default='1280x900')
 parser.add_argument('--text-scale', default='1')
+parser.add_argument('--scale', default='', help='Display scale for the private monitor, e.g. 1.6667 for fractional scaling')
+parser.add_argument('--mode', default='', help="Shell mode, e.g. 'ubuntu' for Ubuntu's Yaru shell theme")
+parser.add_argument('--other-stylesheet', default='', help="Another extension's stylesheet, loaded too as the shell would")
 parser.add_argument('--live-readonly', action='store_true')
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
@@ -19,22 +22,24 @@ with tempfile.TemporaryDirectory(prefix='syncbar-tray-qa-') as temp:
     root = Path(temp)
     runtime = root / 'runtime'
     runtime.mkdir(mode=0o700)
-    archive = root / 'codex-syncbar@griplabs.io.shell-extension.zip'
+    archive = root / 'claude-syncbar@griplabs.io.shell-extension.zip'
     with zipfile.ZipFile(archive, 'w') as zipped:
         for path in (ROOT / 'Ubuntu/gnome').iterdir():
             if path.is_file():
                 zipped.write(path, path.name)
     env = dict(os.environ, XDG_RUNTIME_DIR=str(runtime), LIBGL_ALWAYS_SOFTWARE='1',
                SYNCBAR_QA_OUTPUT=str(args.output.resolve()), SYNCBAR_QA_SIZE=args.size,
-               SYNCBAR_QA_TEXT_SCALE=args.text_scale,
-               SYNCBAR_QA_SOCKET=str(Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'codex-syncbar/control.sock') if args.live_readonly else str(root / 'demo.sock'),
+               SYNCBAR_QA_TEXT_SCALE=args.text_scale, SYNCBAR_QA_SCALE=args.scale, SYNCBAR_QA_MODE=args.mode, SYNCBAR_QA_OTHER_STYLESHEET=args.other_stylesheet,
+               # Settings changed by the scenes stay in this private shell.
+               GSETTINGS_BACKEND='memory', MUTTER_DEBUG_EXPERIMENTAL_FEATURES='scale-monitor-framebuffer',
+               SYNCBAR_QA_SOCKET=str(Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'claude-syncbar/control.sock') if args.live_readonly else str(root / 'demo.sock'),
                SYNCBAR_QA_LIVE=str(int(args.live_readonly)))
     env.pop('DBUS_SESSION_BUS_ADDRESS', None)
     backend = None
     try:
         if not args.live_readonly:
             backend_log = (args.output / 'backend.log').open('w')
-            backend = subprocess.Popen([str(ROOT / 'dist/ubuntu/backend/CodexSyncBar.Backend'), '--demo', '--socket', str(root / 'demo.sock')],
+            backend = subprocess.Popen([str(ROOT / 'dist/ubuntu/backend/ClaudeSyncBar.Backend'), '--demo', '--socket', str(root / 'demo.sock')],
                                        env=env, stdout=backend_log, stderr=subprocess.STDOUT)
         command = ['dbus-run-session', '--', 'gnome-shell-test-tool', '--headless', '--disable-animations',
                    '--wrap', f'python3 {Path(__file__).with_name("compositor.py")}',

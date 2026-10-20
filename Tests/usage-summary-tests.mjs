@@ -8,63 +8,52 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const controller = path.join(repositoryRoot, "Support/gpt-switch");
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-syncbar-usage-tests-"));
+const controller = path.join(repositoryRoot, "Support/claude-switch");
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "claude-syncbar-usage-tests-"));
 // The production helper rejects writable runtime assets. Keep tests independent
 // of the checkout's group-writable directory/file permissions.
 const usageHelper = path.join(root, "usage-summary.mjs");
 fs.copyFileSync(path.join(repositoryRoot, "Support/usage-summary.mjs"), usageHelper);
 fs.chmodSync(usageHelper, 0o755);
-const sessions = path.join(root, ".codex/sessions");
+const claudeHome = path.join(root, ".claude");
+const transcripts = path.join(claudeHome, "projects");
 const cache = path.join(root, "usage-cache.json");
+const now = Date.now();
+const recent = (minutesAgo) => new Date(now - minutesAgo * 60_000).toISOString();
 
-function usage(total, variant = 0) {
-  const output = Math.max(1, Math.floor(total / 5) + variant);
-  const input = total - output;
+function usage(input, cacheRead, cacheWrite, output, extra = {}) {
   return {
     input_tokens: input,
-    cached_input_tokens: Math.floor(input / 2),
-    cache_write_input_tokens: variant,
+    cache_read_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheWrite,
     output_tokens: output,
-    reasoning_output_tokens: Math.floor(output / 3),
-    total_tokens: total,
+    service_tier: "standard",
+    speed: "standard",
+    ...extra,
   };
 }
 
-function addUsage(left, right) {
-  const result = {};
-  for (const key of Object.keys(usage(1))) result[key] = left[key] + right[key];
-  return result;
+// Claude Code writes one line per content block of a response; each line
+// repeats the response's id, request id and usage.
+function response(id, model, tokens, timestamp, lines = 1) {
+  return Array.from({ length: lines }, (_, block) => ({
+    type: "assistant",
+    timestamp,
+    requestId: `req_${id}`,
+    apiBlockIndex: block,
+    message: { id: `msg_${id}`, model, usage: tokens },
+  }));
 }
 
-function sessionMeta(id, sessionID = id, forkedFromID = null, source = undefined) {
-  return {
-    type: "session_meta",
-    payload: { id, session_id: sessionID, forked_from_id: forkedFromID, ...(source ? { source } : {}) },
-  };
-}
-
-function turnContext(model, serviceTier = "default") {
-  return { type: "turn_context", payload: { model, service_tier: serviceTier } };
-}
-
-function tokenCount(last, total, timestamp) {
-  return {
-    ...(timestamp ? { timestamp } : {}),
-    type: "event_msg",
-    payload: { type: "token_count", info: { last_token_usage: last, total_token_usage: total } },
-  };
-}
-
-function writeSession(name, events) {
-  const file = path.join(sessions, name);
+function writeTranscript(name, events) {
+  const file = path.join(transcripts, name);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
+  fs.writeFileSync(file, `${events.flat().map((event) => JSON.stringify(event)).join("\n")}\n`);
   return file;
 }
 
 function collectNode() {
-  const result = spawnSync("node", [usageHelper, sessions, cache], { encoding: "utf8" });
+  const result = spawnSync("node", [usageHelper, transcripts, cache], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
@@ -75,10 +64,10 @@ function collectJQ() {
     env: {
       ...process.env,
       HOME: root,
-      CODEX_HOME: path.join(root, ".codex"),
-      GPT_SWITCH_STATE_ROOT: path.join(root, ".local/share/gpt-switch-jq"),
-      GPT_SWITCH_USAGE_HELPER: usageHelper,
-      GPT_SWITCH_NODE_BIN: "/missing/node",
+      CLAUDE_CONFIG_DIR: claudeHome,
+      CLAUDE_SWITCH_STATE_ROOT: path.join(root, ".local/share/claude-switch-jq"),
+      CLAUDE_SWITCH_USAGE_HELPER: usageHelper,
+      CLAUDE_SWITCH_NODE_BIN: "/missing/node",
     },
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -88,169 +77,126 @@ function collectJQ() {
 function comparable(summary) {
   const fields = [
     "schemaVersion", "scannedFiles", "requests", "inputTokens", "cachedInputTokens",
-    "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens",
+    "cacheWriteInputTokens", "cacheWriteOneHourInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens",
   ];
   return {
     ...Object.fromEntries(fields.map((field) => [field, summary[field]])),
     buckets: [...summary.buckets].sort((left, right) =>
-      `${left.model}\u001f${left.serviceTier}`.localeCompare(`${right.model}\u001f${right.serviceTier}`)),
+      `${left.model}\u001f${left.serviceTier}\u001f${left.isLongContext}`
+        .localeCompare(`${right.model}\u001f${right.serviceTier}\u001f${right.isLongContext}`)),
     errors: summary.errors,
   };
 }
 
 try {
-  fs.mkdirSync(sessions, { recursive: true });
+  const empty = collectNode();
+  assert.equal(empty.totalTokens, 0);
+  assert.equal(empty.scannedFiles, 0);
+  assert.deepEqual(comparable(collectJQ()), comparable(empty), "an absent transcript directory is empty usage");
 
-  const p1 = usage(100, 1);
-  const p2 = usage(80, 2);
-  const p3 = usage(80, 3);
-  const p1Total = p1;
-  const p2Total = addUsage(p1Total, p2);
-  const p3Total = addUsage(p2Total, p3);
-  const parentTokens = [
-    tokenCount(p1, p1Total),
-    tokenCount(p2, p2Total),
-    tokenCount(p3, p3Total),
-  ];
-  writeSession("z-parent.jsonl", [
-    sessionMeta("root-1"),
-    turnContext("gpt-5.6-sol"),
-    ...parentTokens,
+  const opus = "claude-opus-5-5";
+  const haiku = "claude-haiku-5-5";
+  // 10 uncached + 40 cache-read + 5 cache-write prompt tokens, 20 output of which 8 are thinking.
+  // Four of the five cache-write tokens are kept for an hour.
+  const first = usage(10, 40, 5, 20, {
+    output_tokens_details: { thinking_tokens: 8 },
+    cache_creation: { ephemeral_1h_input_tokens: 4, ephemeral_5m_input_tokens: 1 },
+  });
+  const second = usage(100, 0, 0, 50);
+  const session = writeTranscript("-home-user-project/session-a.jsonl", [
+    { type: "user", timestamp: recent(30), message: { role: "user", content: "question" } },
+    response("a1", opus, first, recent(29), 3),
+    response("a2", opus, second, recent(28), 2),
+    response("fast", opus, usage(7, 0, 0, 3, { speed: "fast" }), recent(27)),
+    response("priority", haiku, usage(4, 0, 0, 1, { service_tier: "priority" }), recent(26)),
+    // Locally generated notices and events without usage are not requests.
+    response("notice", "<synthetic>", usage(999, 0, 0, 999), recent(25)),
+    { type: "assistant", timestamp: recent(24), requestId: "req_none", message: { id: "msg_none", model: opus } },
+    { type: "system", timestamp: recent(23), content: "\"assistant\" \"usage\" in unrelated text" },
   ]);
+  fs.appendFileSync(session, "{\"type\":\"assistant\",\"message\":{\"usage\": not json\n");
 
-  const c1 = usage(70, 4);
-  const c2 = usage(70, 5);
-  const c1Total = addUsage(p3Total, c1);
-  const c2Total = addUsage(c1Total, c2);
-  const childTokens = [
-    ...parentTokens,
-    tokenCount(c1, c1Total),
-    tokenCount(c2, c2Total),
-  ];
-  writeSession("a-child.jsonl", [
-    sessionMeta("child-1", "root-1", "root-1"),
-    sessionMeta("root-1"),
-    turnContext("gpt-5.6-sol"),
-    ...parentTokens,
-    turnContext("gpt-5.6-terra", "priority"),
-    ...childTokens.slice(3),
+  // A resumed session starts a new file with the earlier responses copied in.
+  writeTranscript("-home-user-project/session-b.jsonl", [
+    response("a1", opus, first, recent(29), 3),
+    response("a2", opus, second, recent(28), 2),
+    response("b1", opus, usage(1, 2, 3, 4), recent(10)),
   ]);
+  // Sub-agent transcripts live below their session and hold their own requests.
+  writeTranscript("-home-user-project/session-a/subagents/agent-1.jsonl", [
+    response("sub1", haiku, usage(30, 0, 0, 6), recent(20), 2),
+  ]);
+  // Outside the 30-day window.
+  writeTranscript("-home-user-old/session-old.jsonl", [
+    response("old", opus, usage(5000, 0, 0, 5000), new Date(now - 31 * 24 * 60 * 60 * 1000).toISOString()),
+  ]);
+  writeTranscript("-home-user-stale/stale.jsonl", [response("stale", opus, usage(1, 0, 0, 1), recent(5))]);
+  collectNode();
+  fs.rmSync(path.join(transcripts, "-home-user-stale"), { recursive: true });
 
-  const g1 = usage(50, 6);
-  const g1Total = addUsage(c2Total, g1);
-  writeSession("b-grandchild.jsonl", [
-    sessionMeta("grandchild-1", "root-1", "child-1"),
-    turnContext("gpt-5.6-sol"),
-    ...childTokens.slice(1),
-    turnContext("gpt-5.4-mini"),
-    tokenCount(g1, g1Total),
-  ]);
-
-  const same = usage(90, 7);
-  const independentOne = writeSession("independent-one.jsonl", [
-    sessionMeta("independent-1"), turnContext("gpt-5.6-sol"), tokenCount(same, same),
-  ]);
-  writeSession("independent-two.jsonl", [
-    sessionMeta("independent-2"), turnContext("gpt-5.6-sol"), tokenCount(same, same),
-  ]);
-  const standaloneSubagent = usage(35, 15);
-  writeSession("standalone-subagent.jsonl", [
-    sessionMeta("standalone-subagent-1", "standalone-subagent-1", null, { subagent: {} }),
-    turnContext("gpt-5.4"),
-    tokenCount(standaloneSubagent, standaloneSubagent),
-  ]);
-
-  const n1 = usage(60, 8);
-  const n2 = usage(40, 9);
-  const n2Total = addUsage(n1, n2);
-  const reset = usage(30, 10);
-  const fallback = usage(20, 11);
-  writeSession("normal-reset-fallback.jsonl", [
-    sessionMeta("normal-1"),
-    turnContext("gpt-5.6-sol"),
-    tokenCount(n1, n1),
-    tokenCount(n1, n1),
-    turnContext("gpt-5.6-terra", "priority"),
-    tokenCount(n2, n2Total),
-    tokenCount(reset, reset),
-    tokenCount(fallback, usage(0)),
-  ]);
-
-  const oldTimestamp = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
-  const old = usage(100, 12);
-  const recent = usage(60, 13);
-  writeSession("rolling-window.jsonl", [
-    sessionMeta("rolling-1"),
-    turnContext("gpt-5.6-sol"),
-    tokenCount(old, old, oldTimestamp),
-    tokenCount(recent, addUsage(old, recent)),
-  ]);
-
-  fs.writeFileSync(cache, `${JSON.stringify({
-    schemaVersion: 4,
-    files: { "stale.jsonl": { buckets: { stale: { totalTokens: 999_999_999 } } } },
-  })}\n`);
-
-  const first = collectNode();
-  assert.equal(first.totalTokens, 875, "fork replay must not be charged");
-  assert.equal(first.requests, 14);
-  assert.equal(first.schemaVersion, 6);
+  const summary = collectNode();
+  assert.equal(summary.schemaVersion, 6);
+  assert.equal(summary.scannedFiles, 4);
+  assert.equal(summary.requests, 6, "split and copied responses count once");
+  assert.equal(summary.inputTokens, 55 + 100 + 7 + 4 + 6 + 30);
+  assert.equal(summary.cachedInputTokens, 40 + 2);
+  assert.equal(summary.cacheWriteInputTokens, 5 + 3);
+  assert.equal(summary.cacheWriteOneHourInputTokens, 4);
+  assert.equal(summary.outputTokens, 20 + 50 + 3 + 1 + 4 + 6);
+  assert.equal(summary.reasoningOutputTokens, 8);
+  assert.equal(summary.totalTokens, summary.inputTokens + summary.outputTokens);
   assert.deepEqual(
-    first.buckets.map(({ model, serviceTier, totalTokens }) => ({ model, serviceTier, totalTokens })),
+    comparable(summary).buckets.map(({ model, serviceTier, isLongContext, totalTokens, requests }) =>
+      ({ model, serviceTier, isLongContext, totalTokens, requests })),
     [
-      { model: "gpt-5.6-sol", serviceTier: "default", totalTokens: 560 },
-      { model: "gpt-5.6-terra", serviceTier: "priority", totalTokens: 230 },
-      { model: "gpt-5.4-mini", serviceTier: "default", totalTokens: 50 },
-      { model: "gpt-5.4", serviceTier: "default", totalTokens: 35 },
+      { model: haiku, serviceTier: "default", isLongContext: false, totalTokens: 36, requests: 1 },
+      { model: haiku, serviceTier: "priority", isLongContext: false, totalTokens: 5, requests: 1 },
+      { model: opus, serviceTier: "default", isLongContext: false, totalTokens: 75 + 150 + 10, requests: 3 },
+      { model: opus, serviceTier: "fast", isLongContext: false, totalTokens: 10, requests: 1 },
     ],
   );
   const rebuiltCache = JSON.parse(fs.readFileSync(cache, "utf8"));
   assert.equal(rebuiltCache.schemaVersion, 6);
-  assert.equal(rebuiltCache.files["stale.jsonl"], undefined);
+  assert.equal(rebuiltCache.files["-home-user-stale/stale.jsonl"], undefined);
 
-  assert.deepEqual(comparable(collectNode()), comparable(first), "unchanged cache scan must be idempotent");
+  assert.deepEqual(comparable(collectNode()), comparable(summary), "unchanged cache scan must be idempotent");
+  assert.deepEqual(comparable(collectJQ()), comparable(summary), "Node and jq paths must agree");
 
-  const appended = usage(25, 14);
-  fs.appendFileSync(independentOne, `${JSON.stringify(tokenCount(appended, addUsage(same, appended)))}\n`);
-  const afterAppend = collectNode();
-  assert.equal(afterAppend.totalTokens, 900);
-  assert.equal(afterAppend.requests, 15);
-  assert.deepEqual(comparable(collectNode()), comparable(afterAppend));
+  // A response still being written is left for the next scan, then counted once.
+  const appended = response("a3", opus, usage(9, 0, 0, 1), recent(1), 2).map((event) => JSON.stringify(event));
+  fs.appendFileSync(session, `${appended[0]}\n${appended[1].slice(0, 40)}`);
+  const partial = collectNode();
+  assert.equal(partial.requests, summary.requests + 1);
+  assert.equal(partial.totalTokens, summary.totalTokens + 10);
+  fs.appendFileSync(session, `${appended[1].slice(40)}\n`);
+  const completed = collectNode();
+  assert.deepEqual(comparable(completed), comparable(partial));
+  assert.deepEqual(comparable(collectJQ()), comparable(completed));
 
-  const jqSummary = collectJQ();
-  assert.deepEqual(comparable(jqSummary), comparable(afterAppend), "Node and jq paths must agree");
+  // Prompts above 100K tokens can fall on a higher rate card; the cached
+  // parts of the prompt count toward that size.
+  writeTranscript("-home-user-long/long.jsonl", [
+    response("short", opus, usage(50_000, 49_000, 1_000, 10), recent(4)),
+    response("long", opus, usage(50_001, 49_000, 1_000, 10), recent(3)),
+  ]);
+  const long = collectNode();
+  const longBuckets = long.buckets.filter((bucket) => bucket.model === opus && bucket.serviceTier === "default");
+  assert.equal(longBuckets.find((bucket) => bucket.isLongContext).inputTokens, 100_001);
+  assert.equal(longBuckets.find((bucket) => !bucket.isLongContext).inputTokens,
+    100_000 + 55 + 100 + 6 + 9);
+  assert.deepEqual(comparable(collectNode()), comparable(long));
+  assert.deepEqual(comparable(collectJQ()), comparable(long));
 
-  const short = { input_tokens: 272000, cached_input_tokens: 100000, cache_write_input_tokens: 1000,
-    output_tokens: 100, reasoning_output_tokens: 50, total_tokens: 272100 };
-  const long = { ...short, input_tokens: 272001, total_tokens: 272101 };
-  writeSession("astra.jsonl", [sessionMeta("astra"), turnContext("gpt-6-astra"),
-    tokenCount(short, short), tokenCount(long, addUsage(short, long))]);
-  const astra = collectNode();
-  const astraBuckets = astra.buckets.filter((b) => b.model === "gpt-6-astra");
-  assert.equal(astraBuckets.length, 2);
-  assert.equal(astraBuckets.find((b) => b.isLongContext).inputTokens, 272001);
-  assert.equal(astraBuckets.find((b) => !b.isLongContext).inputTokens, 272000);
-  assert.deepEqual(comparable(collectNode()), comparable(astra));
-  assert.deepEqual(comparable(collectJQ()), comparable(astra));
-
-  // A Cursor -> native transition must keep the cumulative baseline while
-  // excluding Cursor tokens, requests, and cached buckets from the output.
-  const cursor = usage(1000, 20);
-  const native = usage(30, 21);
-  writeSession("cursor-transition.jsonl", [sessionMeta("cursor-transition"),
-    turnContext("syncbar-cursor/gpt-5.6-sol"), tokenCount(cursor, cursor),
-    turnContext("gpt-5.6-sol"), tokenCount(native, addUsage(cursor, native))]);
-  writeSession("cursor-model.jsonl", [sessionMeta("cursor-model"),
-    turnContext("CURSOR-grok-4.6"), tokenCount(cursor, cursor)]);
-  const filtered = collectNode();
-  assert.equal(filtered.totalTokens, astra.totalTokens + 30);
-  assert.equal(filtered.requests, astra.requests + 1);
-  assert.ok(filtered.buckets.every((b) => !/cursor/i.test(b.model)));
-  const cursorCache = JSON.parse(fs.readFileSync(cache, "utf8"));
-  assert.ok(Object.values(cursorCache.files["cursor-transition.jsonl"].buckets)
-    .some((b) => /cursor/i.test(b.model)), "retain cached baselines without rebuilding");
-  assert.deepEqual(comparable(collectNode()), comparable(filtered));
-  assert.deepEqual(comparable(collectJQ()), comparable(filtered));
+  // A rewritten transcript is read again from the start without double counting.
+  writeTranscript("-home-user-project/session-b.jsonl", [
+    response("a1", opus, first, recent(29), 3),
+    response("b1", opus, usage(1, 2, 3, 4), recent(10)),
+    response("b2", opus, usage(2, 0, 0, 2), recent(2)),
+  ]);
+  const rewritten = collectNode();
+  assert.equal(rewritten.requests, long.requests + 1);
+  assert.equal(rewritten.totalTokens, long.totalTokens + 4);
+  assert.deepEqual(comparable(collectJQ()), comparable(rewritten));
   process.stdout.write("usage-summary regression tests passed\n");
 
 } finally {

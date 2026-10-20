@@ -1,0 +1,309 @@
+using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.Json.Nodes;
+using ClaudeSyncBar.Ubuntu.Backend;
+using ClaudeSyncBar.Windows.Core;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
+namespace ClaudeSyncBar.Windows.Tests;
+
+public sealed class WindowsPlatformTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "csb-win-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly WindowsPaths _paths;
+
+    public WindowsPlatformTests()
+    {
+        Directory.CreateDirectory(_root);
+        _paths = new WindowsPaths(Path.Combine(_root, "home"));
+        Directory.CreateDirectory(_paths.Home);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    [Fact]
+    public void IsolatedPathsStayInsideTheGivenHome()
+    {
+        Assert.True(_paths.IsIsolated);
+        Assert.Equal(Path.Combine(_paths.Home, "AppData", "Local", "claude-syncbar"), _paths.StateRoot);
+        Assert.Equal(Path.Combine(_paths.Home, "AppData", "Roaming", "Claude"), _paths.DesktopUserDataDirectory);
+        Assert.Equal(Path.Combine(_paths.Home, ".claude", ".credentials.json"), _paths.ActiveAuthFile);
+        Assert.Equal(Path.Combine(_paths.Home, ".claude.json"), _paths.ClaudeConfigFile);
+        Assert.StartsWith(_paths.StateRoot, _paths.DesktopLoginsDirectory);
+    }
+
+    [Fact]
+    public void SecretsRoundTripAndAreBoundToTheirName()
+    {
+        var store = new WindowsSecretStore(_paths);
+        store.Save("s3cret value", "device-1.password");
+        Assert.Equal("s3cret value", store.Read("device-1.password"));
+        var directory = Path.Combine(_paths.StateRoot, "secrets");
+        Assert.DoesNotContain("s3cret", File.ReadAllText(Path.Combine(directory, "device-1.password.bin")));
+        File.Copy(Path.Combine(directory, "device-1.password.bin"), Path.Combine(directory, "device-2.password.bin"));
+        Assert.Throws<ClaudeSyncBarException>(() => store.Read("device-2.password"));
+        store.Delete("device-1.password");
+        Assert.Null(store.Read("device-1.password"));
+    }
+
+    [Fact]
+    public void PrivateFilesRejectReadersOtherThanTheUser()
+    {
+        WindowsPathSafety.EnsurePrivateDirectory(_paths.StateRoot, "상태");
+        var file = Path.Combine(_paths.StateRoot, "private.bin");
+        WindowsPathSafety.WritePrivateBytes(file, [1, 2, 3]);
+        Assert.Equal([1, 2, 3], WindowsPathSafety.ReadPrivateFile(file, "비공개 파일", 16));
+        var security = new FileInfo(file).GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.Read, AccessControlType.Allow));
+        new FileInfo(file).SetAccessControl(security);
+        Assert.Throws<ClaudeSyncBarException>(() => WindowsPathSafety.EnsurePrivateFile(file, "비공개 파일", 16));
+    }
+
+    [Fact]
+    public async Task ConfigLockWaitsForTheHolderAndTakesOverAStaleOne()
+    {
+        var config = Path.Combine(_paths.Home, ".claude.json");
+        var first = ClaudeConfigLock.Acquire(config);
+        var second = Task.Run(() => ClaudeConfigLock.Acquire(config));
+        await Task.Delay(300);
+        Assert.False(second.IsCompleted);
+        first.Dispose();
+        (await second.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+
+        Directory.CreateDirectory(config + ".lock");
+        Directory.SetLastWriteTimeUtc(config + ".lock", DateTime.UtcNow.AddMinutes(-1));
+        var started = DateTime.UtcNow;
+        using (ClaudeConfigLock.Acquire(config)) Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(5));
+        Assert.False(Directory.Exists(config + ".lock"));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Program Files\WindowsApps\Claude_2.42304.2.0_x64__pzs8sxrjxfjjc\app\Claude.exe", true)]
+    [InlineData(@"C:\Users\me\AppData\Local\AnthropicClaude\app-0.9.3\claude.exe", true)]
+    [InlineData(@"C:\Users\me\AppData\Roaming\Claude\claude-code\2.1.299\f0584be0fbaf\claude.exe", false)]
+    [InlineData(@"C:\Users\me\.local\bin\claude.exe", false)]
+    public void TellsClaudeDesktopFromTheCli(string path, bool desktop)
+    {
+        Assert.Equal(desktop, ClaudeDesktopLifecycle.IsDesktopExecutable(path));
+        Assert.Equal(!desktop, WindowsProcess.IsClaudeCliCommand(path, [path]));
+    }
+
+    [Fact]
+    public void RecognisesTheNpmCliUnderNode()
+    {
+        var node = @"C:\Program Files\nodejs\node.exe";
+        Assert.True(WindowsProcess.IsClaudeCliCommand(node, [node, @"C:\Users\me\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js"]));
+        Assert.False(WindowsProcess.IsClaudeCliCommand(node, [node, @"C:\work\server.js"]));
+    }
+
+    [Fact]
+    public void SplitsCommandLinesTheWayWindowsProgramsDo()
+    {
+        Assert.Equal(["a b", "c\"d", @"e\\"], WindowsProcess.SplitCommandLine("\"a b\" c\\\"d \"e\\\\\\\\\""));
+        Assert.Equal(["--user-data-dir=C:\\x y", "--type=renderer"], WindowsProcess.SplitCommandLine("\"--user-data-dir=C:\\x y\" --type=renderer"));
+    }
+
+    [Fact]
+    public void ReadsAnotherProcessCommandLineDirectoryAndEnvironment()
+    {
+        var directory = Path.Combine(_root, "work dir");
+        Directory.CreateDirectory(directory);
+        var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/d /c ping -n 6 127.0.0.1 >nul")
+        {
+            UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = directory,
+        };
+        start.Environment["CSB_PROBE"] = "yes";
+        using var child = Process.Start(start)!;
+        try
+        {
+            Thread.Sleep(300);
+            using var captured = WindowsProcess.Capture(child.Id);
+            Assert.NotNull(captured);
+            Assert.Contains("ping", captured.CommandLine);
+            Assert.Equal(Environment.ProcessId, captured.ParentId);
+            Assert.Equal(directory, captured.CurrentDirectory, ignoreCase: true);
+            Assert.True(captured.EnvironmentReadable);
+            Assert.Equal("yes", captured.Environment["CSB_PROBE"]);
+            Assert.True(WindowsProcess.DescendsFrom(child.Id, Environment.ProcessId));
+        }
+        finally
+        {
+            child.Kill(entireProcessTree: true);
+        }
+    }
+
+    [Fact]
+    public void LoginOpenerWritesTheQuotedAddressExactly()
+    {
+        var directory = Path.Combine(_root, "login");
+        Directory.CreateDirectory(directory);
+        var opener = Path.Combine(directory, ClaudeLoginService.OpenerName);
+        File.WriteAllText(opener, ClaudeLoginService.OpenerScript);
+        var target = Path.Combine(directory, "login-url");
+        const string url = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&scope=user%3Aprofile+user%3Ainference&state=x!y";
+        var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /s /c \"\"{opener}\" \"{url}\"\"")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+        };
+        start.Environment["CLAUDE_SYNCBAR_LOGIN_URL_FILE"] = target;
+        using (var process = Process.Start(start)!) Assert.True(process.WaitForExit(10000));
+        Assert.Equal(url, File.ReadAllText(target).Trim());
+        Assert.False(File.Exists(target + ".tmp"));
+    }
+
+    [Fact]
+    public void PicksTheNewestCliClaudeDesktopKeeps()
+    {
+        var root = Path.Combine(_root, "claude-code");
+        foreach (var (version, build) in new[] { ("2.1.9", "aaa"), ("2.1.10", "bbb") })
+        {
+            Directory.CreateDirectory(Path.Combine(root, version, build));
+            File.WriteAllText(Path.Combine(root, version, build, "claude.exe"), "");
+        }
+
+        Assert.Equal(Path.Combine(root, "2.1.10", "bbb", "claude.exe"), ClaudeCliLocator.FindDesktopBundled(root));
+    }
+
+    [Fact]
+    public void LaunchAtLoginOfAnIsolatedHomeNeverTouchesTheRegistry()
+    {
+        Assert.False(BackendPlatform.LaunchAtLogin(_paths));
+        BackendPlatform.SetLaunchAtLogin(_paths, true);
+        Assert.True(BackendPlatform.LaunchAtLogin(_paths));
+        BackendPlatform.SetLaunchAtLogin(_paths, false);
+        Assert.False(BackendPlatform.LaunchAtLogin(_paths));
+    }
+
+    [Fact]
+    public void ProcessWhoseParentIdWasReusedIsNotTakenForADescendant()
+    {
+        // This app (300) was started by 200, which then ended; Windows gave 200 to a
+        // newer process of Claude Desktop (100), started after this app.
+        var parents = new Dictionary<int, int> { [300] = 200, [200] = 100, [100] = 10 };
+        var started = new Dictionary<int, long> { [300] = 50, [200] = 90, [100] = 80, [10] = 1 };
+        long? Started(int id) => started.TryGetValue(id, out var time) ? time : null;
+        Assert.False(WindowsProcess.DescendsFrom(300, 100, parents, Started));
+
+        // Started from inside the app for real: every parent is older than its child.
+        started[200] = 40;
+        started[100] = 30;
+        Assert.True(WindowsProcess.DescendsFrom(300, 100, parents, Started));
+
+        // Start times that cannot be read are trusted, so the app is never stopped from inside it.
+        Assert.True(WindowsProcess.DescendsFrom(300, 100, parents, _ => null));
+        Assert.False(WindowsProcess.DescendsFrom(300, 999, parents, _ => null));
+    }
+
+    [Fact]
+    public void DesktopDataIsFollowedWhereTheStorePackageMovedIt()
+    {
+        var roaming = Path.Combine(_paths.Home, "AppData", "Roaming", "Claude");
+        var moved = Path.Combine(_paths.LocalAppData, "Claude-Data", "claude_pkg0123456789");
+        // Before the move: the classic folder with its config.
+        Directory.CreateDirectory(roaming);
+        File.WriteAllText(Path.Combine(roaming, "config.json"), "{}");
+        Assert.Equal(roaming, _paths.DesktopUserDataDirectory);
+
+        // The app moves its data and leaves a note where it was; the CLI it keeps moves with it.
+        Directory.CreateDirectory(moved);
+        File.WriteAllText(Path.Combine(moved, "config.json"), "{}");
+        File.Delete(Path.Combine(roaming, "config.json"));
+        File.WriteAllText(Path.Combine(roaming, ".user-data-left.claude_pkg0123456789"), "1");
+        Assert.Equal(moved, _paths.DesktopUserDataDirectory);
+        Assert.Equal(Path.Combine(moved, "claude-code"), _paths.DesktopBundledCliDirectory);
+
+        // A note that names no folder there is not followed.
+        File.Delete(Path.Combine(roaming, ".user-data-left.claude_pkg0123456789"));
+        File.WriteAllText(Path.Combine(roaming, ".user-data-left.claude_elsewhere"), "1");
+        File.WriteAllText(Path.Combine(roaming, "config.json"), "{}");
+        Assert.Equal(roaming, _paths.DesktopUserDataDirectory);
+
+        // A fresh install that only ever had the moved folder.
+        Directory.Delete(roaming, recursive: true);
+        Assert.Equal(moved, _paths.DesktopUserDataDirectory);
+    }
+
+    [Fact]
+    public void DesktopSignInIsExchangedInTheNetworkFolderAndKeptPerAccount()
+    {
+        const string first = "aaaaaaaa-1111";
+        const string second = "bbbbbbbb-2222";
+        var profile = _paths.DesktopUserDataDirectory;
+        var cookies = Path.Combine(profile, "Network", "Cookies");
+        Directory.CreateDirectory(Path.GetDirectoryName(cookies)!);
+        WriteConfig(first, "token-first");
+        File.WriteAllText(cookies, "cookie-first");
+        var sessions = Path.Combine(profile, "claude-code-sessions", first, "org-first");
+        Directory.CreateDirectory(sessions);
+        File.WriteAllText(Path.Combine(sessions, "local_1.json"), "{}");
+        var accounts = new ClaudeDesktopAccounts(_paths, account => account == first ? "org-first" : "org-second");
+
+        Assert.True(accounts.RequiresSwap(second));
+        Assert.NotNull(accounts.Activate(new(second, "org-second")));
+        // Nothing kept for the second account yet: the app opens signed out, the sessions follow.
+        Assert.False(File.Exists(cookies));
+        Assert.Equal(DesktopSignIn.Needed, accounts.SignInState());
+        Assert.True(File.Exists(Path.Combine(profile, "claude-code-sessions", second, "org-second", "local_1.json")));
+        Assert.True(accounts.HasLogin(first));
+
+        // The user signs in to the second account in the app.
+        WriteConfig(second, "token-second");
+        File.WriteAllText(cookies, "cookie-second");
+        Assert.Equal(DesktopSignIn.Settled, accounts.SignInState());
+
+        var back = accounts.Activate(new(first, "org-first"));
+        Assert.NotNull(back);
+        Assert.Equal("cookie-first", File.ReadAllText(cookies));
+        var config = JsonNode.Parse(File.ReadAllText(Path.Combine(profile, "config.json")))!.AsObject();
+        Assert.Equal(first, config["lastKnownAccountUuid"]!.GetValue<string>());
+        Assert.Equal("token-first", config["oauth:tokenCache"]!.GetValue<string>());
+        Assert.Equal("kept", config["locale"]!.GetValue<string>());
+        Assert.True(accounts.HasLogin(second));
+        Assert.True(accounts.HasTokens(second));
+
+        accounts.Undo(back);
+        Assert.Equal("cookie-second", File.ReadAllText(cookies));
+    }
+
+    [Fact]
+    public void DesktopSessionsOfEveryAccountStayInOneListAcrossSwitches()
+    {
+        // The user's case: signed in to the second account by hand, its new session filed apart from the earlier ones.
+        const string first = "aaaaaaaa-1111";
+        const string second = "bbbbbbbb-2222";
+        var profile = _paths.DesktopUserDataDirectory;
+        string Records(string account, string organization) => Path.Combine(profile, "claude-code-sessions", account, organization);
+        Directory.CreateDirectory(Path.Combine(profile, "Network"));
+        Directory.CreateDirectory(Records(first, "org-first"));
+        Directory.CreateDirectory(Records(second, "org-second"));
+        foreach (var name in new[] { "local_1.json", "local_2.json" }) File.WriteAllText(Path.Combine(Records(first, "org-first"), name), "{}");
+        File.WriteAllText(Path.Combine(Records(second, "org-second"), "local_3.json"), "{}");
+        WriteConfig(second, "token-second");
+        File.WriteAllText(Path.Combine(profile, "Network", "Cookies"), "cookie-second");
+        var accounts = new ClaudeDesktopAccounts(_paths, account => account == first ? "org-first" : "org-second", () => [first, second]);
+
+        var swap = accounts.Activate(new(first, "org-first"))!;
+        Assert.Equal(new[] { "local_1.json", "local_2.json", "local_3.json" },
+            Directory.GetFiles(Records(first, "org-first")).Select(Path.GetFileName).Order());
+        Assert.False(Directory.Exists(Records(second, "org-second")));
+        // Where the shared list is now is kept with forward slashes, as on Ubuntu.
+        Assert.Contains("\"claude-code-sessions\":\"aaaaaaaa-1111/org-first\"",
+            File.ReadAllText(Path.Combine(profile, ".claude-syncbar-login.json")));
+
+        accounts.Undo(swap);
+        Assert.Equal(new[] { "local_1.json", "local_2.json" }, Directory.GetFiles(Records(first, "org-first")).Select(Path.GetFileName).Order());
+        Assert.Equal(new[] { "local_3.json" }, Directory.GetFiles(Records(second, "org-second")).Select(Path.GetFileName));
+    }
+
+    private void WriteConfig(string owner, string token)
+    {
+        Directory.CreateDirectory(_paths.DesktopUserDataDirectory);
+        File.WriteAllText(Path.Combine(_paths.DesktopUserDataDirectory, "config.json"),
+            new JsonObject { ["locale"] = "kept", ["lastKnownAccountUuid"] = owner, ["oauth:tokenCache"] = token }.ToJsonString());
+    }
+}
