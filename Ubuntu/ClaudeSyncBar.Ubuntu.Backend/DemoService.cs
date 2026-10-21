@@ -84,7 +84,7 @@ public sealed class DemoService : IManagementService
                 // Every demo account counts as a $200 Max account, and every demo value as fresh.
                 var now = DateTimeOffset.UtcNow;
                 DateTimeOffset? Reset(AccountView a) => a.Usage?.Weekly?.ResetsAt is { } reset && reset > now ? reset : null;
-                var best = _accounts.Where(a => !a.NeedsLogin && a.Usage is { Weekly.RemainingPercent: > 0, FiveHour.RemainingPercent: > 0 })
+                var best = _accounts.Where(a => !a.NeedsLogin && a.Usage is { Weekly.RemainingPercent: > 0, FiveHour.RemainingPercent: > SmartSwitch.FiveHourMinimum })
                     .OrderBy(a => Reset(a) ?? DateTimeOffset.MaxValue).ThenByDescending(a => a.Usage!.Weekly!.RemainingPercent).FirstOrDefault();
                 if (best is null) return new { found = false, message = SmartSwitch.NoneMessage };
                 var reason = SmartSwitch.Reason($"{best.Usage!.Weekly!.RemainingPercent:0}%", $"{best.Usage.FiveHour!.RemainingPercent:0}%", Reset(best));

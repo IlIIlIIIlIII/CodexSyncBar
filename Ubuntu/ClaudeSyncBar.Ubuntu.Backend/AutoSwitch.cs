@@ -58,13 +58,15 @@ internal sealed class AutoSwitchStore(WindowsPaths paths)
 }
 
 /// <summary>
-/// The smart switch: among the $200 Max accounts with some of both the weekly
-/// and the five-hour quota left, the one whose week resets first, so the
-/// quota that would lapse soonest is used first.
+/// The smart switch: among the $200 Max accounts with some of the weekly and
+/// more than a quarter of the five-hour quota left, the one whose week resets
+/// first, so the quota that would lapse soonest is used first.
 /// </summary>
 internal static class SmartSwitch
 {
     internal const string Plan = "Max 20x";
+    // An account with 75% or more of its five hours used is passed over.
+    internal const double FiveHourMinimum = 25;
     private static readonly string[] Days = ["일", "월", "화", "수", "목", "금", "토"];
 
     internal sealed record Choice(AccountView Account, double FiveHour, double Weekly, DateTimeOffset? WeeklyReset);
@@ -77,8 +79,8 @@ internal static class SmartSwitch
             Weekly: AutoSwitchPolicy.TrustedRemaining(account.Usage?.Weekly, account.Usage, now),
             // A week past its reset is whole again, but when it next resets is not known until it is used.
             Reset: account.Usage?.Weekly?.ResetsAt is { } reset && reset > now ? reset : (DateTimeOffset?)null))
-        // Any of each is enough: 0.2% left is still room, as for the automatic switch.
-        .Where(item => item.FiveHour is > 0 && item.Weekly is > 0)
+        // Any of the week is enough, as for the automatic switch; the five hours need more than a quarter left.
+        .Where(item => item.FiveHour > FiveHourMinimum && item.Weekly is > 0)
         // The soonest weekly reset first, an unknown one last; then the most weekly left, the most five-hour left, the priority order.
         .Select((item, order) => (item.Account, FiveHour: item.FiveHour!.Value, Weekly: item.Weekly!.Value, item.Reset, Order: order))
         .OrderBy(item => item.Reset ?? DateTimeOffset.MaxValue).ThenByDescending(item => item.Weekly)
@@ -97,7 +99,7 @@ internal static class SmartSwitch
     internal static string Reason(string weekly, string fiveHour, DateTimeOffset? reset) =>
         $"주간 {weekly} · 5시간 {fiveHour} 남음" + (reset is { } next ? $" · 주간 초기화 {When(next)}" : "");
 
-    internal const string NoneMessage = Plan + " 계정 중 주간·5시간 한도가 모두 남은 계정이 없습니다.";
+    internal const string NoneMessage = Plan + " 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.";
 }
 
 /// <summary>

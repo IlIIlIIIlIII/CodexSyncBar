@@ -325,7 +325,7 @@ public sealed class TrayFlyout : Window
         var smart = Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) =>
         {
             if (_app.Tray is { } tray) await tray.SmartSwitchAsync();
-        }, tip: "Max 20x 계정 중 주간·5시간 한도가 모두 남은 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
+        }, tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
         smart.HorizontalAlignment = HorizontalAlignment.Stretch;
         smart.IsEnabled = !state.Busy && state.Error is null && state.Accounts.Count > 1;
         var open = Ui.Button("앱 열기", click: (_, _) => { Hide(); _app.ShowMainWindow(); });

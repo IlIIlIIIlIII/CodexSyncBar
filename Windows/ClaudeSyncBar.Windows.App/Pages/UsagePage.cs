@@ -16,7 +16,7 @@ public sealed class UsagePage : SyncPage
         var keys = State.VisibleQuotas;
         var busy = State.Busy || State.RefreshRequested;
         var smart = Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) => await Flows.SmartSwitchAsync(XamlRoot),
-            tip: "Max 20x 계정 중 주간·5시간 한도가 모두 남은 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
+            tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
         smart.IsEnabled = !busy && State.Error is null && State.Accounts.Count > 1;
         var refresh = Ui.Button(State.RefreshRequested ? "갱신 중…" : "새로고침", Glyphs.Refresh, click: async (_, _) => await State.RefreshAsync(),
             tip: "사용량 새로고침 (F5)");

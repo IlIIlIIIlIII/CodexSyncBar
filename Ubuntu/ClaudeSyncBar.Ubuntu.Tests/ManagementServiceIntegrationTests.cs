@@ -179,12 +179,13 @@ public sealed class ManagementServiceIntegrationTests
             Account(4, Usage(90, 95, 0.5), plan: "Max 5x"),    // not the $200 plan
             Account(5, Usage(90, 96, 0.5), needsLogin: true),
             Account(6, Usage(90, 97, 0.5, minutesOld: 20)),    // too old to trust
-            Account(7, Usage(0.5, 3, 2)),                      // a sliver of each is room; resets first of the rest
+            Account(7, Usage(26, 0.5, 2)),                     // a sliver of the week is room; resets first of the rest
             Account(8, Usage(60, 70, 4)),
             Account(9, null),
+            Account(16, Usage(25, 99, 1)),                     // 75% of five hours used
         };
         var choice = SmartSwitch.Choose(accounts, now)!;
-        Assert.Equal((7, 0.5, 3d), (choice.Account.Id, Math.Round(choice.FiveHour, 6), Math.Round(choice.Weekly, 6)));
+        Assert.Equal((7, 26d, 0.5), (choice.Account.Id, Math.Round(choice.FiveHour, 6), Math.Round(choice.Weekly, 6)));
         Assert.Equal(now.AddDays(2), choice.WeeklyReset);
         Assert.Null(SmartSwitch.Choose(accounts[1..6], now));
         // The same reset: the most weekly left, then the most five-hour left, then the list order.
@@ -226,19 +227,19 @@ public sealed class ManagementServiceIntegrationTests
         Assert.True(smart.GetProperty("alreadyActive").GetBoolean());
         Assert.False(smart.TryGetProperty("preview", out _));
 
-        // Little left counts as left: 75% of five hours used is no reason to pass an account over any more.
-        usage["synthetic-access-1"] = Quotas(75, 10);
+        // Just under 75% of five hours used still counts.
+        usage["synthetic-access-1"] = Quotas(74, 10);
         usage["synthetic-access-2"] = Quotas(100, 10);
         await RefreshUsage(fixture);
         smart = JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
         Assert.Equal(1, smart.GetProperty("profileId").GetInt32());
 
-        // No account has both quotas left.
-        usage["synthetic-access-1"] = Quotas(100, 10);
+        // 75% of five hours used passes an account over, so none is left.
+        usage["synthetic-access-1"] = Quotas(75, 10);
         await RefreshUsage(fixture);
         smart = JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
         Assert.False(smart.GetProperty("found").GetBoolean());
-        Assert.Equal("Max 20x 계정 중 주간·5시간 한도가 모두 남은 계정이 없습니다.", smart.GetProperty("message").GetString());
+        Assert.Equal("Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.", smart.GetProperty("message").GetString());
     }
 
     [Fact]

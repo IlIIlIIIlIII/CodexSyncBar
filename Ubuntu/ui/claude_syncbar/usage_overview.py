@@ -244,7 +244,7 @@ class UsageOverview(Gtk.Box):
         smart_content.append(self.smart_text)
         self.smart.set_child(smart_content)
         self.smart.add_css_class('suggested-action')
-        self.smart.set_tooltip_text('Max 20x 계정 중 주간·5시간 한도가 모두 남은 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환합니다.')
+        self.smart.set_tooltip_text('Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환합니다.')
         self.smart.update_property([Gtk.AccessibleProperty.LABEL], ['스마트 전환'])
         self.smart.connect('clicked', lambda *_: on_smart and on_smart())
         self.smart.set_visible(on_smart is not None)
