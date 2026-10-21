@@ -74,15 +74,18 @@
                     <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
+            <!-- The notice takes its own row above the page: floated over the page, its translucent
+                 background let the apply bar's text show through. -->
             <Grid>
-                <ContentPresenter x:Name="ContentHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
                 <InfoBar
                     x:Name="Notice"
                     IsOpen="False"
-                    MaxWidth="560"
-                    Margin="24"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Bottom" />
+                    Margin="24,16,24,0" />
+                <ContentPresenter x:Name="ContentHost" Grid.Row="1" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
             </Grid>
         </NavigationView>
     </Grid>
