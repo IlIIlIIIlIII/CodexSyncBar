@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Foundation;
 using Windows.Graphics;
 
 namespace ClaudeSyncBar.App.Tray;
@@ -19,7 +20,7 @@ namespace ClaudeSyncBar.App.Tray;
 /// </summary>
 public sealed class TrayFlyout : Window
 {
-    private const int LogicalWidth = 380, LogicalHeight = 620;
+    private const int LogicalWidth = 380;
     private const int MouseLowLevelHook = 14;
     private const uint ExtendedFrameBounds = 9;
     private const uint LeftDown = 0x0201, RightDown = 0x0204, MiddleDown = 0x0207, ExtraDown = 0x020B;
@@ -32,6 +33,7 @@ public sealed class TrayFlyout : Window
     private bool _visible;
     private bool _disposing;
     private DateTimeOffset _lastAutomaticHide;
+    private PointInt32? _anchor;
     private string? _pending;
     private (string Message, NoticeKind Kind)? _note;
     private (string Notice, JsonObject Preview, string Name)? _confirm;
@@ -171,18 +173,33 @@ public sealed class TrayFlyout : Window
     // Above the icon, inside the work area of its display.
     private void Position(PointInt32? anchor)
     {
+        _anchor = anchor;
         var display = anchor is { } point ? DisplayArea.GetFromPoint(point, DisplayAreaFallback.Primary) : DisplayArea.Primary;
-        var area = display.WorkArea;
         // Moving there first gives the window that display's DPI.
-        AppWindow.Move(new PointInt32(area.X, area.Y));
-        var scale = Math.Max(1.0, GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0);
+        AppWindow.Move(new PointInt32(display.WorkArea.X, display.WorkArea.Y));
+        Fit();
+    }
+
+    // As tall as its content, so every account shows without scrolling; only a list taller than the work area scrolls.
+    private void Fit()
+    {
+        var display = _anchor is { } point ? DisplayArea.GetFromPoint(point, DisplayAreaFallback.Primary) : DisplayArea.Primary;
+        var area = display.WorkArea;
+        var scale = Math.Max(1.0, GetDpiForWindow(_window) / 96.0);
         var margin = (int)Math.Round(12 * scale);
         var width = Math.Min((int)Math.Round(LogicalWidth * scale), area.Width - margin * 2);
-        var height = Math.Min((int)Math.Round(LogicalHeight * scale), area.Height - margin * 2);
-        var target = anchor ?? new PointInt32(area.X + area.Width, area.Y + area.Height);
+        // The frame around the client area, so the content gets the whole height it asks for.
+        var frameWidth = AppWindow.Size.Width - AppWindow.ClientSize.Width;
+        var frameHeight = AppWindow.Size.Height - AppWindow.ClientSize.Height;
+        _surface.Measure(new Size((width - frameWidth) / scale, double.PositiveInfinity));
+        var height = Math.Min((int)Math.Ceiling(_surface.DesiredSize.Height * scale) + frameHeight, area.Height - margin * 2);
+        // The next layout pass measures against the window again.
+        _surface.InvalidateMeasure();
+        var target = _anchor ?? new PointInt32(area.X + area.Width, area.Y + area.Height);
         var x = Math.Clamp(target.X - width / 2, area.X + margin, area.X + area.Width - width - margin);
         // The taskbar is below the work area unless the icon is above it.
         var y = target.Y >= area.Y + area.Height / 2 ? area.Y + area.Height - height - margin : area.Y + margin;
+        if (AppWindow.Position.X == x && AppWindow.Position.Y == y && AppWindow.Size.Width == width && AppWindow.Size.Height == height) return;
         AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
     }
 
@@ -230,6 +247,9 @@ public sealed class TrayFlyout : Window
         Grid.SetRow(footer, 3);
         root.Children.Add(footer);
         _surface.Child = root;
+        // A notice, a confirmation or another account changes the height while it is open.
+        if (_visible) Fit();
+        root.Loaded += (_, _) => { if (_visible) Fit(); };
     }
 
     private Border Account(JsonObject account)
