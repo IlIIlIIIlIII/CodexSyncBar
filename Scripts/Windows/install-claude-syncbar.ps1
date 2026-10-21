@@ -53,11 +53,14 @@ if ($Uninstall) {
     return
 }
 
-# The SDK on PATH, or the per-user one dotnet-install.ps1 puts in LocalAppData.
+# The SDK on PATH, or the per-user one dotnet-install.ps1 puts in LocalAppData. Installed from a shell
+# inside the Store Claude app, that one lands in the package's private LocalAppData, which other shells never see.
 if (!$Dotnet) {
     $onPath = Get-Command dotnet -ErrorAction SilentlyContinue
-    $perUser = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
-    $Dotnet = if ($onPath) { $onPath.Source } elseif (Test-Path -LiteralPath $perUser) { $perUser } else { throw '.NET 10 SDK를 찾지 못했어요. -Dotnet으로 dotnet.exe 경로를 알려 주세요.' }
+    $packaged = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'LocalCache\Local\Microsoft\dotnet\dotnet.exe' }
+    $perUser = @(Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe') + @($packaged) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    $Dotnet = if ($onPath) { $onPath.Source } elseif ($perUser) { $perUser } else { throw '.NET 10 SDK를 찾지 못했어요. -Dotnet으로 dotnet.exe 경로를 알려 주세요.' }
 }
 
 $architecture = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'x64' }
