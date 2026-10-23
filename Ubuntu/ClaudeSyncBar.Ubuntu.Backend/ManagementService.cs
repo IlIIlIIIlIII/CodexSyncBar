@@ -269,9 +269,11 @@ public sealed class ManagementService : IManagementService
                 }
             await RefreshDevicesAsync(_lifetime.Token);
         }
-        catch (Exception) when (!_lifetime.IsCancellationRequested)
+        catch (Exception error) when (!_lifetime.IsCancellationRequested)
         {
-            lock (_state) _error = "시작 복구를 완료하지 못했습니다. 비밀 저장소와 장치 연결을 확인한 뒤 복구를 다시 시도해 주세요.";
+            // The core words its own failures for the user, such as an unsafe login file; say which.
+            var reason = error is ClaudeSyncBarException { Message.Length: > 0 } known ? known.Message + " " : "";
+            lock (_state) _error = $"시작 복구를 완료하지 못했습니다. {reason}비밀 저장소와 장치 연결을 확인한 뒤 복구를 다시 시도해 주세요.";
         }
     }
 

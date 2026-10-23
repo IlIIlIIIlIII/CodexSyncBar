@@ -73,18 +73,37 @@ public sealed class AuthVaultTests : IDisposable
     }
 
     [Fact]
-    public void ActiveAuthRejectsGeneralReaders()
+    public void ActiveAuthMayHaveOtherReadersButNotOtherWriters()
     {
-        if (!OperatingSystem.IsWindows()) return;
         _store.ImportAuth(Source(), 1);
         _store.SwitchActive(1);
-        var file = new FileInfo(_paths.ActiveAuthFile);
-        var acl = file.GetAccessControl();
-        acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-            FileSystemRights.Read, AccessControlType.Allow));
-        file.SetAccessControl(acl);
+        // Claude Code rewrites its login with its folder's permissions, and other
+        // tools add readers there: the Codex sandbox gives its users read access.
+        AllowOthers(_paths.ActiveAuthFile, write: false);
+        Assert.Equal("test-account", _store.ReadActiveAccountId());
+        // A switch writes the login private again.
+        _store.SwitchActive(1);
+        if (OperatingSystem.IsWindows()) WindowsPathSafety.EnsurePrivateFile(_paths.ActiveAuthFile, "test", 16384);
+        else Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(_paths.ActiveAuthFile));
+
+        AllowOthers(_paths.ActiveAuthFile, write: true);
         Assert.Throws<ClaudeSyncBarException>(() => _store.ReadActiveAccountId());
         Assert.Throws<ClaudeSyncBarException>(() => _store.SwitchActive(1));
+    }
+
+    private static void AllowOthers(string path, bool write)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var file = new FileInfo(path);
+            var acl = file.GetAccessControl();
+            acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                write ? FileSystemRights.Modify : FileSystemRights.ReadAndExecute, AccessControlType.Allow));
+            file.SetAccessControl(acl);
+        }
+        else
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead
+                | (write ? UnixFileMode.GroupWrite : 0));
     }
 
     [Fact]

@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Net;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json.Nodes;
 using ClaudeSyncBar.Ubuntu.Backend;
 using ClaudeSyncBar.Windows.Core;
+using TestAuth = ClaudeSyncBar.Windows.Core.Tests.TestAuth;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
@@ -62,6 +64,58 @@ public sealed class WindowsPlatformTests : IDisposable
         security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), FileSystemRights.Read, AccessControlType.Allow));
         new FileInfo(file).SetAccessControl(security);
         Assert.Throws<ClaudeSyncBarException>(() => WindowsPathSafety.EnsurePrivateFile(file, "비공개 파일", 16));
+    }
+
+    [Fact]
+    public async Task StartsWithALoginOthersMayReadAndNamesOneOthersMayChange()
+    {
+        // The user's case: Claude Code rewrote its login with the .claude folder's ACL,
+        // where the Codex sandbox had given its users read access.
+        _paths.EnsureDirectories();
+        var auth = new AuthStore(_paths);
+        var source = Path.Combine(_paths.LoginSessionsDirectory, "source.json");
+        WindowsPathSafety.WritePrivateBytes(source, TestAuth.Bytes(TestAuth.Create("account-1", "synthetic-access", "synthetic-refresh",
+            email: "one@example.invalid", expiresAt: DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeMilliseconds())));
+        auth.ImportAuth(source, 1);
+        auth.SwitchActive(1);
+        new ConfigurationStore(_paths).Save(new AppConfiguration { Accounts = [new() { Id = 1, Email = "one@example.invalid" }], NextAccountId = 2 });
+
+        Allow(_paths.ActiveAuthFile, FileSystemRights.ReadAndExecute);
+        var snapshot = await StartAndSnapshotAsync();
+        Assert.Equal(1, snapshot.ActiveProfileId);
+        Assert.DoesNotContain("시작 복구", snapshot.Error ?? "");
+
+        // Write access for others is still refused, and the start says why.
+        Allow(_paths.ActiveAuthFile, FileSystemRights.Modify);
+        snapshot = await StartAndSnapshotAsync();
+        Assert.StartsWith("시작 복구를 완료하지 못했습니다.", snapshot.Error);
+        Assert.Contains("인증 파일을(를) 다른 사용자가 변경할 수 있어 안전하지 않습니다.", snapshot.Error);
+    }
+
+    private async Task<ManagementSnapshot> StartAndSnapshotAsync()
+    {
+        var service = new ManagementService(_paths, new UsageService(new HttpClient(new OfflineHandler())), _ => { }, watch: false,
+            new ResumeHooks(_ => [], _ => false, _ => throw new InvalidOperationException("No test may continue a real session.")));
+        try { return (ManagementSnapshot)(await service.DispatchAsync("snapshot", default, CancellationToken.None))!; }
+        finally
+        {
+            await service.StopAsync();
+            service.Dispose();
+        }
+    }
+
+    private static void Allow(string path, FileSystemRights rights)
+    {
+        var file = new FileInfo(path);
+        var security = file.GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid, null), rights, AccessControlType.Allow));
+        file.SetAccessControl(security);
+    }
+
+    private sealed class OfflineHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
     }
 
     [Fact]

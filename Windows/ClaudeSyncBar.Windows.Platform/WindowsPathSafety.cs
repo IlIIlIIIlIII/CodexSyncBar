@@ -69,7 +69,28 @@ internal static class WindowsPathSafety
         return contents;
     }
 
-    public static void EnsurePrivateFile(string path, string description, long maximumBytes, SecurityIdentifier? additionalReader = null)
+    /// <summary>
+    /// A file another program keeps for the user, such as Claude Code's login. It
+    /// inherits its folder's ACL, and other tools add readers there (the Codex
+    /// sandbox group does), so other readers are accepted; other writers are not.
+    /// </summary>
+    public static byte[] ReadOwnerWritableFile(string path, string description, long maximumBytes)
+    {
+        EnsureFileAccess(path, description, maximumBytes, null, othersMayRead: true);
+        if (!File.Exists(path)) return [];
+        var contents = File.ReadAllBytes(path);
+        if (contents.LongLength > maximumBytes)
+            throw new ClaudeSyncBarException($"{description} 크기가 안전 한도를 초과했습니다.");
+        return contents;
+    }
+
+    public static void EnsurePrivateFile(string path, string description, long maximumBytes, SecurityIdentifier? additionalReader = null) =>
+        EnsureFileAccess(path, description, maximumBytes, additionalReader, othersMayRead: false);
+
+    private const FileSystemRights ChangeRights = FileSystemRights.Write | FileSystemRights.Delete
+        | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+
+    private static void EnsureFileAccess(string path, string description, long maximumBytes, SecurityIdentifier? additionalReader, bool othersMayRead)
     {
         EnsureFile(path, description);
         if (!File.Exists(path)) return;
@@ -101,8 +122,11 @@ internal static class WindowsPathSafety
                         throw new ClaudeSyncBarException($"{description}에 허용 범위를 넘는 권한이 있습니다.");
                     continue;
                 }
-                if (rule.AccessControlType == AccessControlType.Allow && rule.IdentityReference is SecurityIdentifier identity
-                    && !allowedReaders.Contains(identity.Value) && (rule.FileSystemRights & FileSystemRights.ReadData) != 0)
+                if (rule.AccessControlType != AccessControlType.Allow || rule.IdentityReference is not SecurityIdentifier identity
+                    || allowedReaders.Contains(identity.Value)) continue;
+                if ((rule.FileSystemRights & ChangeRights) != 0)
+                    throw new ClaudeSyncBarException($"{description}을(를) 다른 사용자가 변경할 수 있어 안전하지 않습니다.");
+                if (!othersMayRead && (rule.FileSystemRights & FileSystemRights.ReadData) != 0)
                     throw new ClaudeSyncBarException($"{description}에 다른 사용자 읽기 권한이 있어 안전하지 않습니다.");
             }
         }

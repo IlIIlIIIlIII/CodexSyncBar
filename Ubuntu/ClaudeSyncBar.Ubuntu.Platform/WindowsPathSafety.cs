@@ -52,6 +52,22 @@ internal static class WindowsPathSafety
         return bytes;
     }
 
+    /// <summary>
+    /// A file another program keeps for the user, such as Claude Code's login.
+    /// Who may read it is that program's choice; only the owner may change it.
+    /// </summary>
+    public static byte[] ReadOwnerWritableFile(string path, string description, long maximumBytes)
+    {
+        EnsureFile(path, description);
+        if (!LinuxFileMetadata.TryRead(path, out var info)) return [];
+        if (info.Uid != LinuxFileMetadata.CurrentUid || (info.Mode & 0x12) != 0 || info.Size > (ulong)maximumBytes)
+            throw new ClaudeSyncBarException(description + "의 소유자·권한 또는 크기가 안전하지 않습니다.");
+        if (info.Links != 1) throw new ClaudeSyncBarException(description + "의 하드 링크를 거부했습니다.");
+        var bytes = File.ReadAllBytes(path);
+        if (bytes.LongLength > maximumBytes) throw new ClaudeSyncBarException(description + " 크기가 안전 한도를 초과했습니다.");
+        return bytes;
+    }
+
     public static void EnsurePrivateFile(string path, string description, long maximumBytes, SecurityIdentifier? additionalReader = null)
     {
         EnsureFile(path, description);

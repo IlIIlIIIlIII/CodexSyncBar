@@ -719,7 +719,8 @@ public sealed class AuthStore
         if (!File.Exists(path)) return null;
         try
         {
-            return JsonNode.Parse(WindowsPathSafety.ReadPrivateFile(path, description, maximumBytes)) as JsonObject
+            // Claude Code's own files: it, not this app, decides who may read them.
+            return JsonNode.Parse(WindowsPathSafety.ReadOwnerWritableFile(path, description, maximumBytes)) as JsonObject
                 ?? throw new JsonException($"{description}이 JSON 객체가 아닙니다.");
         }
         catch (JsonException) when (tolerateInvalid)
