@@ -394,12 +394,17 @@ public sealed class SwitchPage : SyncPage
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, VerticalAlignment = VerticalAlignment.Center };
         var waitingLogin = State.Busy && AppState.Str(State.Operation?["kind"]) == "login";
-        if (State.Busy && !waitingLogin) actions.Children.Add(new ProgressRing { IsActive = true, Width = 20, Height = 20 });
-        var apply = Ui.Button(State.Busy ? State.BusyLabel : "모든 장치에 적용", Glyphs.Sync, accent: true, click: async (_, _) => await State.ApplyAsync(),
-            tip: "모든 장치에 적용 (Ctrl+Enter)");
-        apply.MinHeight = 40;
+        if (State.Busy && !waitingLogin) actions.Children.Add(Keep("ring", () => new ProgressRing { IsActive = true, Width = 20, Height = 20 }));
+        var apply = Keep("apply", () =>
+        {
+            var button = Ui.Button("모든 장치에 적용", Glyphs.Sync, accent: true, click: async (_, _) => await State.ApplyAsync(),
+                tip: "모든 장치에 적용 (Ctrl+Enter)");
+            button.MinHeight = 40;
+            button.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = global::Windows.System.VirtualKey.Enter, Modifiers = global::Windows.System.VirtualKeyModifiers.Control });
+            return button;
+        });
+        Ui.Relabel(apply, State.Busy ? State.BusyLabel : "모든 장치에 적용");
         apply.IsEnabled = State.CanApply;
-        apply.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = global::Windows.System.VirtualKey.Enter, Modifiers = global::Windows.System.VirtualKeyModifiers.Control });
         actions.Children.Add(apply);
         Grid.SetColumn(actions, 2);
         grid.Children.Add(actions);

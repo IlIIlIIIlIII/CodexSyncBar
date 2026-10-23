@@ -28,6 +28,20 @@ public sealed class TrayFlyout : Window
     private static TrayFlyout? _watching;
     private readonly App _app;
     private readonly Border _surface = new();
+    // Built once and changed in place. Drawn anew on every look during a job, the ring started
+    // over and the disabled smart switch faded in from its enabled colour (the accent button's
+    // template animates its background), as if the refresh stopped and went on again.
+    private readonly TextBlock _subtitle;
+    private readonly Button _refresh;
+    private readonly Border _title = new();
+    private readonly StackPanel _list = new() { Spacing = 6 };
+    private readonly Border _confirmCard;
+    private readonly ProgressRing _ring = new() { Width = 14, Height = 14 };
+    private readonly TextBlock _workingText;
+    private readonly Grid _working;
+    private readonly Border _noteHost = new();
+    private readonly Button _smart;
+    private string? _signature;
     private readonly IntPtr _window;
     private IntPtr _hook;
     private bool _visible;
@@ -63,6 +77,45 @@ public sealed class TrayFlyout : Window
         if (app.Options.CapturePath is not null)
             _surface.Background = new SolidColorBrush(app.Options.Theme == "dark" ? Microsoft.UI.ColorHelper.FromArgb(255, 44, 44, 44) : Microsoft.UI.ColorHelper.FromArgb(255, 238, 238, 238));
         _surface.KeyDown += (_, args) => { if (args.Key == global::Windows.System.VirtualKey.Escape) Hide(); };
+        _surface.ActualThemeChanged += (_, _) => Redraw();
+
+        var icon = new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/AppIcon.png")), Width = 20, Height = 20 };
+        AutomationProperties.SetAccessibilityView(icon, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        _subtitle = Ui.Caption("", wrap: false);
+        _refresh = Ui.IconButton(Glyphs.Refresh, "사용량 새로고침", async (_, _) => await _app.State.RefreshAsync());
+        var openApp = Ui.IconButton(Glyphs.OpenWindow, "앱 열기", (_, _) => { Hide(); _app.ShowMainWindow(); });
+        var header = Ui.Columns(10, 1, icon, Ui.Stack(0, false, Ui.Text("Claude SyncBar", strong: true, wrap: false), _subtitle), _refresh, openApp);
+
+        AutomationProperties.SetName(_list, "계정별 잔여량");
+        var scroll = new ScrollViewer { Content = _list, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 8, 0), Margin = new Thickness(0, 0, -8, 0) };
+
+        _confirmCard = new Border { Style = Ui.Style("SyncBarCardStyle"), Padding = new Thickness(12), Visibility = Visibility.Collapsed };
+        _workingText = Ui.Caption("");
+        _working = Ui.Columns(8, 1, _ring, _workingText);
+        _working.Visibility = Visibility.Collapsed;
+        _noteHost.Visibility = Visibility.Collapsed;
+        _smart = Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) =>
+        {
+            if (_app.Tray is { } tray) await tray.SmartSwitchAsync();
+        }, tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
+        _smart.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var openFooter = Ui.Button("앱 열기", click: (_, _) => { Hide(); _app.ShowMainWindow(); });
+        var quit = Ui.IconButton(Glyphs.Power, "Claude SyncBar 완전히 종료", (_, _) => _app.Quit());
+        var footer = Ui.Stack(10, false, _confirmCard, _working, _noteHost, Ui.Columns(8, 0, _smart, openFooter),
+            Ui.Columns(8, 0, Ui.Caption("전환 버튼은 이 PC에만 적용돼요. 모든 장치는 스마트 전환이나 앱에서 바꿔요."), quit));
+
+        var root = new Grid { Padding = new Thickness(16, 14, 16, 12), RowSpacing = 12 };
+        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
+            root.RowDefinitions.Add(new RowDefinition { Height = height });
+        var row = 0;
+        foreach (var part in new FrameworkElement[] { header, _title, scroll, footer })
+        {
+            Grid.SetRow(part, row++);
+            root.Children.Add(part);
+        }
+
+        _surface.Child = root;
+        root.Loaded += (_, _) => { if (_visible) Fit(); };
         Activated += (_, args) =>
         {
             if (!_visible || _disposing || args.WindowActivationState != WindowActivationState.Deactivated || _app.Options.CapturePath is not null) return;
@@ -103,6 +156,7 @@ public sealed class TrayFlyout : Window
     {
         _note = null;
         _confirm = null;
+        _signature = null;
         Render();
         Position(anchor);
         AppWindow.Show();
@@ -203,23 +257,47 @@ public sealed class TrayFlyout : Window
         AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
     }
 
-    private void Render()
+    // What the quick view shows; while it is unchanged nothing is drawn again.
+    private string Signature()
     {
         var state = _app.State;
-        var root = new Grid { Padding = new Thickness(16, 14, 16, 12), RowSpacing = 12 };
-        foreach (var height in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
-            root.RowDefinitions.Add(new RowDefinition { Height = height });
+        var snapshot = (JsonObject)state.Snapshot.DeepClone();
+        snapshot.Remove("updatedAt");
+        // Reset times count down in minutes.
+        return string.Join("|", snapshot.ToJsonString(), state.RefreshRequested, state.ConnectionError, _pending, _note?.Message, _note?.Kind,
+            _confirm?.Name, AppState.Str(_confirm?.Preview["previewId"]), DateTime.Now.ToString("HH:mm"));
+    }
 
-        var icon = new Image { Source = new BitmapImage(new Uri("ms-appx:///Assets/AppIcon.png")), Width = 20, Height = 20 };
-        AutomationProperties.SetAccessibilityView(icon, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+    private void Redraw()
+    {
+        _signature = null;
+        if (_visible) Render();
+    }
+
+    private void Render()
+    {
+        var signature = Signature();
+        if (signature == _signature) return;
+        _signature = signature;
+        var state = _app.State;
+        // A refresh asked for counts as under way: until the service says so, nothing else starts.
+        var busy = state.Busy || state.RefreshRequested;
         var updated = state.Accounts.Select(account => QuotaFormat.Time(account["usage"]?["updatedAt"])).OfType<DateTimeOffset>().DefaultIfEmpty().Max();
-        var subtitle = Ubuntu.Backend.BackendPlatform.LocalDeviceName + (updated == default ? "" : $" · {updated.ToLocalTime():HH:mm} 갱신")
+        _subtitle.Text = Ubuntu.Backend.BackendPlatform.LocalDeviceName + (updated == default ? "" : $" · {updated.ToLocalTime():HH:mm} 갱신")
             + (QuotaFormat.Flag(state.Settings?["autoSwitchEnabled"]) ? " · 자동 전환 켜짐" : "");
-        var refresh = Ui.IconButton(Glyphs.Refresh, "사용량 새로고침", async (_, _) => await state.RefreshAsync());
-        refresh.IsEnabled = !state.Busy && !state.RefreshRequested;
-        var open = Ui.IconButton(Glyphs.OpenWindow, "앱 열기", (_, _) => { Hide(); _app.ShowMainWindow(); });
-        root.Children.Add(Ui.Columns(10, 1, icon, Ui.Stack(0, false, Ui.Text("Claude SyncBar", strong: true, wrap: false), Ui.Caption(subtitle, wrap: false)), refresh, open));
+        _refresh.IsEnabled = !busy;
+        _title.Child = Heading();
+        _list.Children.Clear();
+        foreach (var account in state.Accounts) _list.Children.Add(Account(account, busy));
+        if (state.Accounts.Count == 0) _list.Children.Add(Ui.Text("등록된 계정이 없어요. 앱에서 계정을 추가해 주세요.", secondary: true));
+        UpdateFooter(busy);
+        // A notice, a confirmation or another account changes the height while it is open.
+        if (_visible) Fit();
+    }
 
+    private StackPanel Heading()
+    {
+        var state = _app.State;
         var now = DateTimeOffset.UtcNow;
         var weekly = state.VisibleQuotas.Contains("weekly");
         var pool = WeeklyPool.Of(state.Accounts, now, state.ConnectionError is not null);
@@ -232,27 +310,11 @@ public sealed class TrayFlyout : Window
             AutomationProperties.SetName(timer, $"{countdown}, {pool.NextResetAccount}, {QuotaFormat.Date(pool.NextReset.Value)}");
             title.Children.Add(Ui.Columns(6, 1, Ui.Glyph(Glyphs.Clock, 12, "SyncBarGlyphMuted"), timer));
         }
-        Grid.SetRow(title, 1);
-        root.Children.Add(title);
 
-        var list = new StackPanel { Spacing = 6 };
-        AutomationProperties.SetName(list, "계정별 잔여량");
-        foreach (var account in state.Accounts) list.Children.Add(Account(account));
-        if (state.Accounts.Count == 0) list.Children.Add(Ui.Text("등록된 계정이 없어요. 앱에서 계정을 추가해 주세요.", secondary: true));
-        var scroll = new ScrollViewer { Content = list, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 8, 0), Margin = new Thickness(0, 0, -8, 0) };
-        Grid.SetRow(scroll, 2);
-        root.Children.Add(scroll);
-
-        var footer = Footer();
-        Grid.SetRow(footer, 3);
-        root.Children.Add(footer);
-        _surface.Child = root;
-        // A notice, a confirmation or another account changes the height while it is open.
-        if (_visible) Fit();
-        root.Loaded += (_, _) => { if (_visible) Fit(); };
+        return title;
     }
 
-    private Border Account(JsonObject account)
+    private Border Account(JsonObject account, bool busy)
     {
         var state = _app.State;
         var id = AppState.Int(account["id"]) ?? 0;
@@ -274,7 +336,7 @@ public sealed class TrayFlyout : Window
         else
         {
             var change = Ui.Button("전환", click: async (_, _) => await SwitchAsync(id, name), tip: $"{name} 계정으로 이 PC 전환");
-            change.IsEnabled = _pending is null && _confirm is null && !state.Busy && state.Error is null
+            change.IsEnabled = _pending is null && _confirm is null && !busy && state.Error is null
                 && AppState.Str(state.Operation?["state"]) != "recoveryRequired";
             AutomationProperties.SetName(change, $"{name} 계정으로 이 PC 전환");
             action = change;
@@ -311,26 +373,27 @@ public sealed class TrayFlyout : Window
         return card;
     }
 
-    private StackPanel Footer()
+    private void UpdateFooter(bool busy)
     {
         var state = _app.State;
-        var footer = new StackPanel { Spacing = 10 };
+        _confirmCard.Child = null;
         if (_confirm is { } confirm)
         {
             var go = Ui.Button("전환", accent: true, click: async (_, _) => await ApplyAsync(confirm.Preview));
             var cancel = Ui.Button("취소", click: (_, _) => { _confirm = null; Render(); });
             var text = Ui.Stack(4, false, Ui.Text($"{confirm.Name}(으)로 이 PC를 전환할까요?", strong: true), Ui.Caption(confirm.Notice));
-            footer.Children.Add(new Border
-            {
-                Style = Ui.Style("SyncBarCardStyle"), Padding = new Thickness(12),
-                Child = Ui.Stack(10, false, text, Ui.Stack(8, true, go, cancel)),
-            });
+            _confirmCard.Child = Ui.Stack(10, false, text, Ui.Stack(8, true, go, cancel));
         }
+        _confirmCard.Visibility = _confirm is null ? Visibility.Collapsed : Visibility.Visible;
 
-        var working = _pending ?? (state.Busy ? AppState.Str(state.Operation?["message"]) ?? state.BusyLabel : null);
-        if (working is not null)
-            footer.Children.Add(Ui.Columns(8, 1, new ProgressRing { IsActive = true, Width = 14, Height = 14 }, Ui.Caption(working)));
-        else if (_note is { } note)
+        // One label from the click to the end of the refresh; the job's own message is generic.
+        var working = _pending ?? (state.Refreshing ? "새로고침 중…" : state.Busy ? AppState.Str(state.Operation?["message"]) ?? state.BusyLabel : null);
+        _workingText.Text = working ?? "";
+        _working.Visibility = working is null ? Visibility.Collapsed : Visibility.Visible;
+        _ring.IsActive = working is not null;
+
+        _noteHost.Child = null;
+        if (working is null && _note is { } note)
         {
             var message = Ui.Caption(note.Message);
             if (note.Kind is NoticeKind.Error or NoticeKind.Warning)
@@ -339,20 +402,11 @@ public sealed class TrayFlyout : Window
                 message.FontSize = 12;
             }
 
-            footer.Children.Add(message);
+            _noteHost.Child = message;
         }
+        _noteHost.Visibility = _noteHost.Child is null ? Visibility.Collapsed : Visibility.Visible;
 
-        var smart = Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) =>
-        {
-            if (_app.Tray is { } tray) await tray.SmartSwitchAsync();
-        }, tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
-        smart.HorizontalAlignment = HorizontalAlignment.Stretch;
-        smart.IsEnabled = !state.Busy && state.Error is null && state.Accounts.Count > 1;
-        var open = Ui.Button("앱 열기", click: (_, _) => { Hide(); _app.ShowMainWindow(); });
-        footer.Children.Add(Ui.Columns(8, 0, smart, open));
-        var quit = Ui.IconButton(Glyphs.Power, "Claude SyncBar 완전히 종료", (_, _) => _app.Quit());
-        footer.Children.Add(Ui.Columns(8, 0, Ui.Caption("전환 버튼은 이 PC에만 적용돼요. 모든 장치는 스마트 전환이나 앱에서 바꿔요."), quit));
-        return footer;
+        _smart.IsEnabled = !busy && state.Error is null && state.Accounts.Count > 1;
     }
 
     // Switches this PC only. Anything that would change another machine stops it.

@@ -20,7 +20,8 @@ public sealed class AppState(ServiceClient client)
 
     /// <summary>The SSH devices as configured: host, user, port, authentication. Null until first loaded.</summary>
     public JsonArray? DeviceList { get; private set; }
-    private bool _polling;
+    private Task? _poll;
+    private bool _pollAgain;
     private int _previewGeneration;
     private string? _previewRevision;
     private (string?, string?) _lastOperation;
@@ -58,25 +59,44 @@ public sealed class AppState(ServiceClient client)
 
     public void Say(string message, NoticeKind kind = NoticeKind.Info) => Notice?.Invoke(message, kind);
 
-    public async Task PollAsync()
+    /// <summary>
+    /// Looks at the service again, after whatever the caller just changed. A look already under
+    /// way may have read the state before that change, so another follows it.
+    /// </summary>
+    public Task PollAsync()
     {
-        if (_polling) return;
-        _polling = true;
-        try
+        if (_poll is { IsCompleted: false })
         {
-            var snapshot = await Client.CallAsync("snapshot") as JsonObject ?? new JsonObject();
-            ConnectionError = null;
-            Apply(snapshot);
+            _pollAgain = true;
+            return _poll;
         }
-        catch (ServiceError error)
+
+        return _poll = PollLoopAsync();
+    }
+
+    /// <summary>The timer's look: none while another is under way.</summary>
+    public void PollIfIdle()
+    {
+        if (_poll is not { IsCompleted: false }) _poll = PollLoopAsync();
+    }
+
+    private async Task PollLoopAsync()
+    {
+        do
         {
-            ConnectionError = error.Message;
-            Changed?.Invoke();
-        }
-        finally
-        {
-            _polling = false;
-        }
+            _pollAgain = false;
+            try
+            {
+                var snapshot = await Client.CallAsync("snapshot") as JsonObject ?? new JsonObject();
+                ConnectionError = null;
+                Apply(snapshot);
+            }
+            catch (ServiceError error)
+            {
+                ConnectionError = error.Message;
+                Changed?.Invoke();
+            }
+        } while (_pollAgain);
     }
 
     private void Apply(JsonObject snapshot)
@@ -225,10 +245,16 @@ public sealed class AppState(ServiceClient client)
         Changed?.Invoke();
         try { await Client.CallAsync("refresh", new { kind = "all" }); }
         catch (ServiceError error) { Say(error.Message, NoticeKind.Error); }
+        // Until a look taken after the job started, the last one still says nothing runs:
+        // the refresh would seem to stop for a moment and then go on.
+        try { await PollAsync(); }
         finally { RefreshRequested = false; }
-        await PollAsync();
+        Changed?.Invoke();
         await RequestPreviewAsync();
     }
+
+    /// <summary>A refresh asked for or under way.</summary>
+    public bool Refreshing => RefreshRequested || (Busy && Str(Operation?["kind"]) == "refresh");
 
     /// <summary>Runs a command and reports its outcome; returns its result, or null when it failed.</summary>
     public async Task<JsonNode?> CommandAsync(string method, object? parameters = null, string? success = null, TimeSpan? timeout = null)

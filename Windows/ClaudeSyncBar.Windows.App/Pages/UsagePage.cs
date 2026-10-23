@@ -15,13 +15,17 @@ public sealed class UsagePage : SyncPage
     {
         var keys = State.VisibleQuotas;
         var busy = State.Busy || State.RefreshRequested;
-        var smart = Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) => await Flows.SmartSwitchAsync(XamlRoot),
-            tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
+        var smart = Keep("smart", () => Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) => await Flows.SmartSwitchAsync(XamlRoot),
+            tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요."));
         smart.IsEnabled = !busy && State.Error is null && State.Accounts.Count > 1;
-        var refresh = Ui.Button(State.RefreshRequested ? "갱신 중…" : "새로고침", Glyphs.Refresh, click: async (_, _) => await State.RefreshAsync(),
-            tip: "사용량 새로고침 (F5)");
+        var refresh = Keep("refresh", () =>
+        {
+            var button = Ui.Button("새로고침", Glyphs.Refresh, click: async (_, _) => await State.RefreshAsync(), tip: "사용량 새로고침 (F5)");
+            button.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = global::Windows.System.VirtualKey.F5 });
+            return button;
+        });
+        Ui.Relabel(refresh, State.Refreshing ? "갱신 중…" : "새로고침");
         refresh.IsEnabled = !busy;
-        refresh.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = global::Windows.System.VirtualKey.F5 });
         var subtitle = keys.Count switch
         {
             0 => "설정에서 표시할 사용량을 켜 주세요.",
@@ -34,10 +38,10 @@ public sealed class UsagePage : SyncPage
         var accounts = State.Accounts;
         if (accounts.Count == 0)
         {
-            var add = Ui.Button("계정 추가", Glyphs.Add, accent: true, click: async (_, _) =>
+            var add = Keep("add", () => Ui.Button("계정 추가", Glyphs.Add, accent: true, click: async (_, _) =>
             {
                 if (await State.CommandAsync("account.add", success: "브라우저에서 로그인을 마쳐 주세요.") is not null) Shell.Navigate("accounts");
-            });
+            }));
             add.IsEnabled = !busy && State.Error is null;
             Add(Ui.Card(Ui.Stack(16, false, Ui.Text(State.Error is null ? "계정을 추가하면 계정별 사용량을 비교할 수 있어요." : "서비스에 연결하지 못했어요. 새로고침해 주세요.", secondary: true), add)));
             return;
@@ -47,7 +51,7 @@ public sealed class UsagePage : SyncPage
         if (keys.Contains("weekly") && WeeklySummary(accounts, now) is { } summary) Add(summary);
         var list = new StackPanel { Spacing = 4 };
         if (Wide && keys.Count > 0) list.Children.Add(ColumnHeader(keys));
-        var refreshing = State.RefreshRequested || (State.Busy && AppState.Str(State.Operation?["kind"]) == "refresh");
+        var refreshing = State.Refreshing;
         var updated = new List<DateTimeOffset>();
         foreach (var account in accounts)
         {

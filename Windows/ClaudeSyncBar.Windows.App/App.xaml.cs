@@ -47,7 +47,7 @@ public partial class App : Application
         if (Options.CapturePath is null) _taskbar = CreateTaskbar();
         _poll = queue.CreateTimer();
         _poll.Interval = TimeSpan.FromSeconds(2);
-        _poll.Tick += (_, _) => _ = State.PollAsync();
+        _poll.Tick += (_, _) => State.PollIfIdle();
         _poll.Start();
         _ = State.PollAsync();
         if (Options.CaptureTray) _ = CaptureTrayAsync();

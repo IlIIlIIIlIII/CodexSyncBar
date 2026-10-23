@@ -19,6 +19,7 @@ public abstract class SyncPage : Page
     protected Grid Layout { get; } = new();
     private string? _signature;
     private bool _wide = true;
+    private readonly Dictionary<string, FrameworkElement> _kept = [];
 
     protected SyncPage()
     {
@@ -63,6 +64,8 @@ public abstract class SyncPage : Page
         var signature = Signature();
         if (signature == _signature) return;
         _signature = signature;
+        // Kept controls leave their places first: taken from a part already removed, WinUI refused to place them again.
+        foreach (var kept in _kept.Values) Ui.Detach(kept);
         Body.Children.Clear();
         Render();
     }
@@ -75,6 +78,24 @@ public abstract class SyncPage : Page
     }
 
     protected abstract void Render();
+
+    /// <summary>
+    /// A control made once and placed again on every drawing; the caller sets what changes.
+    /// Made anew while a job ran, a disabled accent button faded in from its enabled colour
+    /// (its template animates the background) and a ring started over, as if the work paused.
+    /// </summary>
+    protected T Keep<T>(string key, Func<T> create) where T : FrameworkElement
+    {
+        if (_kept.TryGetValue(key, out var kept))
+        {
+            Ui.Detach(kept);
+            return (T)kept;
+        }
+
+        var made = create();
+        _kept[key] = made;
+        return made;
+    }
 
     protected void SetFooter(UIElement? footer)
     {

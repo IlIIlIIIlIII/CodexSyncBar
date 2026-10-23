@@ -170,6 +170,27 @@ public static class Ui
         return button;
     }
 
+    /// <summary>Changes the words of a button made by <see cref="Button"/>, for one kept from drawing to drawing.</summary>
+    public static void Relabel(Button button, string text)
+    {
+        if (button.Content is StackPanel content && content.Children.OfType<TextBlock>().FirstOrDefault() is { } label && label.Text != text)
+        {
+            label.Text = text;
+            AutomationProperties.SetName(button, text);
+        }
+    }
+
+    /// <summary>Takes an element out of where it was placed, so it can be placed again.</summary>
+    public static void Detach(FrameworkElement element)
+    {
+        switch (element.Parent)
+        {
+            case Panel panel: panel.Children.Remove(element); break;
+            case Border border when ReferenceEquals(border.Child, element): border.Child = null; break;
+            case ContentControl control when ReferenceEquals(control.Content, element): control.Content = null; break;
+        }
+    }
+
     public static Button IconButton(string glyph, string name, RoutedEventHandler? click = null, bool subtle = true)
     {
         var button = new Button { Content = Glyph(glyph, 14), Padding = new Thickness(8), MinWidth = 32, MinHeight = 32 };

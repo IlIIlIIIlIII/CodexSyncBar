@@ -124,7 +124,7 @@ public sealed partial class MainWindow : Window
         // What the app is doing reads right after its name, as the design has it; the title
         // bar's own content area would centre it.
         string status;
-        if (state.Busy || state.RefreshRequested) status = state.RefreshRequested ? "새로고침 중…" : AppState.Str(state.Operation?["message"]) ?? state.BusyLabel;
+        if (state.Busy || state.RefreshRequested) status = state.Refreshing ? "새로고침 중…" : AppState.Str(state.Operation?["message"]) ?? state.BusyLabel;
         else
         {
             var updated = state.Accounts.Select(account => QuotaFormat.Time(account["usage"]?["updatedAt"])).OfType<DateTimeOffset>().DefaultIfEmpty().Max();

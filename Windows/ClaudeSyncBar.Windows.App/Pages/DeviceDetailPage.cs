@@ -215,7 +215,7 @@ public sealed class DeviceDetailPage : SyncPage
     private Grid Actions()
     {
         var busy = State.Busy;
-        var save = Ui.Button("저장", accent: true, click: async (_, _) => await SaveAsync());
+        var save = Keep("save", () => Ui.Button("저장", accent: true, click: async (_, _) => await SaveAsync()));
         save.IsEnabled = !busy && State.Error is null;
         Button? only = null;
         if (_id is not null && QuotaFormat.Flag(Saved?["enabled"]) && State.Selected is { } selected && !AppState.NeedsLogin(selected))

@@ -23,8 +23,8 @@ public sealed class AccountsPage : SyncPage
     protected override void Render()
     {
         var busy = State.Busy || State.RefreshRequested;
-        var add = Ui.Button("계정 추가", Glyphs.Add, accent: true, click: async (_, _) =>
-            await State.CommandAsync("account.add", success: "브라우저에서 로그인을 마쳐 주세요."));
+        var add = Keep("add", () => Ui.Button("계정 추가", Glyphs.Add, accent: true, click: async (_, _) =>
+            await State.CommandAsync("account.add", success: "브라우저에서 로그인을 마쳐 주세요.")));
         add.IsEnabled = !busy && State.Error is null;
         var import = Ui.Button("인증 파일 가져오기", Glyphs.Import, click: async (_, _) => await ImportAsync(),
             tip: "Claude 인증 파일(.credentials.json) 가져오기");
@@ -87,7 +87,7 @@ public sealed class AccountsPage : SyncPage
         var waiting = State.Busy && AppState.Str(State.Operation?["kind"]) == "login" && AppState.Int(State.Operation?["profileId"]) == id;
         var badge = current ? Ui.Pill("사용 중", Ui.PillKind.Accent, Glyphs.Check) : null;
         UIElement status = waiting
-            ? Ui.Stack(6, true, new ProgressRing { IsActive = true, Width = 12, Height = 12 }, Ui.Caption("로그인 대기 중", wrap: false))
+            ? Ui.Stack(6, true, Keep("loginRing", () => new ProgressRing { IsActive = true, Width = 12, Height = 12 }), Ui.Caption("로그인 대기 중", wrap: false))
             : AppState.NeedsLogin(account)
                 ? Ui.Pill(QuotaFormat.Flag(account["isPending"]) ? "로그인 전" : "재로그인 필요", Ui.PillKind.Caution, Glyphs.Lock)
                 : Ui.Status("인증 정상", Tone.Healthy, Glyphs.Completed);
