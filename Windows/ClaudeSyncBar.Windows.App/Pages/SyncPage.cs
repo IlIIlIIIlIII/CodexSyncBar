@@ -26,8 +26,7 @@ public abstract class SyncPage : Page
         Layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var scroll = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         Body.Padding = new Thickness(36, 24, 36, 32);
-        Body.MaxWidth = 1100;
-        Body.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Body.HorizontalAlignment = HorizontalAlignment.Center;
         scroll.Content = Body;
         Layout.Children.Add(scroll);
         Content = Layout;
@@ -36,6 +35,9 @@ public abstract class SyncPage : Page
         ActualThemeChanged += (_, _) => Redraw();
         SizeChanged += (_, args) =>
         {
+            // The body is as wide as the page, up to 1100, and centred. Stretched under a MaxWidth
+            // instead, it was centred by its desired width: right of centre, and past a narrow window's edge.
+            Body.Width = Math.Min(1100, args.NewSize.Width);
             var wide = args.NewSize.Width >= 720;
             if (wide == _wide) return;
             _wide = wide;
