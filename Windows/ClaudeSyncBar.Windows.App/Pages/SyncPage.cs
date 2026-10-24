@@ -3,6 +3,8 @@ using ClaudeSyncBar.App.Controls;
 using ClaudeSyncBar.App.Model;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace ClaudeSyncBar.App.Pages;
 
@@ -64,10 +66,22 @@ public abstract class SyncPage : Page
         var signature = Signature();
         if (signature == _signature) return;
         _signature = signature;
+        // A kept control placed again loses the keyboard focus it had: it is given back after drawing.
+        var focused = XamlRoot is { } root ? FocusManager.GetFocusedElement(root) as UIElement : null;
+        var state = focused?.FocusState ?? FocusState.Unfocused;
+        var restore = focused is not null && state != FocusState.Unfocused && _kept.Values.Any(kept => Within(focused, kept));
         // Kept controls leave their places first: taken from a part already removed, WinUI refused to place them again.
         foreach (var kept in _kept.Values) Ui.Detach(kept);
         Body.Children.Clear();
         Render();
+        if (restore) DispatcherQueue.TryEnqueue(() => { if (focused!.XamlRoot is not null) focused.Focus(state); });
+    }
+
+    private static bool Within(DependencyObject element, FrameworkElement ancestor)
+    {
+        for (var node = element; node is not null; node = VisualTreeHelper.GetParent(node))
+            if (ReferenceEquals(node, ancestor)) return true;
+        return false;
     }
 
     /// <summary>Draws the page again now, whatever changed.</summary>

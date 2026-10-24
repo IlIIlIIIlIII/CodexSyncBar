@@ -29,6 +29,9 @@ public sealed class ManagementService : IManagementService
     private readonly Task _initialization;
     private Task? _job;
     private readonly AutoSwitchStore _autoSwitch;
+    private readonly QuotaHistoryStore _quotaHistory;
+    // The last token collection; a new period or basis is cut from it without reading every log again.
+    private TokenUsageSnapshot? _tokenSnapshot;
     private readonly Action<string> _notify;
     private readonly Task _watcher;
     private DateTimeOffset _lastAutoAttempt = DateTimeOffset.MinValue;
@@ -56,6 +59,7 @@ public sealed class ManagementService : IManagementService
         _browser = new(paths);
         _controller = new(paths, usageService);
         _autoSwitch = new(paths);
+        _quotaHistory = new(paths);
         _resume = resume ?? ResumeHooks.For(paths);
         // A home given explicitly is a test's; its events never reach the desktop.
         _notify = notify ?? (paths.IsIsolated ? _ => { } : AutoSwitchPolicy.Notify);
@@ -297,9 +301,10 @@ public sealed class ManagementService : IManagementService
                 var kind = Wire.Text(p, "kind", "all");
                 if (kind is "usage" or "all") await _controller.RefreshUsageAsync(ct);
                 if (kind is "devices" or "all") await RefreshDevicesAsync(ct, allowBusy: true);
-                return kind == "tokens" ? await TokensAsync(ct) : null;
+                return kind == "tokens" ? await TokensAsync(p, ct) : null;
             });
-            case "tokens": return await TokensAsync(token);
+            case "tokens": return await TokensAsync(p, token);
+            case "tokens.view": return await TokenViewAsync(p, token);
             case "account.add": return StartLogin(null, false, false);
             case "account.login": return StartLogin(Wire.Number(p, "profileId"), Wire.Flag(p, "replaceExisting"), Wire.Flag(p, "fresh"));
             case "account.cancel": _loginCancellation?.Cancel(); return new { cancelled = true };
@@ -442,11 +447,17 @@ public sealed class ManagementService : IManagementService
         var statuses = await _ssh.FetchStatusesAsync(c, active, token);
         _local.RefreshClientStatus();
         var identities = new Dictionary<string, int>(StringComparer.Ordinal);
+        var complete = true;
         foreach (var account in c.Accounts.Where(a => !a.IsPending && !a.NeedsLogin))
         {
             try { identities[Fingerprint(_auth.ReadCredentials(account.Id).AccountId)] = account.Id; }
-            catch (AuthenticationRequiredException) { }
+            catch (AuthenticationRequiredException) { complete = false; }
         }
+        // Each look is kept for the token page's rates; a login matching none of the registered accounts is another account.
+        _controller.RecordDevices(statuses.Where(s => s.IsReachable && c.Devices.Any(d => d.Id == s.Id)).Select(s =>
+            s.AccountId is { } fingerprint && identities.TryGetValue(fingerprint, out var id)
+                ? new DeviceAccountObservation("ssh:" + s.Id, id, observed)
+                : new DeviceAccountObservation("ssh:" + s.Id, null, observed, Unregistered: complete && s.AccountId is not null)).ToArray());
         var rows = new List<DeviceView>
         {
             new("local", BackendPlatform.LocalDeviceName, "local", true, true, active, AccountLabel(c, active), observed,
@@ -554,6 +565,8 @@ public sealed class ManagementService : IManagementService
         lock (_state) operationId = _operation!.Id;
         var result = await coordinator.SwitchAsync(preview.View.ProfileId, targets, operationId, token);
         SetOperation(FromSwitch(result, kind));
+        // The token page's rates need the moment each device changed account.
+        _controller.RecordSwitch(result);
         await RefreshDevicesAsync(token, allowBusy: true);
         return null;
     }
@@ -786,11 +799,59 @@ public sealed class ManagementService : IManagementService
         return results;
     }
 
-    private async Task<object?> TokensAsync(CancellationToken token)
+    private async Task<object?> TokensAsync(JsonElement p, CancellationToken token)
     {
         var result = await new TokenUsageService(_paths).FetchAsync(_config.LoadOrCreate(), _ssh, token);
+        lock (_state) _tokenSnapshot = result;
         // Collector errors may include external helper text: expose a stable message only.
-        return new { devices = result.Devices.Select(d => new { id = d.Id == "windows" ? "local" : d.Id, displayName = d.Id == "windows" ? BackendPlatform.LocalDeviceName : d.DisplayName, d.IsReachable, d.Summary, d.EstimatedCostUsd, error = d.Error is null ? null : "사용량 수집을 완료하지 못했습니다." }), result.CollectedAt, result.EstimatedCostUsd };
+        return new { devices = result.Devices.Select(d => new { id = d.Id == "windows" ? "local" : d.Id, displayName = d.Id == "windows" ? BackendPlatform.LocalDeviceName : d.DisplayName, d.IsReachable, summary = d.Summary?.WithoutMinutes(), d.EstimatedCostUsd, error = d.Error is null ? null : "사용량 수집을 완료하지 못했습니다." }), result.CollectedAt, result.EstimatedCostUsd, view = TokenView(result, p) };
+    }
+
+    /// <summary>The period and basis asked for, cut from the last collection; collects first when there is none.</summary>
+    private async Task<object?> TokenViewAsync(JsonElement p, CancellationToken token)
+    {
+        TokenUsageSnapshot? snapshot;
+        lock (_state) snapshot = _tokenSnapshot;
+        if (snapshot is null) return await TokensAsync(p, token);
+        return new { snapshot.CollectedAt, view = TokenView(snapshot, p) };
+    }
+
+    private TokenPeriodView TokenView(TokenUsageSnapshot snapshot, JsonElement p)
+    {
+        var store = new UsageDisplayPreferencesStore(_paths);
+        var preferences = store.LoadUsagePreferences();
+        var hours = Math.Clamp(Wire.Number(p, "hours", preferences.TokenPeriodHours), 1, TokenRateCalculator.MaximumHours);
+        var basis = TokenBurnBasis.Normalize(Wire.Text(p, "basis", preferences.TokenRateBasis));
+        if (hours != preferences.TokenPeriodHours || basis != preferences.TokenRateBasis)
+        {
+            // The page opens on the period and basis chosen there last.
+            preferences.TokenPeriodHours = hours;
+            preferences.TokenRateBasis = basis;
+            try { store.SaveUsagePreferences(preferences); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or ClaudeSyncBarException) { }
+        }
+
+        var c = _config.LoadOrCreate();
+        var ssh = c.Devices.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
+        var devices = snapshot.Devices.Select(d => new TokenDeviceInput(
+            d.Id == "windows" ? "local" : ssh.Contains(d.Id) ? "ssh:" + d.Id : d.Id,
+            d.Id == "windows" ? BackendPlatform.LocalDeviceName : d.DisplayName,
+            d.Id == "windows" ? "local" : ssh.Contains(d.Id) ? "ssh" : "wsl",
+            d.IsReachable, d.Error is null ? null : "사용량 수집을 완료하지 못했습니다.", d.Summary)).ToArray();
+        int? active = null;
+        try { active = _local.GetActiveProfileId(c.Accounts); } catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException) { }
+        var accounts = c.Accounts.Where(a => !a.IsPending).Select(a => new TokenAccountInput(a.Id, a.CustomAlias ?? a.Email, PlanOf(a.Id))).ToArray();
+        IReadOnlyList<QuotaHistoryEntry> history = [];
+        DateTimeOffset? historyStart = null;
+        try
+        {
+            // Accounts seen up to a week before the period still say who held each device when it began.
+            history = _quotaHistory.Read(snapshot.CollectedAt - TimeSpan.FromHours(hours) - TimeSpan.FromDays(8));
+            historyStart = _quotaHistory.FirstSampledAt();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ClaudeSyncBarException) { }
+        return TokenRateCalculator.Calculate(new(snapshot.CollectedAt, hours, basis, devices, history, historyStart, accounts, active,
+            preferences.ClaudeFiveHour, preferences.ClaudeWeekly));
     }
 
     private object Settings()
@@ -798,7 +859,7 @@ public sealed class ManagementService : IManagementService
         var usage = new UsageDisplayPreferencesStore(_paths).LoadUsagePreferences();
         var anchor = _controller.WeeklyAnchor.Load();
         var automatic = _autoSwitch.Load();
-        return new { usage.ClaudeFiveHour, usage.ClaudeWeekly, usage.TaskbarUsage, autoSwitchEnabled = automatic.Enabled, autoSwitchLast = automatic.Last,
+        return new { usage.ClaudeFiveHour, usage.ClaudeWeekly, usage.TaskbarUsage, usage.TokenPeriodHours, usage.TokenRateBasis, autoSwitchEnabled = automatic.Enabled, autoSwitchLast = automatic.Last,
             autoResumeEnabled = automatic.ResumeEnabled, autoResumeLast = automatic.ResumeLast, launchAtLogin = BackendPlatform.LaunchAtLogin(_paths), weekly = anchor, stateDirectory = _paths.StateRoot, claudeHome = _paths.ClaudeHome };
     }
 
@@ -809,6 +870,8 @@ public sealed class ManagementService : IManagementService
         usage.ClaudeWeekly = Wire.Flag(p, "claudeWeekly", usage.ClaudeWeekly);
         usage.ClaudeFiveHour = Wire.Flag(p, "claudeFiveHour", usage.ClaudeFiveHour);
         usage.TaskbarUsage = Wire.Flag(p, "taskbarUsage", usage.TaskbarUsage);
+        usage.TokenPeriodHours = Math.Clamp(Wire.Number(p, "tokenPeriodHours", usage.TokenPeriodHours), 1, TokenRateCalculator.MaximumHours);
+        usage.TokenRateBasis = TokenBurnBasis.Normalize(Wire.Text(p, "tokenRateBasis", usage.TokenRateBasis));
         store.SaveUsagePreferences(usage);
         foreach (var key in new[] { "autoSwitchEnabled", "autoResumeEnabled" })
         {

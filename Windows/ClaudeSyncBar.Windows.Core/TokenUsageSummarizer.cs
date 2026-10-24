@@ -13,7 +13,7 @@ namespace ClaudeSyncBar.Windows.Core;
 /// </summary>
 internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cachePath)
 {
-    private const int SchemaVersion = 6;
+    private const int SchemaVersion = 7;
     private const int WindowDays = 30;
     // Some models bill a prompt above this size on a higher rate card.
     private const long LongContextTokens = 100_000;
@@ -22,7 +22,11 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
     private static readonly byte[] UsageMark = "\"usage\""u8.ToArray();
     private static readonly JsonSerializerOptions CacheFormat = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public DeviceTokenUsageSummary Summarize(CancellationToken token = default)
+    // A cold scan of a large history can outlast the caller's time limit: keep what was read now and then.
+    private static readonly TimeSpan SaveInterval = TimeSpan.FromSeconds(5);
+
+    /// <param name="skipSessions">Sessions another device already counted; their logs here are left out of the sums.</param>
+    public DeviceTokenUsageSummary Summarize(CancellationToken token = default, IReadOnlySet<string>? skipSessions = null)
     {
         var generatedAt = DateTimeOffset.UtcNow;
         var cutoff = (double)generatedAt.AddDays(-WindowDays).ToUnixTimeMilliseconds();
@@ -37,25 +41,59 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
             foreach (var key in state.Responses.Keys) owners.TryAdd(key, relative);
 
         var errors = new List<string>();
+        var saved = System.Diagnostics.Stopwatch.StartNew();
         for (var i = 0; i < files.Count; i++)
         {
-            token.ThrowIfCancellationRequested();
+            if (token.IsCancellationRequested)
+            {
+                // What was read so far is kept, so the next attempt goes on from there.
+                SaveCache(cache);
+                token.ThrowIfCancellationRequested();
+            }
+
             try { cache.Files[relatives[i]] = Scan(files[i], relatives[i], cache.Files.GetValueOrDefault(relatives[i]), cutoff, owners); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { errors.Add($"{relatives[i]}: {error.Message}"); }
+            if (saved.Elapsed < SaveInterval) continue;
+            SaveCache(cache);
+            saved.Restart();
         }
 
         SaveCache(cache);
         var merged = new Dictionary<string, Bucket>(StringComparer.Ordinal);
-        foreach (var bucket in cache.Files.Values.SelectMany(state => state.Buckets.Values))
+        // The same buckets by minute, every log together, so a period down to the hour can be cut from them.
+        var minutes = new Dictionary<(long Minute, string Model, string Tier, bool LongContext), Bucket>();
+        var sessions = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var (relative, state) in cache.Files)
         {
-            if (Time(bucket.StartedAt) is not { } started || started < cutoff) continue;
-            var key = $"{bucket.Model}\u001f{bucket.ServiceTier}\u001f{(bucket.IsLongContext ? "true" : "false")}";
-            if (!merged.TryGetValue(key, out var sum))
-                merged[key] = sum = new Bucket { Model = bucket.Model, ServiceTier = bucket.ServiceTier, IsLongContext = bucket.IsLongContext };
-            sum.Add(bucket);
-            sum.Requests += Math.Max(0, bucket.Requests);
+            var session = SessionOf(relative);
+            if (skipSessions?.Contains(session) == true) continue;
+            foreach (var bucket in state.Buckets.Values)
+            {
+                if (Time(bucket.StartedAt) is not { } started || started < cutoff) continue;
+                sessions.Add(session);
+                var key = $"{bucket.Model}\u001f{bucket.ServiceTier}\u001f{(bucket.IsLongContext ? "true" : "false")}";
+                if (!merged.TryGetValue(key, out var sum))
+                    merged[key] = sum = new Bucket { Model = bucket.Model, ServiceTier = bucket.ServiceTier, IsLongContext = bucket.IsLongContext };
+                sum.Add(bucket);
+                sum.Requests += Math.Max(0, bucket.Requests);
+                var minuteKey = ((long)Math.Floor(started / 60_000), bucket.Model, bucket.ServiceTier, bucket.IsLongContext);
+                if (!minutes.TryGetValue(minuteKey, out var minute)) minutes[minuteKey] = minute = new Bucket();
+                minute.Add(bucket);
+                minute.Requests += Math.Max(0, bucket.Requests);
+            }
         }
 
+        var models = minutes.Keys.Select(key => key.Model).Distinct().Order(StringComparer.Ordinal).ToList();
+        var tiers = minutes.Keys.Select(key => key.Tier).Distinct().Order(StringComparer.Ordinal).ToList();
+        var series = minutes
+            .Select(pair => (pair.Key, Model: models.IndexOf(pair.Key.Model), Tier: tiers.IndexOf(pair.Key.Tier), pair.Value))
+            .OrderBy(entry => entry.Key.Minute).ThenBy(entry => entry.Model).ThenBy(entry => entry.Tier).ThenBy(entry => entry.Key.LongContext)
+            .Select(entry => new long[]
+            {
+                entry.Key.Minute, entry.Model, entry.Tier, entry.Key.LongContext ? 1 : 0, entry.Value.InputTokens, entry.Value.CachedInputTokens,
+                entry.Value.CacheWriteInputTokens, entry.Value.CacheWriteOneHourInputTokens, entry.Value.OutputTokens,
+                entry.Value.ReasoningOutputTokens, entry.Value.Requests,
+            }).ToList();
         var buckets = merged.Values.OrderByDescending(bucket => bucket.TotalTokens).ToList();
         var total = new Bucket();
         foreach (var bucket in buckets)
@@ -67,7 +105,10 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
         return new DeviceTokenUsageSummary
         {
             SchemaVersion = SchemaVersion,
-            GeneratedAt = generatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            GeneratedAt = Iso(generatedAt),
+            WindowDays = WindowDays,
+            WindowStartedAt = Iso(DateTimeOffset.FromUnixTimeMilliseconds((long)cutoff)),
+            FirstRecordAt = series.Count == 0 ? null : Iso(DateTimeOffset.FromUnixTimeMilliseconds(series[0][0] * 60_000)),
             ScannedFiles = files.Count,
             Requests = total.Requests,
             InputTokens = total.InputTokens,
@@ -84,9 +125,27 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
                 CacheWriteOneHourInputTokens = bucket.CacheWriteOneHourInputTokens, OutputTokens = bucket.OutputTokens,
                 ReasoningOutputTokens = bucket.ReasoningOutputTokens, TotalTokens = bucket.TotalTokens,
             }).ToList(),
+            Models = models,
+            Tiers = tiers,
+            Minutes = series,
+            Sessions = [.. sessions],
             Errors = errors.Take(20).ToList(),
         };
     }
+
+    /// <summary>
+    /// The session a log belongs to, as Support/usage-summary.mjs names it: &lt;project&gt;/&lt;session&gt;.jsonl and
+    /// &lt;project&gt;/&lt;session&gt;/... where it ran, ssh-&lt;session&gt;/... in Claude Desktop's copy of a session that ran elsewhere.
+    /// </summary>
+    internal static string SessionOf(string relative)
+    {
+        var parts = relative.Split('/', '\\');
+        if (parts.Length > 1 && parts[0].StartsWith("ssh-", StringComparison.Ordinal)) return parts[0][4..];
+        var name = parts.Length > 1 ? parts[1] : parts[0];
+        return name.EndsWith(".jsonl", StringComparison.Ordinal) ? name[..^6] : name;
+    }
+
+    private static string Iso(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
 
     private List<string> TranscriptFiles()
     {
@@ -171,15 +230,21 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
         if (Text(message, "model") is not { Length: > 0 } model || model == "<synthetic>") return;
         if (Text(message, "id") is not { Length: > 0 } id) return;
         var key = ResponseKey(id, Text(entry, "requestId") ?? "");
-        if (owners.ContainsKey(key)) return;
+        var tokens = Tokens(usage);
+        if (owners.TryGetValue(key, out var owner))
+        {
+            // A response's later lines repeat its prompt and carry more of its output: count the largest output once.
+            if (owner == relative && state.Responses.TryGetValue(key, out var seen)) Grow(state, seen, tokens);
+            return;
+        }
+
         var occurred = Time(Text(entry, "timestamp")) ?? fallback;
         if (occurred < cutoff) return;
         owners[key] = relative;
-        state.Responses[key] = occurred;
-        var tokens = Tokens(usage);
+        var response = new Response { At = occurred, Output = tokens.OutputTokens, Thinking = tokens.Thinking };
+        state.Responses[key] = response;
         if (tokens.TotalTokens <= 0) return;
-        var started = DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Floor(occurred / 60_000) * 60_000).UtcDateTime
-            .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+        var started = Iso(DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Floor(occurred / 60_000) * 60_000));
         var tier = Tier(usage);
         var longContext = tokens.InputTokens > LongContextTokens;
         var bucketKey = $"{started}\u001f{model}\u001f{tier}\u001f{(longContext ? "true" : "false")}";
@@ -187,6 +252,20 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
             state.Buckets[bucketKey] = bucket = new Bucket { StartedAt = started, Model = model, ServiceTier = tier, IsLongContext = longContext };
         bucket.Add(tokens);
         bucket.Requests += 1;
+        response.Bucket = bucketKey;
+    }
+
+    private static void Grow(FileState state, Response seen, Bucket line)
+    {
+        if (seen.Bucket is null || !state.Buckets.TryGetValue(seen.Bucket, out var bucket)) return;
+        // The largest output and the largest thinking seen, the reasoning still within the output.
+        var output = Math.Max(seen.Output, line.OutputTokens);
+        var thinking = Math.Max(seen.Thinking, line.Thinking);
+        bucket.OutputTokens += output - seen.Output;
+        bucket.TotalTokens += output - seen.Output;
+        bucket.ReasoningOutputTokens += Math.Min(output, thinking) - Math.Min(seen.Output, seen.Thinking);
+        seen.Output = output;
+        seen.Thinking = thinking;
     }
 
     // Claude reports uncached, cache-read and cache-write prompt tokens apart.
@@ -206,7 +285,7 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
         {
             InputTokens = input, CachedInputTokens = cached, CacheWriteInputTokens = cacheWrite,
             CacheWriteOneHourInputTokens = Math.Min(cacheWrite, hour), OutputTokens = output,
-            ReasoningOutputTokens = Math.Min(output, thinking), TotalTokens = input + output,
+            ReasoningOutputTokens = Math.Min(output, thinking), TotalTokens = input + output, Thinking = thinking,
         };
     }
 
@@ -225,7 +304,7 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
     private static void Prune(FileState state, double cutoff)
     {
         foreach (var key in state.Buckets.Where(pair => !(Time(pair.Value.StartedAt) >= cutoff)).Select(pair => pair.Key).ToList()) state.Buckets.Remove(key);
-        foreach (var key in state.Responses.Where(pair => !(pair.Value >= cutoff)).Select(pair => pair.Key).ToList()) state.Responses.Remove(key);
+        foreach (var key in state.Responses.Where(pair => !(pair.Value.At >= cutoff)).Select(pair => pair.Key).ToList()) state.Responses.Remove(key);
     }
 
     private static string? Text(JsonElement element, string name) =>
@@ -285,11 +364,20 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
         public long Offset { get; set; }
         public long Size { get; set; }
         public double MtimeMs { get; set; }
-        public Dictionary<string, double> Responses { get; set; } = new(StringComparer.Ordinal);
+        public Dictionary<string, Response> Responses { get; set; } = new(StringComparer.Ordinal);
         public Dictionary<string, Bucket> Buckets { get; set; } = new(StringComparer.Ordinal);
 
         public static FileState Empty(string identity, long size, double modified) =>
             new() { Dev = Native, Ino = identity, Offset = 0, Size = size, MtimeMs = modified };
+    }
+
+    /// <summary>When a response happened, its largest output and thinking so far, and the bucket that holds it.</summary>
+    private sealed class Response
+    {
+        public double At { get; set; }
+        public long Output { get; set; }
+        public long Thinking { get; set; }
+        public string? Bucket { get; set; }
     }
 
     private sealed class Bucket
@@ -306,6 +394,10 @@ internal sealed class TokenUsageSummarizer(string transcriptsRoot, string cacheP
         public long ReasoningOutputTokens { get; set; }
         public long TotalTokens { get; set; }
         public long Requests { get; set; }
+
+        /// <summary>A line's thinking tokens before capping at its output; not kept in the cache.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public long Thinking { get; set; }
 
         public void Add(Bucket other)
         {

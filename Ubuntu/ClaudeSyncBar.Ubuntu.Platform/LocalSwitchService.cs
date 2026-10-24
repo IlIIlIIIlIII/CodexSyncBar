@@ -38,6 +38,23 @@ public sealed class LocalSwitchService
         _ => null,
     };
 
+    /// <summary>
+    /// Whether Claude Desktop is, or may be, signed in to another account than Claude Code's login here: the
+    /// account the app last saw against the login's own. A fresh kept sign-in counts as other until the app takes it up.
+    /// </summary>
+    public bool DesktopUsesOtherAccount
+    {
+        get
+        {
+            if (!Directory.Exists(_desktopAccounts.ActiveDirectory)) return false;
+            if (ClaudeDesktopAccounts.SignedInOwner(_desktopAccounts.ActiveDirectory) is not { } owner) return false;
+            string? login;
+            try { login = _authStore.ReadActiveAuth()?.Account.AccountUuid; }
+            catch (ClaudeSyncBarException) { return true; }
+            return !string.Equals(owner, login, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>Why the account cannot be applied to Claude Desktop from this process, or null.</summary>
     public string? DescribeDesktopBlocker(int profileId) =>
         DesktopAccountToMove(profileId) is not null && _hostedByDesktop() ? HostedByDesktopMessage : null;

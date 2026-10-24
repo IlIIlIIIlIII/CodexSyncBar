@@ -12,6 +12,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gsk, Gtk, Pango
 from .ipc import Client, ServiceError
 from .quota import account_usage, visible_quotas
 from .usage_overview import UsageOverview, CSS as USAGE_CSS, retone
+from .token_dialog import CSS as TOKENS_CSS
 
 CSS = b'''
 .main-content { padding: 30px 32px; font-size: 16px; }
@@ -150,6 +151,8 @@ class SyncBarApplication(Adw.Application):
         self._narrow = None
         self._dialogs = []
         self._refresh_requested = False
+        # The last token reading, shown at once when the token dialog opens again while a new one is made.
+        self.tokens_last = None
 
     def do_activate(self):
         if self.window:
@@ -157,7 +160,7 @@ class SyncBarApplication(Adw.Application):
             self.poll()
             return
         provider = Gtk.CssProvider()
-        provider.load_from_data(CSS + USAGE_CSS)
+        provider.load_from_data(CSS + USAGE_CSS + TOKENS_CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         if self.args.light:
             self.get_style_manager().set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)

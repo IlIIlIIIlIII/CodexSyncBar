@@ -33,6 +33,9 @@ public sealed class DemoService : IManagementService
     private bool _autostart;
     private string? _disabledDevice;
     private OperationView? _operation;
+    private int _tokenHours = TokenRateCalculator.MaximumHours;
+    private string _tokenBasis = TokenBurnBasis.Uncached;
+    private DemoTokens? _tokens;
     public bool ShutdownRequested { get; private set; }
 
     public DemoService()
@@ -56,7 +59,7 @@ public sealed class DemoService : IManagementService
     }
 
     private string Revision => "demo-" + _revision;
-    private object Settings => new { claudeFiveHour = _fiveHour, claudeWeekly = _weekly, taskbarUsage = _taskbar, autoSwitchEnabled = _autoSwitch, autoSwitchLast = (object?)null, autoResumeEnabled = _autoResume, autoResumeLast = (object?)null, launchAtLogin = _autostart, weekly = new { preferences = new { }, records = new { } }, isDemo = true };
+    private object Settings => new { claudeFiveHour = _fiveHour, claudeWeekly = _weekly, taskbarUsage = _taskbar, tokenPeriodHours = _tokenHours, tokenRateBasis = _tokenBasis, autoSwitchEnabled = _autoSwitch, autoSwitchLast = (object?)null, autoResumeEnabled = _autoResume, autoResumeLast = (object?)null, launchAtLogin = _autostart, weekly = new { preferences = new { }, records = new { } }, isDemo = true };
     private string Label(int id) => _accounts.FirstOrDefault(a => a.Id == id)?.Alias ?? "알 수 없음";
     private IReadOnlyList<DeviceView> Devices => new DeviceView[]
     {
@@ -146,6 +149,8 @@ public sealed class DemoService : IManagementService
                 _autoSwitch = Wire.Flag(p, "autoSwitchEnabled", _autoSwitch);
                 _autoResume = Wire.Flag(p, "autoResumeEnabled", _autoResume);
                 _autostart = Wire.Flag(p, "launchAtLogin", _autostart);
+                _tokenHours = Math.Clamp(Wire.Number(p, "tokenPeriodHours", _tokenHours), 1, TokenRateCalculator.MaximumHours);
+                _tokenBasis = TokenBurnBasis.Normalize(Wire.Text(p, "tokenRateBasis", _tokenBasis));
                 return Settings;
             case "device.list": return _configuration;
             case "device.test": return new { isReachable = !_offline, message = "데모 장치 연결을 확인했습니다.", hostKey = (object?)null };
@@ -170,15 +175,25 @@ public sealed class DemoService : IManagementService
                 return new { saved = true };
             }
             case "refresh": return Completed("refresh", "데모 상태를 새로고침했습니다.");
-            case "tokens": return new
+            case "tokens":
+            case "tokens.view":
             {
-                devices = new[]
+                _tokens ??= new DemoTokens(DateTimeOffset.UtcNow, _accounts, _local);
+                _tokenHours = Math.Clamp(Wire.Number(p, "hours", _tokenHours), 1, TokenRateCalculator.MaximumHours);
+                _tokenBasis = TokenBurnBasis.Normalize(Wire.Text(p, "basis", _tokenBasis));
+                var devices = _tokens.Devices(_offline);
+                var view = TokenRateCalculator.Calculate(new(_tokens.CollectedAt, _tokenHours, _tokenBasis, devices, _tokens.History,
+                    _tokens.History.FirstOrDefault()?.At, _accounts.Where(a => !a.IsPending).Select(a => new TokenAccountInput(a.Id, a.Alias, a.Plan)).ToArray(),
+                    _local, _fiveHour, _weekly));
+                if (method == "tokens.view") return new { collectedAt = _tokens.CollectedAt, view };
+                return new
                 {
-                    new { id = "local", displayName = BackendPlatform.LocalDeviceName, isReachable = true, summary = new { totalTokens = 1284000, inputTokens = 1060000, outputTokens = 224000, requests = 286, buckets = Array.Empty<object>() }, estimatedCostUsd = 12.45m, error = (string?)null },
-                    new { id = "ssh:dev", displayName = "개발 서버", isReachable = !_offline, summary = new { totalTokens = 3648000, inputTokens = 3080000, outputTokens = 568000, requests = 712, buckets = Array.Empty<object>() }, estimatedCostUsd = 34.18m, error = (string?)null },
-                },
-                collectedAt = DateTimeOffset.UtcNow, estimatedCostUsd = 46.63m,
-            };
+                    devices = devices.Select(d => new { id = d.Id, displayName = d.DisplayName, isReachable = d.IsReachable, summary = d.Summary?.WithoutMinutes(),
+                        estimatedCostUsd = d.Summary?.Buckets.Sum(b => TokenUsagePricing.EstimateUsd(b).PricedUsd) ?? 0m, error = d.Error }),
+                    collectedAt = _tokens.CollectedAt, estimatedCostUsd = devices.Sum(d => d.Summary?.Buckets.Sum(b => TokenUsagePricing.EstimateUsd(b).PricedUsd) ?? 0m),
+                    view,
+                };
+            }
             case "cli.status": return new { version = "demo", path = "/demo/claude", manager = "demo", canUpdate = false, notice = "격리된 데모에서는 실제 CLI를 실행하지 않습니다." };
             case "recovery.retry":
                 _failRecovery = false;
@@ -245,4 +260,184 @@ public sealed class DemoService : IManagementService
     }
     public Task StopAsync() => Task.CompletedTask;
     public void Dispose() { }
+}
+
+/// <summary>
+/// Five days of made-up session logs and quota readings, shaped like heavy real use: about 81M tokens an hour,
+/// nineteen in twenty of them cache reads. The account in use moves to the next once its five hours run low,
+/// the app is off for a night (no readings) and for an afternoon nobody knows which account the desktop used.
+/// </summary>
+internal sealed class DemoTokens
+{
+    private const int Hours = 120;
+    private static readonly double[] Weights = [0.55, 0.35, 0.15, 0.08, 0, 0, 0, 0.05, 0.25, 0.6, 0.85, 1, 0.8, 0.9, 1, 1.1, 1, 0.95, 0.7, 0.8, 1, 1.1, 1, 0.8];
+    private static readonly TimeSpan Slot = TimeSpan.FromMinutes(5);
+    private readonly DeviceTokenUsageSummary _local;
+    private readonly DeviceTokenUsageSummary _remote;
+
+    public DateTimeOffset CollectedAt { get; }
+    public IReadOnlyList<QuotaHistoryEntry> History { get; }
+
+    public DemoTokens(DateTimeOffset now, IReadOnlyList<AccountView> accounts, int active)
+    {
+        CollectedAt = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.TicksPerMinute, TimeSpan.Zero);
+        var start = CollectedAt - TimeSpan.FromHours(Hours) + TimeSpan.FromMinutes(20);
+        var off = (From: CollectedAt - TimeSpan.FromHours(71), To: CollectedAt - TimeSpan.FromHours(62));
+        var unknown = (From: CollectedAt - TimeSpan.FromHours(81), To: CollectedAt - TimeSpan.FromHours(73));
+        var sampled = accounts.Where(a => !a.NeedsLogin && !a.IsPending).ToList();
+        var order = sampled.OrderBy(a => a.Id == active ? 0 : 1).ThenBy(a => a.Id).Take(3).ToList();
+        var quota = sampled.ToDictionary(a => a.Id, a => new Quota(a.Plan, order.IndexOf(a) switch
+        {
+            0 => (40, CollectedAt - TimeSpan.FromHours(40)),
+            1 => (22, CollectedAt + TimeSpan.FromDays(3)),
+            2 => (8, CollectedAt + TimeSpan.FromDays(5)),
+            _ => (a.Usage?.Weekly?.UsedPercent ?? 10, a.Usage?.Weekly?.ResetsAt ?? CollectedAt + TimeSpan.FromDays(4)),
+        }));
+
+        // Tokens per hour, from the hour of day, then spread over five-minute slots.
+        var hourly = new double[Hours];
+        var output = new double[Hours];
+        for (var k = 0; k < Hours; k++)
+        {
+            // The hour of day in Korea, where the real logs these follow were written.
+            var clock = CollectedAt - TimeSpan.FromHours(k) - TimeSpan.FromMinutes(30) + TimeSpan.FromHours(9);
+            var weight = Weights[clock.Hour] * (clock.Hour == 3 && clock.Day % 2 == 1 ? 0 : 1);
+            hourly[k] = weight * (0.7 + 0.6 * Noise(k, 1.3));
+            output[k] = 0.0049 * (0.75 + 0.5 * Noise(k, 7.1));
+        }
+
+        var scale = 9.72e9 / hourly.Sum();
+        var local = new List<long[]>();
+        var remote = new List<long[]>();
+        var history = new List<QuotaHistoryEntry>();
+        int? holder = null;
+        var chatted = false;
+        var quiet = 0;
+        for (var time = start; time < CollectedAt; time += Slot)
+        {
+            var k = (int)((CollectedAt - time).TotalHours);
+            var slot = (int)((CollectedAt - time).TotalMinutes / 5);
+            var total = hourly[Math.Min(k, Hours - 1)] * scale / 12 * (0.6 + 0.8 * Noise(slot, 9.7));
+            foreach (var state in quota.Values) state.Expire(time);
+            var user = order.FirstOrDefault(a => quota[a.Id] is { FiveHour: < 97, Weekly: < 97 }) ?? order[0];
+            if (user.Id != holder && !(time >= off.From && time < off.To))
+                history.Add(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Switch, At = time, ProfileId = user.Id, DeviceIds = ["local", "ssh:dev"] });
+            holder = user.Id;
+            // One night, well after the last tokens, a chat in the desktop app used the account with no Claude Code log.
+            quiet = total > 0 ? 0 : quiet + 1;
+            if (quiet >= 5 && !chatted && k is > 20 and < 48)
+            {
+                chatted = true;
+                quota[order[0].Id].Chat(time);
+            }
+
+            if (total > 0)
+            {
+                var minute = (long)Math.Floor((time + TimeSpan.FromMinutes(2)).ToUnixTimeMilliseconds() / 60_000d);
+                var uncached = 0d;
+                foreach (var (model, index, share, longContext) in new[] { ("claude-opus-5-5", 0, 0.88, 1), ("claude-sonnet-5-5", 1, 0.12, 0) })
+                {
+                    foreach (var (list, part) in new[] { (local, 0.914), (remote, 0.086) })
+                    {
+                        var tokens = total * share * part;
+                        var outTokens = tokens * output[Math.Min(k, Hours - 1)];
+                        var input = tokens - outTokens;
+                        var write = input * 0.0381;
+                        list.Add([minute, index, 0, longContext, (long)input, (long)(input * 0.9619), (long)write, (long)(write * 0.16),
+                            (long)outTokens, (long)(outTokens * 0.433), Math.Max(1, (long)Math.Round(tokens / 136_000))]);
+                        uncached += input * 0.0381 + outTokens;
+                    }
+                }
+
+                quota[user.Id].Use(uncached, time, Noise(slot, 3.7), Noise(slot, 5.3));
+            }
+
+            // The app looks every five minutes while it runs; for an afternoon the desktop's account is unknown.
+            var look = time + TimeSpan.FromMinutes(4);
+            if (look >= off.From && look < off.To) continue;
+            history.Add(new QuotaHistoryEntry
+            {
+                Kind = QuotaHistoryEntry.Poll, At = look,
+                Samples = sampled.Select(a => quota[a.Id].Sample(a.Id, look)).ToArray(),
+                Devices = [new("local", look >= unknown.From && look < unknown.To ? null : user.Id, look)],
+            });
+        }
+
+        History = history;
+        _local = Summary(local);
+        _remote = Summary(remote);
+    }
+
+    public IReadOnlyList<TokenDeviceInput> Devices(bool offline) =>
+    [
+        new("local", BackendPlatform.LocalDeviceName, "local", true, null, _local),
+        new("ssh:dev", "개발 서버", "ssh", !offline, offline ? "사용량 수집을 완료하지 못했습니다." : null, offline ? null : _remote),
+    ];
+
+    private static double Noise(int index, double salt)
+    {
+        var value = Math.Sin(index * 78.233 + salt) * 43758.5453;
+        return value - Math.Floor(value);
+    }
+
+    private DeviceTokenUsageSummary Summary(List<long[]> minutes)
+    {
+        string[] models = ["claude-opus-5-5", "claude-sonnet-5-5"];
+        var buckets = minutes.GroupBy(row => row[1]).Select(group => new ModelTokenUsage
+        {
+            Model = models[group.Key], ServiceTier = "default", IsLongContext = group.Key == 0, Requests = group.Sum(row => row[10]),
+            InputTokens = group.Sum(row => row[4]), CachedInputTokens = group.Sum(row => row[5]), CacheWriteInputTokens = group.Sum(row => row[6]),
+            CacheWriteOneHourInputTokens = group.Sum(row => row[7]), OutputTokens = group.Sum(row => row[8]),
+            ReasoningOutputTokens = group.Sum(row => row[9]), TotalTokens = group.Sum(row => row[4] + row[8]),
+        }).ToList();
+        return new DeviceTokenUsageSummary
+        {
+            SchemaVersion = 7, GeneratedAt = CollectedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"), ScannedFiles = 42,
+            Requests = buckets.Sum(b => b.Requests), InputTokens = buckets.Sum(b => b.InputTokens), CachedInputTokens = buckets.Sum(b => b.CachedInputTokens),
+            CacheWriteInputTokens = buckets.Sum(b => b.CacheWriteInputTokens), CacheWriteOneHourInputTokens = buckets.Sum(b => b.CacheWriteOneHourInputTokens),
+            OutputTokens = buckets.Sum(b => b.OutputTokens), ReasoningOutputTokens = buckets.Sum(b => b.ReasoningOutputTokens),
+            TotalTokens = buckets.Sum(b => b.TotalTokens), Buckets = buckets, Models = [.. models], Tiers = ["default"], Minutes = minutes,
+            WindowDays = 30, FirstRecordAt = minutes.Count == 0 ? null
+                : DateTimeOffset.FromUnixTimeMilliseconds(minutes[0][0] * 60_000).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"),
+        };
+    }
+
+    /// <summary>One account's five-hour and weekly use as the service would report it, in whole percent.</summary>
+    private sealed class Quota(string? plan, (double Used, DateTimeOffset ResetsAt) weekly)
+    {
+        // Percent of each quota per million uncached tokens, by plan; a smaller plan's 1% is a smaller amount.
+        private readonly (double FiveHour, double Weekly) _rate = plan switch
+        {
+            "Max 5x" => (18.4, 1.04),
+            "Pro" => (92, 5.2),
+            _ => (4.6, 0.26),
+        };
+        private DateTimeOffset? _fiveHourReset;
+        private DateTimeOffset _weeklyReset = weekly.ResetsAt;
+        public double FiveHour { get; private set; }
+        public double Weekly { get; private set; } = weekly.Used;
+
+        public void Expire(DateTimeOffset time)
+        {
+            if (_fiveHourReset is { } reset && time >= reset) { FiveHour = 0; _fiveHourReset = null; }
+            while (time >= _weeklyReset) { Weekly = 0; _weeklyReset += TimeSpan.FromDays(7); }
+        }
+
+        public void Use(double uncached, DateTimeOffset time, double noiseFive, double noiseWeek)
+        {
+            _fiveHourReset ??= time + TimeSpan.FromHours(5);
+            FiveHour = Math.Min(100, FiveHour + uncached / 1e6 * _rate.FiveHour * (0.85 + 0.3 * noiseFive));
+            Weekly = Math.Min(100, Weekly + uncached / 1e6 * _rate.Weekly * (0.85 + 0.3 * noiseWeek));
+        }
+
+        public void Chat(DateTimeOffset time)
+        {
+            _fiveHourReset ??= time + TimeSpan.FromHours(5);
+            FiveHour = Math.Min(100, FiveHour + 4);
+            Weekly = Math.Min(100, Weekly + 0.4);
+        }
+
+        public QuotaSample Sample(int profileId, DateTimeOffset at) =>
+            new(profileId, at, plan, Math.Floor(FiveHour), _fiveHourReset, Math.Floor(Weekly), _weeklyReset);
+    }
 }

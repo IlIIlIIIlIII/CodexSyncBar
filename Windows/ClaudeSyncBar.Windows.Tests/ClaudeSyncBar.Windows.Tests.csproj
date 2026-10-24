@@ -22,6 +22,7 @@
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/LoginProtocolTests.cs" Link="Contracts/LoginProtocolTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/UsagePreferencesMigrationTests.cs" Link="Contracts/UsagePreferencesMigrationTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/QuotaResetFormattingTests.cs" Link="Contracts/QuotaResetFormattingTests.cs" />
+    <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/TokenRateTests.cs" Link="Contracts/TokenRateTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/TestAuth.cs" Link="Contracts/TestAuth.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/WeeklyAnchorExecutionTests.cs" Link="Contracts/WeeklyAnchorExecutionTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/WindowsFactAttribute.cs" Link="Contracts/WindowsFactAttribute.cs" />

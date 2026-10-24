@@ -114,6 +114,13 @@
     <!-- Token counts are not amounts left: their bars stay neutral. -->
     <Style x:Key="SyncBarTokenBar" TargetType="Border"><Setter Property="Background" Value="{ThemeResource TextFillColorTertiaryBrush}" /></Style>
     <Style x:Key="SyncBarTokenTrack" TargetType="Border"><Setter Property="Background" Value="{ThemeResource SyncBarMeterTrackBrush}" /></Style>
+    <!-- What tokens are made of: two neutral parts told apart by lightness, each named by a swatch in the legend. -->
+    <Style x:Key="SyncBarCompositionMajor" TargetType="Border"><Setter Property="Background" Value="{ThemeResource SyncBarMeterMutedBrush}" /></Style>
+    <Style x:Key="SyncBarCompositionMinor" TargetType="Border"><Setter Property="Background" Value="{ThemeResource TextFillColorSecondaryBrush}" /></Style>
+    <Style x:Key="SyncBarCompositionNone" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
     <Style x:Key="SyncBarSegmentHealthy" TargetType="Rectangle"><Setter Property="Fill" Value="{ThemeResource SystemFillColorSuccessBrush}" /></Style>
     <Style x:Key="SyncBarSegmentWarning" TargetType="Rectangle"><Setter Property="Fill" Value="{ThemeResource SystemFillColorCautionBrush}" /></Style>
     <Style x:Key="SyncBarSegmentCritical" TargetType="Rectangle"><Setter Property="Fill" Value="{ThemeResource SystemFillColorCriticalBrush}" /></Style>

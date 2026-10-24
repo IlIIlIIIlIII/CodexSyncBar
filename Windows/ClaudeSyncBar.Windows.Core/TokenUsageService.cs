@@ -21,9 +21,9 @@ public sealed class TokenUsageService
         SshDeviceService sshDeviceService,
         CancellationToken cancellationToken = default)
     {
+        // Other devices first: Claude Desktop keeps a copy of a session it ran on one of them here, and the
+        // sessions they counted are left out of this computer's sums instead of being counted twice.
         var devices = new List<DeviceTokenUsage>();
-        devices.Add(await FetchLocalAsync(cancellationToken));
-
         foreach (var device in configuration.Devices.Where(item => item.Enabled))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -49,6 +49,8 @@ public sealed class TokenUsageService
             }
         }
 
+        var counted = devices.SelectMany(device => device.Summary?.Sessions ?? []).ToHashSet(StringComparer.Ordinal);
+        devices.Insert(0, await FetchLocalAsync(cancellationToken, counted));
         return new TokenUsageSnapshot
         {
             Devices = devices,
@@ -68,7 +70,7 @@ public sealed class TokenUsageService
                 var summary = JsonSerializer.Deserialize<DeviceTokenUsageSummary>(
                     trimmed[firstObject..(lastObject + 1)],
                     JsonOptions);
-                if (summary is not null && summary.SchemaVersion == 6)
+                if (summary is not null && IsKnownSchema(summary.SchemaVersion))
                 {
                     return summary;
                 }
@@ -86,7 +88,7 @@ public sealed class TokenUsageService
             try
             {
                 var summary = JsonSerializer.Deserialize<DeviceTokenUsageSummary>(line, JsonOptions);
-                if (summary is not null && summary.SchemaVersion == 6)
+                if (summary is not null && IsKnownSchema(summary.SchemaVersion))
                 {
                     return summary;
                 }
@@ -100,10 +102,13 @@ public sealed class TokenUsageService
         throw new ClaudeSyncBarException("사용량 집계 helper가 올바른 JSON을 반환하지 않았습니다.");
     }
 
+    // Schema 7 adds the minutes a period is cut from; a schema-6 helper still gives the 30-day totals.
+    private static bool IsKnownSchema(int version) => version is 6 or 7;
+
     /// <summary>Where the in-process summary remembers how far each log was read, apart from the helper's cache.</summary>
     internal string NativeUsageCacheFile => Path.Combine(_paths.ExternalRuntimeDirectory, "usage-cache-native.json");
 
-    internal async Task<DeviceTokenUsage> FetchLocalAsync(CancellationToken cancellationToken)
+    internal async Task<DeviceTokenUsage> FetchLocalAsync(CancellationToken cancellationToken, IReadOnlySet<string>? skipSessions = null)
     {
         var node = ResolveNode();
         var helper = ResolveHelper();
@@ -119,7 +124,7 @@ public sealed class TokenUsageService
                     Id = "windows",
                     DisplayName = "이 Windows PC",
                     IsReachable = true,
-                    Summary = await Task.Run(() => summarizer.Summarize(cancellationToken), cancellationToken),
+                    Summary = await Task.Run(() => summarizer.Summarize(cancellationToken, skipSessions), cancellationToken),
                 };
             }
             catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException)
@@ -133,12 +138,20 @@ public sealed class TokenUsageService
             }
         }
 
+        var skipFile = Path.Combine(_paths.ExternalRuntimeDirectory, "usage-skip-sessions.json");
         try
         {
             _paths.EnsureDirectories();
+            List<string> arguments = [helper, Path.Combine(_paths.ClaudeHome, "projects"), _paths.UsageCacheFile];
+            if (skipSessions is { Count: > 0 })
+            {
+                WindowsPathSafety.WritePrivateBytes(skipFile, JsonSerializer.SerializeToUtf8Bytes(skipSessions.Order(StringComparer.Ordinal)));
+                arguments.Add(skipFile);
+            }
+
             var result = await ProcessRunner.RunAsync(
                 node,
-                [helper, Path.Combine(_paths.ClaudeHome, "projects"), _paths.UsageCacheFile],
+                arguments,
                 cancellationToken: cancellationToken,
                 timeout: TimeSpan.FromSeconds(45));
             if (result.ExitCode != 0)
@@ -171,6 +184,10 @@ public sealed class TokenUsageService
                 DisplayName = "이 Windows PC",
                 Error = "로컬 세션 로그 집계 시간이 초과되었습니다.",
             };
+        }
+        finally
+        {
+            File.Delete(skipFile);
         }
     }
 
@@ -224,10 +241,11 @@ public sealed class TokenUsageService
     private static string? ResolveNode()
     {
         var bundled = Path.Combine(AppContext.BaseDirectory, "Runtime", "node.exe");
-        if (File.Exists(bundled)) return bundled;
+        if (OperatingSystem.IsWindows() && File.Exists(bundled)) return bundled;
         var pathEntries = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var name in new[] { "node.exe", "node" })
+        // Under WSL the PATH also lists Windows folders, whose node.exe cannot read Linux paths.
+        foreach (var name in OperatingSystem.IsWindows() ? new[] { "node.exe", "node" } : ["node"])
         {
             foreach (var directory in pathEntries)
             {

@@ -162,11 +162,11 @@ if [ -n "${CLAUDE_SWITCH_TEST_LIVE_FALLBACK_TARGET:-}" ]; then
 fi
 case " $* " in
   *" __node status "*) printf 'active=3 fingerprint=abcdef123456 mode=600 auth_mode=claudeai cli=logged-in credential=access-only access_fp=123456abcdef expires_at=4102444800\n' ;;
-  *" __node version "*) printf '2.1.3\n' ;;
+  *" __node version "*) printf '2.2.0\n' ;;
   *" __node initialize "*) printf 'active=3 fingerprint=abcdef123456 state=initialized\n' ;;
   *" __node verify "*) printf 'active=3 fingerprint=abcdef123456\n' ;;
   *".bootstrap."*) printf 'bootstrap=installed\n' ;;
-  *) printf 'version=2.1.3 active=3 active_fp=abcdef123456 target_fp=abcdef123456\n' ;;
+  *) printf 'version=2.2.0 active=3 active_fp=abcdef123456 target_fp=abcdef123456\n' ;;
 esac
 SH
 chmod 700 "$FAKE_SSH"
@@ -250,10 +250,10 @@ cat >"$USAGE_SSH" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 case " $* " in
-  *" __node version "*) printf '2.1.3\n' ;;
+  *" __node version "*) printf '2.2.0\n' ;;
   *" __node usage-summary "*)
     if [ -f "$CLAUDE_SWITCH_TEST_USAGE_REMOTE_STATE" ]; then
-      printf '%s\n' '{"schemaVersion":6,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":2,"inputTokens":18,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":20,"buckets":[],"errors":[]}'
+      printf '%s\n' '{"schemaVersion":7,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":2,"inputTokens":18,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":20,"buckets":[],"errors":[]}'
     else
       printf '%s\n' '{"schemaVersion":4,"generatedAt":"2026-08-03T00:00:00.000Z","scannedFiles":1,"requests":99,"inputTokens":990,"cachedInputTokens":0,"cacheWriteInputTokens":0,"outputTokens":9,"reasoningOutputTokens":0,"totalTokens":999,"buckets":[],"errors":[]}'
     fi
@@ -275,11 +275,56 @@ usage_output=$(env "${common_env[@]}" \
   CLAUDE_SWITCH_TEST_USAGE_REMOTE_STATE="$USAGE_REMOTE_STATE" \
   "$HELPER" usage-summary)
 printf '%s\n' "$usage_output" | jq -e -s '
-  length == 2 and .[0].id == "macbook" and .[0].summary.schemaVersion == 6 and
+  length == 2 and .[0].id == "macbook" and .[0].summary.schemaVersion == 7 and
   .[1].id == "usage-node" and .[1].isReachable == true and
-  .[1].summary.schemaVersion == 6 and .[1].summary.totalTokens == 20
+  .[1].summary.schemaVersion == 7 and .[1].summary.totalTokens == 20
 ' >/dev/null
 [ -f "$USAGE_REMOTE_STATE" ]
+
+# Devices without Node.js use the jq collector. It counts a response like the
+# Node helper: the prompt of its first line and the largest output and
+# thinking counts among its lines in the file that first had it.
+JQ_USAGE_HOME="$TMP/jq-usage"
+JQ_USAGE_PROJECT="$JQ_USAGE_HOME/.claude/projects/-home-user-project"
+mkdir -p "$JQ_USAGE_PROJECT"
+chmod 700 "$JQ_USAGE_HOME" "$JQ_USAGE_HOME/.claude"
+usage_now=$(date -u +%s)
+usage_line() {
+  jq -cn --arg id "$1" --arg model "$2" --argjson input "$3" --argjson output "$4" --argjson thinking "$5" \
+    --argjson at "$((usage_now - $6 * 60))" '{
+      type:"assistant",timestamp:($at | todate),requestId:("req_" + $id),
+      message:{id:("msg_" + $id),model:$model,usage:{
+        input_tokens:$input,cache_read_input_tokens:0,cache_creation_input_tokens:0,output_tokens:$output,
+        output_tokens_details:{thinking_tokens:$thinking},service_tier:"standard"}}
+    }'
+}
+{
+  usage_line m1 claude-opus-5-5 10 10 4 9
+  usage_line m1 claude-opus-5-5 10 25 12 9
+  usage_line h1 claude-haiku-5-5 6 3 0 5
+} >"$JQ_USAGE_PROJECT/session-a.jsonl"
+# A resumed session's copy of a response is ignored, even with more output.
+{
+  usage_line m1 claude-opus-5-5 10 60 30 9
+  usage_line b1 claude-opus-5-5 4 2 0 5
+} >"$JQ_USAGE_PROJECT/session-b.jsonl"
+jq_usage=$(env HOME="$JQ_USAGE_HOME" CLAUDE_CONFIG_DIR="$JQ_USAGE_HOME/.claude" \
+  CLAUDE_SWITCH_STATE_ROOT="$JQ_USAGE_HOME/state" CLAUDE_SWITCH_USAGE_HELPER="$USAGE_SOURCE" \
+  CLAUDE_SWITCH_NODE_BIN=missing-node-runtime "$HELPER" __node usage-summary)
+printf '%s\n' "$jq_usage" | jq -e --argjson minute "$(((usage_now - 9 * 60) / 60))" '
+  .schemaVersion == 7 and .windowDays == 30 and .requests == 3 and
+  .inputTokens == 20 and .outputTokens == 30 and .reasoningOutputTokens == 12 and .totalTokens == 50 and
+  .models == ["claude-haiku-5-5", "claude-opus-5-5"] and .tiers == ["default"] and
+  .firstRecordAt == ($minute * 60 | todate | sub("Z$"; ".000Z")) and
+  (.minutes | length) == 3 and .minutes[0] == [$minute, 1, 0, 0, 10, 0, 0, 0, 25, 12, 1] and
+  (reduce .minutes[] as $row ([0, 0, 0, 0, 0, 0, 0]; [range(0; 7) as $index | .[$index] + $row[$index + 4]]))
+    == [.inputTokens, .cachedInputTokens, .cacheWriteInputTokens, .cacheWriteOneHourInputTokens,
+        .outputTokens, .reasoningOutputTokens, .requests]
+' >/dev/null
+node_usage=$(node "$USAGE_SOURCE" "$JQ_USAGE_HOME/.claude/projects" "$JQ_USAGE_HOME/state/usage-cache.json")
+jq -en --argjson jq "$jq_usage" --argjson node "$node_usage" '
+  [$jq, $node] | map(del(.generatedAt, .windowStartedAt)) | .[0] == .[1]
+' >/dev/null
 
 status_json=$(env "${common_env[@]}" "$HELPER" status-json)
 printf '%s\n' "$status_json" | jq -e -s '
@@ -848,7 +893,7 @@ if grep -E 'password-value|passphrase-value' "$STATE/config.json" "$SSH_ARGS" >/
 fi
 
 version=$("$HELPER" --version)
-[ "$version" = "2.1.3" ]
+[ "$version" = "2.2.0" ]
 
 FAKE_SECURITY="$TMP/fake-security"
 SECURITY_ARGS="$TMP/security-args"

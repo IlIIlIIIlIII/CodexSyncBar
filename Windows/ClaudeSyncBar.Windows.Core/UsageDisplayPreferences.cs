@@ -42,6 +42,12 @@ public sealed class UsageDisplayPreferences
     /// <summary>Whether the Windows app shows usage on the taskbar; other platforms ignore it.</summary>
     public bool TaskbarUsage { get; set; } = true;
 
+    /// <summary>The token page's period in whole hours, the last one chosen there.</summary>
+    public int TokenPeriodHours { get; set; } = TokenRateCalculator.MaximumHours;
+
+    /// <summary>What a million tokens counts in the quota rate; see <see cref="TokenBurnBasis"/>.</summary>
+    public string TokenRateBasis { get; set; } = TokenBurnBasis.Uncached;
+
     // Preserve unrelated settings written by other app versions while removing
     // only the retired quota keys during migration.
     [JsonExtensionData]

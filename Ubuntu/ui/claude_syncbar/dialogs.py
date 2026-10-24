@@ -1,6 +1,7 @@
 """Native management dialogs backed by service commands, never placeholder actions."""
 from gi.repository import Adw, GLib, Gtk
 from .app import account_name, box, button, clear, label, timestamp
+from .token_dialog import TokenPage
 
 
 class ManagerDialog(Adw.Dialog):
@@ -422,40 +423,8 @@ class ManagerDialog(Adw.Dialog):
             group.add(row)
 
     def build_tokens(self):
-        self.body.append(label('Claude Code 세션 기록에서 집계한 사용량을 API 요금으로 환산한 추정치입니다. 구독 요금이나 실제 청구 금액과 다릅니다.', 'muted', True))
-        self.body.append(button('다시 집계', callback=lambda *_: self.render()))
-        group = self.group('토큰 사용량')
-        def loaded(result, error):
-            if error:
-                self.feedback.set_text(str(error))
-                return False
-            if not result:
-                group.add(Adw.ActionRow(title='집계된 기록이 없습니다.'))
-                return False
-            devices = result.get('devices', []) if isinstance(result, dict) else []
-            if devices:
-                for device in devices:
-                    row = Adw.ExpanderRow(title=device.get('displayName', '장치'), subtitle=device.get('error') or ('집계 완료' if device.get('isReachable') else '연결 확인 필요'))
-                    for title, value in token_rows(device.get('summary') or {}):
-                        detail = Adw.ActionRow(title=title)
-                        detail.add_suffix(label(value))
-                        row.add_row(detail)
-                    if isinstance(device.get('estimatedCostUsd'), (int,float)):
-                        cost = Adw.ActionRow(title='추정 비용 (USD)')
-                        cost.add_suffix(label(f"${device['estimatedCostUsd']:,.2f}"))
-                        row.add_row(cost)
-                    for bucket in (device.get('summary') or {}).get('buckets', []):
-                        model = Adw.ActionRow(title=bucket.get('model', '모델 확인 필요'), subtitle=bucket.get('serviceTier', 'default'))
-                        model.add_suffix(label(f"{bucket.get('totalTokens',0):,} 토큰"))
-                        row.add_row(model)
-                    group.add(row)
-                return False
-            for title, value in token_rows(result):
-                row = Adw.ActionRow(title=title)
-                row.add_suffix(label(value))
-                group.add(row)
-            return False
-        self.app.client.submit('tokens', callback=loaded, timeout=120)
+        # Tokens per hour, quota use per million tokens and the period's totals; the wording lives in token_view.
+        self.tokens_page = TokenPage(self)
 
     def build_settings(self):
         settings = self.app.snapshot.get('settings') or {}
@@ -499,14 +468,3 @@ def cli_description(result):
         return str(result or '조회 결과 없음')
     parts = [result.get('version') or result.get('currentVersion'), result.get('path') or result.get('executablePath'), result.get('message') or result.get('detail') or result.get('notice')]
     return ' · '.join(str(value) for value in parts if value) or '버전 정보를 확인하지 못했습니다.'
-
-
-def token_rows(result):
-    if not isinstance(result, dict):
-        return [('집계 결과', '확인 필요')]
-    totals = result.get('totals') or result.get('total') or result
-    if not isinstance(totals, dict):
-        totals = result
-    fields = [('입력 토큰','inputTokens'),('캐시 입력','cachedInputTokens'),('출력 토큰','outputTokens'),('추론 토큰','reasoningOutputTokens'),('전체 토큰','totalTokens')]
-    rows = [(title, f'{totals[key]:,}') for title,key in fields if isinstance(totals.get(key), (int,float))]
-    return rows or [('기록 상태', result.get('message') or '집계된 기록이 없습니다.')]

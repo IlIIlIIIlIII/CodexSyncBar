@@ -126,6 +126,33 @@ public sealed class DeviceTokenUsageSummary
     [JsonPropertyName("errors")]
     public List<string> Errors { get; init; } = [];
 
+    [JsonPropertyName("windowDays")]
+    public int? WindowDays { get; init; }
+
+    [JsonPropertyName("windowStartedAt")]
+    public string? WindowStartedAt { get; init; }
+
+    /// <summary>The start of the earliest minute with tokens in the window; null when there is none.</summary>
+    [JsonPropertyName("firstRecordAt")]
+    public string? FirstRecordAt { get; init; }
+
+    [JsonPropertyName("models")]
+    public List<string> Models { get; init; } = [];
+
+    [JsonPropertyName("tiers")]
+    public List<string> Tiers { get; init; } = [];
+
+    /// <summary>
+    /// The same tokens by minute: [minute since the epoch, model index, tier index, long context 0/1, input,
+    /// cached input, cache write, one-hour cache write, output, reasoning output, requests]. Schema 7 and later.
+    /// </summary>
+    [JsonPropertyName("minutes")]
+    public List<long[]> Minutes { get; init; } = [];
+
+    /// <summary>The sessions counted in the window, so another device's copy of them can be left out.</summary>
+    [JsonPropertyName("sessions")]
+    public List<string> Sessions { get; init; } = [];
+
     [JsonIgnore]
     public TokenCounts Counts => new()
     {
@@ -136,6 +163,50 @@ public sealed class DeviceTokenUsageSummary
         OutputTokens = OutputTokens,
         ReasoningOutputTokens = ReasoningOutputTokens,
         TotalTokens = TotalTokens,
+    };
+
+    /// <summary>The minutes decoded; entries that do not fit the format are left out.</summary>
+    public IReadOnlyList<TokenMinute> MinuteSeries()
+    {
+        var series = new List<TokenMinute>(Minutes.Count);
+        foreach (var row in Minutes)
+        {
+            if (row is not { Length: >= 11 } || row[1] < 0 || row[1] >= Models.Count || row[2] < 0 || row[2] >= Tiers.Count) continue;
+            series.Add(new TokenMinute(row[0], Models[(int)row[1]], Tiers[(int)row[2]], row[3] == 1,
+                Math.Max(0, row[4]), Math.Max(0, row[5]), Math.Max(0, row[6]), Math.Max(0, row[7]), Math.Max(0, row[8]), Math.Max(0, row[9]), Math.Max(0, row[10])));
+        }
+
+        return series;
+    }
+
+    /// <summary>The 30-day summary without its minutes, for screens that show only totals.</summary>
+    public DeviceTokenUsageSummary WithoutMinutes() => new()
+    {
+        SchemaVersion = SchemaVersion, GeneratedAt = GeneratedAt, ScannedFiles = ScannedFiles, Requests = Requests,
+        InputTokens = InputTokens, CachedInputTokens = CachedInputTokens, CacheWriteInputTokens = CacheWriteInputTokens,
+        CacheWriteOneHourInputTokens = CacheWriteOneHourInputTokens, OutputTokens = OutputTokens,
+        ReasoningOutputTokens = ReasoningOutputTokens, TotalTokens = TotalTokens, Buckets = Buckets, Errors = Errors,
+        WindowDays = WindowDays, WindowStartedAt = WindowStartedAt, FirstRecordAt = FirstRecordAt,
+    };
+}
+
+/// <summary>One minute of one model's tokens on one device.</summary>
+public sealed record TokenMinute(
+    long Minute, string Model, string ServiceTier, bool IsLongContext, long InputTokens, long CachedInputTokens,
+    long CacheWriteInputTokens, long CacheWriteOneHourInputTokens, long OutputTokens, long ReasoningOutputTokens, long Requests)
+{
+    public DateTimeOffset StartedAt => DateTimeOffset.FromUnixTimeMilliseconds(Minute * 60_000);
+    public long TotalTokens => InputTokens + OutputTokens;
+
+    /// <summary>Everything but cache reads: uncached input, cache writes and output.</summary>
+    public long UncachedTokens => Math.Max(0, InputTokens - CachedInputTokens) + OutputTokens;
+
+    public ModelTokenUsage Usage => new()
+    {
+        Model = Model, ServiceTier = ServiceTier, IsLongContext = IsLongContext, Requests = Requests, InputTokens = InputTokens,
+        CachedInputTokens = CachedInputTokens, CacheWriteInputTokens = CacheWriteInputTokens,
+        CacheWriteOneHourInputTokens = CacheWriteOneHourInputTokens, OutputTokens = OutputTokens,
+        ReasoningOutputTokens = ReasoningOutputTokens, TotalTokens = TotalTokens,
     };
 }
 

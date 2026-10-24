@@ -6,14 +6,18 @@ namespace ClaudeSyncBar.App;
 
 /// <summary>How the app was started.</summary>
 public sealed record LaunchOptions(bool Background, bool Demo, string? Page, string? Theme, string? CapturePath, bool CaptureTray, string? Dialog,
-    bool CaptureTaskbar = false)
+    bool CaptureTaskbar = false, string? Size = null)
 {
     public static LaunchOptions Parse(string[] args)
     {
         string? Option(string key) { var i = Array.IndexOf(args, key); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
         return new(args.Contains("--background"), args.Contains("--demo"), Option("--page"), Option("--theme"),
-            Option("--capture"), args.Contains("--tray"), Option("--dialog"), args.Contains("--taskbar"));
+            Option("--capture"), args.Contains("--tray"), Option("--dialog"), args.Contains("--taskbar"), Option("--size"));
     }
+
+    /// <summary>A window size in DIP for a design capture, as "1040x1500"; only an isolated run takes it.</summary>
+    public (int Width, int Height)? WindowSize => Isolated && Size?.Split('x') is [var width, var height]
+        && int.TryParse(width, out var w) && int.TryParse(height, out var h) && w >= 740 && h >= 600 ? (w, h) : null;
 
     /// <summary>A demo or a capture runs beside the real app and never touches its data.</summary>
     public bool Isolated => Demo || CapturePath is not null;

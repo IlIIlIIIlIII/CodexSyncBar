@@ -19,6 +19,7 @@ bash Tests/helper-contract-tests.sh
 python3 Ubuntu/tests/test_ipc_client.py
 python3 Ubuntu/tests/test_quota.py
 python3 Ubuntu/tests/test_usage_overview.py
+python3 Ubuntu/tests/test_token_view.py
 python3 Ubuntu/tests/test_user_install.py
 node Ubuntu/tests/tray/model.test.mjs
 python3 Ubuntu/tests/test_live_qa.py

@@ -158,8 +158,10 @@ public sealed partial class MainWindow : Window
         var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
         presenter.PreferredMinimumWidth = (int)Math.Round(740 * scale);
         presenter.PreferredMinimumHeight = (int)Math.Round(600 * scale);
-        var width = Math.Min((int)Math.Round(1040 * scale), area.Width - 32);
-        var height = Math.Min((int)Math.Round(760 * scale), area.Height - 32);
+        // A design capture may ask for a whole page, taller than the screen.
+        var asked = _app.Options.WindowSize;
+        var width = asked is { } size ? (int)Math.Round(size.Width * scale) : Math.Min((int)Math.Round(1040 * scale), area.Width - 32);
+        var height = asked is { } tall ? (int)Math.Round(tall.Height * scale) : Math.Min((int)Math.Round(760 * scale), area.Height - 32);
         AppWindow.MoveAndResize(new global::Windows.Graphics.RectInt32(area.X + (area.Width - width) / 2, area.Y + (area.Height - height) / 2, width, height));
     }
 

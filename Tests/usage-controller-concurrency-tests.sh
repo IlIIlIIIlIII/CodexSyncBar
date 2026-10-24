@@ -36,12 +36,12 @@ if [ "${TEST_SLOW_SCAN:-0}" = 1 ]; then
   done
   [ -f "$TEST_ROOT/release-scan" ] || exit 1
 fi
-printf '%s\n' '{"schemaVersion":6,"totalTokens":20,"buckets":[],"errors":[]}'
+printf '%s\n' '{"schemaVersion":7,"totalTokens":20,"buckets":[],"errors":[]}'
 SH
 cat >"$TEST_ROOT/ssh" <<'SH'
 #!/usr/bin/env bash
 case " $* " in
-  *" __node version "*) printf '2.1.3\n' ;;
+  *" __node version "*) printf '2.2.0\n' ;;
   *" __node usage-summary "*)
     if [ "${TEST_DISABLE_DEVICE:-0}" = 1 ]; then
       jq '.devices[0].enabled = false' "$CLAUDE_SWITCH_CONFIG_FILE" >"$CLAUDE_SWITCH_CONFIG_FILE.tmp"
@@ -49,8 +49,8 @@ case " $* " in
       mv "$CLAUDE_SWITCH_CONFIG_FILE.tmp" "$CLAUDE_SWITCH_CONFIG_FILE"
     fi
     if [ "${TEST_REMOVE_CONFIGURATION:-0}" = 1 ]; then rm -f "$CLAUDE_SWITCH_CONFIG_FILE"; fi
-    schema=${TEST_REMOTE_SCHEMA:-6}
-    [ ! -f "$TEST_ROOT/installed" ] || schema=6
+    schema=${TEST_REMOTE_SCHEMA:-7}
+    [ ! -f "$TEST_ROOT/installed" ] || schema=7
     printf '{"schemaVersion":%s,"totalTokens":20,"buckets":[],"errors":[]}\n' "$schema"
     ;;
   *" __node status "*) printf 'active=1 fingerprint=test mode=600 auth_mode=claudeai cli=logged-in\n' ;;

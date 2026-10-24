@@ -4,8 +4,8 @@ set +x
 set -euo pipefail
 
 PROGRAM_NAME="claude-switch"
-SCRIPT_VERSION="2.1.3"
-USAGE_SCHEMA_VERSION=6
+SCRIPT_VERSION="2.2.0"
+USAGE_SCHEMA_VERSION=7
 STATE_ROOT="${CLAUDE_SWITCH_STATE_ROOT:-$HOME/.local/share/claude-switch}"
 CONFIG_FILE="${CLAUDE_SWITCH_CONFIG_FILE:-$STATE_ROOT/config.json}"
 PROFILE_DIR="$STATE_ROOT/profiles"
@@ -157,7 +157,7 @@ ensure_usage_dirs() {
 # Used on devices without Node.js. It rescans every transcript on each call
 # instead of keeping the incremental cache the Node helper maintains.
 jq_usage_summary() {
-  local records scanned=0 generated window_started cutoff file modified
+  local records scanned=0 generated window_started cutoff file modified relative session
   command -v jq >/dev/null 2>&1 || die "jq is required for usage collection"
   ensure_usage_dirs
   records=$(mktemp "$STATE_ROOT/.usage-jq-records.XXXXXX") || die "could not prepare usage collection"
@@ -170,8 +170,20 @@ jq_usage_summary() {
     while IFS= read -r -d '' file; do
       scanned=$((scanned + 1))
       modified=$(stat -c '%Y' "$file" 2>/dev/null || stat -f '%m' "$file" 2>/dev/null || printf '0')
+      # The session, as usage-summary.mjs names it: <project>/<session>.jsonl or <project>/<session>/...,
+      # and ssh-<session>/... for Claude Desktop's copy of a session that ran on another machine.
+      relative=${file#"$CLAUDE_DIR/projects/"}
+      case "$relative" in
+        */*)
+          session=${relative%%/*}
+          case "$session" in
+            ssh-*) session=${session#ssh-} ;;
+            *) session=${relative#*/}; session=${session%%/*}; session=${session%.jsonl} ;;
+          esac ;;
+        *) session=${relative%.jsonl} ;;
+      esac
       # A malformed or half-written line must not discard the rest of a session.
-      jq -R -c --argjson modified "$modified" '
+      jq -R -c --argjson modified "$modified" --argjson file "$scanned" --arg session "$session" '
         def count: if type == "number" and . >= 0 and floor == . then . else 0 end;
         (fromjson? // empty)
         | select(type == "object" and .type == "assistant")
@@ -185,6 +197,8 @@ jq_usage_summary() {
         | ($usage.output_tokens | count) as $output
         | {
             key: (.message.id + "\u001f" + ((.requestId | strings) // "")),
+            file: $file,
+            session: $session,
             at: ((.timestamp | strings | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch null) // $modified),
             model: .message.model,
             serviceTier: (if $usage.speed == "fast" then "fast"
@@ -196,18 +210,33 @@ jq_usage_summary() {
             cacheWriteInputTokens: $written,
             cacheWriteOneHourInputTokens: ([$written, ($usage.cache_creation.ephemeral_1h_input_tokens | count)] | min),
             outputTokens: $output,
-            reasoningOutputTokens: ([$output, ($usage.output_tokens_details.thinking_tokens | count)] | min),
+            thinkingTokens: ($usage.output_tokens_details.thinking_tokens | count),
             totalTokens: ($input + $output)
           }
       ' "$file" >>"$records" 2>/dev/null || true
     done < <(find "$CLAUDE_DIR/projects" -type f -name '*.jsonl' -print0 | sort -z)
   fi
   # One response is written as several lines and copied into resumed
-  # sessions; it counts once.
+  # sessions; it counts once. Its lines repeat the prompt fields while the
+  # output and thinking counts grow, so the first line gives the prompt and
+  # time, and the largest counts among the lines of that file give the output.
+  # The per-minute timeline names each model and tier once and refers to them
+  # by index: [minute, model, tier, longContext, input, cacheRead, cacheWrite,
+  # cacheWriteOneHour, output, reasoning, requests], in Unix epoch minutes.
   jq -s -c --arg generatedAt "$generated" --arg windowStartedAt "$window_started" \
-    --argjson cutoff "$cutoff" --argjson scannedFiles "$scanned" '
-    unique_by(.key)
-    | map(select(.at >= $cutoff and .totalTokens > 0))
+    --argjson cutoff "$cutoff" --argjson scannedFiles "$scanned" --argjson schemaVersion "$USAGE_SCHEMA_VERSION" '
+    group_by(.key)
+    | map(.[0] as $first
+        | select($first.at >= $cutoff and $first.totalTokens > 0)
+        | map(select(.file == $first.file)) as $lines
+        | ($lines | map(.outputTokens) | max) as $output
+        | $first + {
+            minute: ($first.at / 60 | floor),
+            outputTokens: $output,
+            reasoningOutputTokens: ([$output, ($lines | map(.thinkingTokens) | max)] | min),
+            totalTokens: ($first.inputTokens + $output)
+          })
+    | . as $responses
     | group_by([.model, .serviceTier, .isLongContext])
     | map({
         model: .[0].model, isLongContext: .[0].isLongContext, serviceTier: .[0].serviceTier,
@@ -218,7 +247,20 @@ jq_usage_summary() {
         requests: length
       })
     | sort_by(-.totalTokens) as $buckets
-    | {schemaVersion:6,generatedAt:$generatedAt,windowDays:30,windowStartedAt:$windowStartedAt,
+    | ($responses | map(.model) | unique) as $models
+    | ($responses | map(.serviceTier) | unique) as $tiers
+    | (reduce range(0; $models | length) as $index ({}; .[$models[$index]] = $index)) as $modelIndex
+    | (reduce range(0; $tiers | length) as $index ({}; .[$tiers[$index]] = $index)) as $tierIndex
+    | ($responses
+        | group_by([.minute, .model, .serviceTier, .isLongContext])
+        | map([.[0].minute, $modelIndex[.[0].model], $tierIndex[.[0].serviceTier],
+            (if .[0].isLongContext then 1 else 0 end),
+            (map(.inputTokens) | add), (map(.cachedInputTokens) | add), (map(.cacheWriteInputTokens) | add),
+            (map(.cacheWriteOneHourInputTokens) | add), (map(.outputTokens) | add),
+            (map(.reasoningOutputTokens) | add), length])
+        | sort_by(.[0:4])) as $minutes
+    | {schemaVersion:$schemaVersion,generatedAt:$generatedAt,windowDays:30,windowStartedAt:$windowStartedAt,
+       firstRecordAt: (if $minutes == [] then null else ($minutes[0][0] * 60 | todate | sub("Z$"; ".000Z")) end),
        scannedFiles:$scannedFiles,
        requests: ($buckets | map(.requests) | add // 0),
        inputTokens: ($buckets | map(.inputTokens) | add // 0),
@@ -228,7 +270,8 @@ jq_usage_summary() {
        outputTokens: ($buckets | map(.outputTokens) | add // 0),
        reasoningOutputTokens: ($buckets | map(.reasoningOutputTokens) | add // 0),
        totalTokens: ($buckets | map(.totalTokens) | add // 0),
-       buckets:$buckets,errors:[]}
+       buckets:$buckets,models:$models,tiers:$tiers,minutes:$minutes,
+       sessions: ($responses | map(.session) | unique),errors:[]}
   ' "$records"
   rm -f "$records"
   trap - RETURN

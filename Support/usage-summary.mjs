@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const ROLLING_WINDOW_DAYS = 30;
 const ROLLING_WINDOW_MS = ROLLING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 // Some models bill a prompt above this size on a higher rate card.
@@ -20,6 +20,24 @@ const TOKEN_KEYS = [
 ];
 const transcriptsRoot = path.resolve(process.argv[2] ?? path.join(process.env.HOME ?? "", ".claude/projects"));
 const cachePath = path.resolve(process.argv[3] ?? path.join(process.env.HOME ?? "", ".local/share/claude-switch/usage-cache.json"));
+// An optional JSON file listing sessions another device already counted.
+const skipPath = process.argv[4];
+// A cold scan of a large history can outlast the caller's time limit: keep what was read now and then.
+const SAVE_INTERVAL_MS = 5_000;
+
+// The session a log belongs to: <project>/<session>.jsonl and <project>/<session>/... on the machine that
+// ran it, and ssh-<session>/... where Claude Desktop keeps its copy of a session on another machine.
+function sessionOf(relative) {
+  const parts = relative.split(/[\\/]/);
+  if (parts.length > 1 && parts[0].startsWith("ssh-")) return parts[0].slice(4);
+  return (parts.length > 1 ? parts[1] : parts[0]).replace(/\.jsonl$/, "");
+}
+
+async function skippedSessions() {
+  if (!skipPath) return new Set();
+  const parsed = JSON.parse(await fs.promises.readFile(skipPath, "utf8"));
+  return new Set(Array.isArray(parsed) ? parsed.filter((value) => typeof value === "string") : []);
+}
 
 function emptyTokens() {
   return {
@@ -37,6 +55,10 @@ function safeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
+function thinkingFrom(usage) {
+  return safeInteger(usage?.output_tokens_details?.thinking_tokens);
+}
+
 // Claude reports uncached, cache-read and cache-write prompt tokens apart.
 // The summary's inputTokens is the whole prompt, with the cached parts as
 // subsets of it, which is what the cost estimate expects. Cache writes kept
@@ -52,7 +74,7 @@ function tokensFrom(usage) {
     cacheWriteInputTokens: cacheWrite,
     cacheWriteOneHourInputTokens: Math.min(cacheWrite, safeInteger(usage?.cache_creation?.ephemeral_1h_input_tokens)),
     outputTokens: output,
-    reasoningOutputTokens: Math.min(output, safeInteger(usage?.output_tokens_details?.thinking_tokens)),
+    reasoningOutputTokens: Math.min(output, thinkingFrom(usage)),
     totalTokens: input + output,
   };
 }
@@ -113,7 +135,27 @@ function bucketFor(state, eventTime, model, serviceTier, isLongContext) {
       requests: 0,
     };
   }
-  return state.buckets[key];
+  return key;
+}
+
+// The lines of one response repeat its prompt fields, but the output and
+// thinking counts grow until the last line. The first line already counted
+// the response, so a later line adds only the growth, even in a later scan.
+function growResponse(state, key, usage) {
+  const response = state.responses[key];
+  if (!Array.isArray(response) || typeof response[3] !== "string") return;
+  const bucket = state.buckets[response[3]];
+  if (!bucket) return;
+  const output = safeInteger(response[1]);
+  const thinking = safeInteger(response[2]);
+  const nextOutput = Math.max(output, safeInteger(usage.output_tokens));
+  const nextThinking = Math.max(thinking, thinkingFrom(usage));
+  const outputGrowth = nextOutput - output;
+  bucket.outputTokens += outputGrowth;
+  bucket.reasoningOutputTokens += Math.min(nextOutput, nextThinking) - Math.min(output, thinking);
+  bucket.totalTokens += outputGrowth;
+  response[1] = nextOutput;
+  response[2] = nextThinking;
 }
 
 function processEvent(state, relative, event, fallbackTimeMs, cutoffMs, owners) {
@@ -125,16 +167,24 @@ function processEvent(state, relative, event, fallbackTimeMs, cutoffMs, owners) 
   const key = responseKey(event);
   if (!key) return;
   // One response is written as several lines, and a resumed session copies
-  // earlier responses into its new file. Each response counts once.
-  if (owners.has(key)) return;
+  // earlier responses into its new file. Each response counts once, with the
+  // largest output of the lines in the file that first had it.
+  const owner = owners.get(key);
+  if (owner !== undefined) {
+    if (owner === relative) growResponse(state, key, usage);
+    return;
+  }
   const parsed = Date.parse(event.timestamp ?? "");
   const occurredAt = Number.isFinite(parsed) ? parsed : fallbackTimeMs;
   if (occurredAt < cutoffMs) return;
   owners.set(key, relative);
-  state.responses[key] = occurredAt;
   const tokens = tokensFrom(usage);
+  // [first line time, largest output, largest thinking, bucket it counted in]
+  const response = [occurredAt, tokens.outputTokens, thinkingFrom(usage), null];
+  state.responses[key] = response;
   if (tokens.totalTokens <= 0) return;
-  const bucket = bucketFor(state, occurredAt, model, serviceTierFrom(usage), tokens.inputTokens > LONG_CONTEXT_TOKENS);
+  response[3] = bucketFor(state, occurredAt, model, serviceTierFrom(usage), tokens.inputTokens > LONG_CONTEXT_TOKENS);
+  const bucket = state.buckets[response[3]];
   addTokens(bucket, tokens);
   bucket.requests += 1;
 }
@@ -143,8 +193,8 @@ function prune(state, cutoffMs) {
   for (const [key, bucket] of Object.entries(state.buckets)) {
     if (Date.parse(bucket.startedAt ?? "") < cutoffMs) delete state.buckets[key];
   }
-  for (const [key, occurredAt] of Object.entries(state.responses)) {
-    if (!(occurredAt >= cutoffMs)) delete state.responses[key];
+  for (const [key, response] of Object.entries(state.responses)) {
+    if (!(response?.[0] >= cutoffMs)) delete state.responses[key];
   }
 }
 
@@ -242,7 +292,9 @@ async function main() {
     }
   }
 
+  const skipped = await skippedSessions();
   const errors = [];
+  let savedAt = Date.now();
   for (let index = 0; index < files.length; index += 1) {
     const relative = relatives[index];
     try {
@@ -250,13 +302,24 @@ async function main() {
     } catch (error) {
       errors.push(`${relative}: ${error?.message ?? String(error)}`);
     }
+    if (Date.now() - savedAt >= SAVE_INTERVAL_MS) {
+      await saveCache(cache);
+      savedAt = Date.now();
+    }
   }
   await saveCache(cache);
 
   const merged = {};
-  for (const state of Object.values(cache.files)) {
+  const perMinute = {};
+  const sessions = new Set();
+  for (const [relative, state] of Object.entries(cache.files)) {
+    // A session another device already counted is left to it.
+    const session = sessionOf(relative);
+    if (skipped.has(session)) continue;
     for (const bucket of Object.values(state.buckets ?? {})) {
-      if (Date.parse(bucket.startedAt ?? "") < cutoffMs) continue;
+      const startedAtMs = Date.parse(bucket.startedAt ?? "");
+      if (!(startedAtMs >= cutoffMs)) continue;
+      sessions.add(session);
       const key = `${bucket.model}\u001f${bucket.serviceTier}\u001f${bucket.isLongContext}`;
       if (!merged[key]) {
         merged[key] = {
@@ -269,9 +332,46 @@ async function main() {
       }
       addTokens(merged[key], bucket);
       merged[key].requests += safeInteger(bucket.requests);
+      // Several files can hold the same minute; the timeline merges them.
+      const minute = Math.floor(startedAtMs / 60_000);
+      const minuteKey = `${minute}\u001f${key}`;
+      if (!perMinute[minuteKey]) {
+        perMinute[minuteKey] = {
+          minute,
+          model: bucket.model,
+          isLongContext: bucket.isLongContext,
+          serviceTier: bucket.serviceTier,
+          ...emptyTokens(),
+          requests: 0,
+        };
+      }
+      addTokens(perMinute[minuteKey], bucket);
+      perMinute[minuteKey].requests += safeInteger(bucket.requests);
     }
   }
   const buckets = Object.values(merged).sort((a, b) => b.totalTokens - a.totalTokens);
+  // The per-minute timeline names each model and tier once and refers to
+  // them by index. Each row is [minute, model, tier, longContext, input,
+  // cacheRead, cacheWrite, cacheWriteOneHour, output, reasoning, requests],
+  // with Unix epoch minutes; totalTokens is input plus output and is left out.
+  const minuteBuckets = Object.values(perMinute);
+  const models = [...new Set(minuteBuckets.map((bucket) => bucket.model))].sort();
+  const tiers = [...new Set(minuteBuckets.map((bucket) => bucket.serviceTier))].sort();
+  const modelIndex = new Map(models.map((model, index) => [model, index]));
+  const tierIndex = new Map(tiers.map((tier, index) => [tier, index]));
+  const minutes = minuteBuckets.map((bucket) => [
+    bucket.minute,
+    modelIndex.get(bucket.model),
+    tierIndex.get(bucket.serviceTier),
+    bucket.isLongContext ? 1 : 0,
+    bucket.inputTokens,
+    bucket.cachedInputTokens,
+    bucket.cacheWriteInputTokens,
+    bucket.cacheWriteOneHourInputTokens,
+    bucket.outputTokens,
+    bucket.reasoningOutputTokens,
+    bucket.requests,
+  ]).sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
   const totals = emptyTokens();
   let requests = 0;
   for (const bucket of buckets) {
@@ -283,10 +383,15 @@ async function main() {
     generatedAt: generatedAt.toISOString(),
     windowDays: ROLLING_WINDOW_DAYS,
     windowStartedAt: new Date(cutoffMs).toISOString(),
+    firstRecordAt: minutes.length > 0 ? new Date(minutes[0][0] * 60_000).toISOString() : null,
     scannedFiles: files.length,
     requests,
     ...totals,
     buckets,
+    models,
+    tiers,
+    minutes,
+    sessions: [...sessions].sort(),
     errors: errors.slice(0, 20),
   })}\n`);
 }

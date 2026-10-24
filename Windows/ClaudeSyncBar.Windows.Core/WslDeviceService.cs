@@ -78,7 +78,7 @@ public sealed class WslDeviceService(WindowsPaths paths, AuthStore authStore, IW
 {
     private readonly AuthStore _authStore = authStore;
     private readonly IWslCommandRunner _runner = runner ?? new WslCommandRunner();
-    public const string HelperVersion = "2.1.3";
+    public const string HelperVersion = "2.2.0";
     public bool HasPendingBootstrap => File.Exists(BootstrapJournalPath);
     private string BootstrapJournalPath => Path.Combine(paths.StateRoot, "wsl-bootstrap-pending.json");
 
@@ -253,7 +253,7 @@ public sealed class WslDeviceService(WindowsPaths paths, AuthStore authStore, IW
         var result = await NodeAsync(device, ["usage-summary"], null, cancellationToken);
         EnsureSuccess(result);
         var summary = TokenUsageService.ParseSummary(result.StandardOutput);
-        if (summary.SchemaVersion != 6) throw new ClaudeSyncBarException("WSL 사용량 helper를 다시 설치해 주세요.");
+        if (summary.SchemaVersion is not (6 or 7)) throw new ClaudeSyncBarException("WSL 사용량 helper를 다시 설치해 주세요.");
         return summary;
     }
 

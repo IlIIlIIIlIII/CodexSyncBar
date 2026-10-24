@@ -8,7 +8,7 @@ namespace ClaudeSyncBar.Windows.Core;
 
 public sealed class SshDeviceService
 {
-    private const string ExpectedHelperVersion = "2.1.3";
+    private const string ExpectedHelperVersion = "2.2.0";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,

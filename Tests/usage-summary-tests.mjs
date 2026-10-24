@@ -20,6 +20,11 @@ const transcripts = path.join(claudeHome, "projects");
 const cache = path.join(root, "usage-cache.json");
 const now = Date.now();
 const recent = (minutesAgo) => new Date(now - minutesAgo * 60_000).toISOString();
+const epochMinute = (timestamp) => Math.floor(Date.parse(timestamp) / 60_000);
+const TOKEN_FIELDS = [
+  "inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWriteOneHourInputTokens",
+  "outputTokens", "reasoningOutputTokens",
+];
 
 function usage(input, cacheRead, cacheWrite, output, extra = {}) {
   return {
@@ -45,6 +50,15 @@ function response(id, model, tokens, timestamp, lines = 1) {
   }));
 }
 
+// The prompt fields repeat on every line, while the output and thinking
+// counts grow; each entry of `outputs` is one line's [output, thinking].
+function growing(id, model, input, outputs, timestamp) {
+  return outputs.map(([output, thinking], block) => ({
+    ...response(id, model, usage(input, 0, 0, output, { output_tokens_details: { thinking_tokens: thinking } }), timestamp)[0],
+    apiBlockIndex: block,
+  }));
+}
+
 function writeTranscript(name, events) {
   const file = path.join(transcripts, name);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -52,10 +66,53 @@ function writeTranscript(name, events) {
   return file;
 }
 
+function appendTranscript(file, events) {
+  fs.appendFileSync(file, `${events.flat().map((event) => JSON.stringify(event)).join("\n")}\n`);
+}
+
+// The per-minute timeline must hold exactly the 30-day totals and buckets.
+function checkTimeline(summary) {
+  const { models, tiers, minutes } = summary;
+  assert.deepEqual(models, [...new Set(models)].sort(), "models are distinct and sorted");
+  assert.deepEqual(tiers, [...new Set(tiers)].sort(), "tiers are distinct and sorted");
+  const sums = {};
+  const totals = Object.fromEntries([...TOKEN_FIELDS, "requests"].map((field) => [field, 0]));
+  minutes.forEach((row, index) => {
+    assert.equal(row.length, 11);
+    assert.ok(row.every(Number.isSafeInteger), "timeline rows hold integers");
+    assert.ok(row[1] < models.length && row[2] < tiers.length && (row[3] === 0 || row[3] === 1));
+    if (index > 0) {
+      const previous = minutes[index - 1];
+      const order = previous[0] - row[0] || previous[1] - row[1] || previous[2] - row[2] || previous[3] - row[3];
+      assert.ok(order < 0, "timeline rows are sorted and unique");
+    }
+    const key = `${models[row[1]]}\u001f${tiers[row[2]]}\u001f${row[3] === 1}`;
+    sums[key] ??= Object.fromEntries([...TOKEN_FIELDS, "requests"].map((field) => [field, 0]));
+    [...TOKEN_FIELDS, "requests"].forEach((field, column) => {
+      sums[key][field] += row[column + 4];
+      totals[field] += row[column + 4];
+    });
+  });
+  for (const field of TOKEN_FIELDS) assert.equal(totals[field], summary[field], `timeline ${field}`);
+  assert.equal(totals.requests, summary.requests, "timeline requests");
+  assert.deepEqual(
+    Object.fromEntries(summary.buckets.map((bucket) => [
+      `${bucket.model}\u001f${bucket.serviceTier}\u001f${bucket.isLongContext}`,
+      Object.fromEntries([...TOKEN_FIELDS, "requests"].map((field) => [field, bucket[field]])),
+    ])),
+    sums,
+    "timeline matches the buckets",
+  );
+  assert.deepEqual(models, [...new Set(summary.buckets.map((bucket) => bucket.model))].sort());
+  assert.deepEqual(tiers, [...new Set(summary.buckets.map((bucket) => bucket.serviceTier))].sort());
+  assert.equal(summary.firstRecordAt, minutes.length > 0 ? new Date(minutes[0][0] * 60_000).toISOString() : null);
+  return summary;
+}
+
 function collectNode() {
   const result = spawnSync("node", [usageHelper, transcripts, cache], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  return JSON.parse(result.stdout);
+  return checkTimeline(JSON.parse(result.stdout));
 }
 
 function collectJQ() {
@@ -71,13 +128,14 @@ function collectJQ() {
     },
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  return JSON.parse(result.stdout);
+  return checkTimeline(JSON.parse(result.stdout));
 }
 
 function comparable(summary) {
   const fields = [
-    "schemaVersion", "scannedFiles", "requests", "inputTokens", "cachedInputTokens",
+    "schemaVersion", "windowDays", "firstRecordAt", "scannedFiles", "requests", "inputTokens", "cachedInputTokens",
     "cacheWriteInputTokens", "cacheWriteOneHourInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens",
+    "models", "tiers", "minutes", "sessions",
   ];
   return {
     ...Object.fromEntries(fields.map((field) => [field, summary[field]])),
@@ -92,6 +150,8 @@ try {
   const empty = collectNode();
   assert.equal(empty.totalTokens, 0);
   assert.equal(empty.scannedFiles, 0);
+  assert.equal(empty.firstRecordAt, null);
+  assert.deepEqual([empty.models, empty.tiers, empty.minutes], [[], [], []]);
   assert.deepEqual(comparable(collectJQ()), comparable(empty), "an absent transcript directory is empty usage");
 
   const opus = "claude-opus-5-5";
@@ -135,7 +195,8 @@ try {
   fs.rmSync(path.join(transcripts, "-home-user-stale"), { recursive: true });
 
   const summary = collectNode();
-  assert.equal(summary.schemaVersion, 6);
+  assert.equal(summary.schemaVersion, 7);
+  assert.equal(summary.windowDays, 30);
   assert.equal(summary.scannedFiles, 4);
   assert.equal(summary.requests, 6, "split and copied responses count once");
   assert.equal(summary.inputTokens, 55 + 100 + 7 + 4 + 6 + 30);
@@ -155,9 +216,29 @@ try {
       { model: opus, serviceTier: "fast", isLongContext: false, totalTokens: 10, requests: 1 },
     ],
   );
+  // The timeline starts at the minute of the earliest response in the window
+  // and names models and tiers by their index in the sorted lists.
+  assert.equal(summary.firstRecordAt, new Date(epochMinute(recent(29)) * 60_000).toISOString());
+  assert.deepEqual(summary.models, [haiku, opus]);
+  assert.deepEqual(summary.tiers, ["default", "fast", "priority"]);
+  assert.deepEqual(summary.minutes, [
+    [epochMinute(recent(29)), 1, 0, 0, 55, 40, 5, 4, 20, 8, 1],
+    [epochMinute(recent(28)), 1, 0, 0, 100, 0, 0, 0, 50, 0, 1],
+    [epochMinute(recent(27)), 1, 1, 0, 7, 0, 0, 0, 3, 0, 1],
+    [epochMinute(recent(26)), 0, 2, 0, 4, 0, 0, 0, 1, 0, 1],
+    [epochMinute(recent(20)), 0, 0, 0, 30, 0, 0, 0, 6, 0, 1],
+    [epochMinute(recent(10)), 1, 0, 0, 6, 2, 3, 0, 4, 0, 1],
+  ]);
   const rebuiltCache = JSON.parse(fs.readFileSync(cache, "utf8"));
-  assert.equal(rebuiltCache.schemaVersion, 6);
+  assert.equal(rebuiltCache.schemaVersion, 7);
   assert.equal(rebuiltCache.files["-home-user-stale/stale.jsonl"], undefined);
+  for (const state of Object.values(rebuiltCache.files)) {
+    for (const entry of Object.values(state.responses)) {
+      assert.ok(Array.isArray(entry) && entry.length === 4 && Number.isFinite(entry[0])
+        && Number.isSafeInteger(entry[1]) && Number.isSafeInteger(entry[2])
+        && (entry[3] === null || state.buckets[entry[3]] !== undefined), "cached responses name their bucket");
+    }
+  }
 
   assert.deepEqual(comparable(collectNode()), comparable(summary), "unchanged cache scan must be idempotent");
   assert.deepEqual(comparable(collectJQ()), comparable(summary), "Node and jq paths must agree");
@@ -184,6 +265,7 @@ try {
   assert.equal(longBuckets.find((bucket) => bucket.isLongContext).inputTokens, 100_001);
   assert.equal(longBuckets.find((bucket) => !bucket.isLongContext).inputTokens,
     100_000 + 55 + 100 + 6 + 9);
+  assert.ok(long.minutes.some((row) => row[0] === epochMinute(recent(3)) && row[3] === 1 && row[4] === 100_001));
   assert.deepEqual(comparable(collectNode()), comparable(long));
   assert.deepEqual(comparable(collectJQ()), comparable(long));
 
@@ -197,6 +279,85 @@ try {
   assert.equal(rewritten.requests, long.requests + 1);
   assert.equal(rewritten.totalTokens, long.totalTokens + 4);
   assert.deepEqual(comparable(collectJQ()), comparable(rewritten));
+
+  // The output count of a response grows over its lines; the largest counts.
+  // Its thinking count is the largest one too, capped at the largest output.
+  const sonnet = "claude-sonnet-5-5";
+  const grow = writeTranscript("-home-user-grow/grow.jsonl", [
+    growing("m1", sonnet, 10, [[10, 4], [25, 12]], recent(8)),
+    growing("t1", sonnet, 5, [[10, 30], [25, 20]], recent(8)),
+    // A response whose first line has no tokens is not a request.
+    growing("z1", sonnet, 0, [[0, 0], [5, 0]], recent(8)),
+    // Only this response's first line is written before the next scan.
+    growing("g1", sonnet, 7, [[10, 4]], recent(7)),
+  ]);
+  const grown = collectNode();
+  assert.equal(grown.requests, rewritten.requests + 3);
+  assert.equal(grown.inputTokens, rewritten.inputTokens + 10 + 5 + 7);
+  assert.equal(grown.outputTokens, rewritten.outputTokens + 25 + 25 + 10);
+  assert.equal(grown.reasoningOutputTokens, rewritten.reasoningOutputTokens + 12 + 25 + 4);
+  assert.equal(grown.totalTokens, grown.inputTokens + grown.outputTokens);
+  assert.deepEqual(grown.models, [haiku, opus, sonnet]);
+  assert.deepEqual(grown.minutes.filter((row) => row[1] === 2), [
+    [epochMinute(recent(8)), 2, 0, 0, 15, 0, 0, 0, 50, 37, 2],
+    [epochMinute(recent(7)), 2, 0, 0, 7, 0, 0, 0, 10, 4, 1],
+  ]);
+  assert.deepEqual(comparable(collectJQ()), comparable(grown));
+
+  // The larger lines can arrive after the first one was read in an earlier scan.
+  appendTranscript(grow, [growing("g1", sonnet, 7, [[10, 4], [40, 16], [30, 20]], recent(7)).slice(1)]);
+  const finished = collectNode();
+  assert.equal(finished.requests, grown.requests);
+  assert.equal(finished.inputTokens, grown.inputTokens);
+  assert.equal(finished.outputTokens, grown.outputTokens + 30);
+  assert.equal(finished.reasoningOutputTokens, grown.reasoningOutputTokens + 16);
+  assert.deepEqual(grown.minutes.filter((row) => row[1] === 2)[0],
+    finished.minutes.filter((row) => row[1] === 2)[0]);
+  assert.deepEqual(finished.minutes.filter((row) => row[1] === 2)[1],
+    [epochMinute(recent(7)), 2, 0, 0, 7, 0, 0, 0, 40, 20, 1]);
+  const grownCache = JSON.parse(fs.readFileSync(cache, "utf8")).files["-home-user-grow/grow.jsonl"];
+  assert.deepEqual(Object.values(grownCache.responses).map((entry) => entry.slice(1, 3)).sort((a, b) => a[0] - b[0] || a[1] - b[1]),
+    [[0, 0], [25, 12], [25, 30], [40, 20]]);
+  assert.deepEqual(comparable(collectNode()), comparable(finished));
+  assert.deepEqual(comparable(collectJQ()), comparable(finished));
+
+  // A resumed session's copy of a response, even with more output, is ignored.
+  writeTranscript("-home-user-grow/resumed.jsonl", [
+    growing("m1", sonnet, 10, [[10, 4], [25, 12], [60, 30]], recent(8)),
+    growing("g1", sonnet, 7, [[90, 0]], recent(7)),
+    growing("r1", sonnet, 3, [[2, 0], [6, 1]], recent(6)),
+  ]);
+  const resumed = collectNode();
+  assert.equal(resumed.requests, finished.requests + 1);
+  assert.equal(resumed.outputTokens, finished.outputTokens + 6);
+  assert.equal(resumed.reasoningOutputTokens, finished.reasoningOutputTokens + 1);
+  assert.deepEqual(comparable(collectJQ()), comparable(resumed));
+  // A full rescan without the cache reaches the same totals.
+  fs.rmSync(cache);
+  assert.deepEqual(comparable(collectNode()), comparable(resumed));
+
+  // A cache written by the previous schema is rebuilt from the logs.
+  const current = JSON.parse(fs.readFileSync(cache, "utf8"));
+  const stale = current.files["-home-user-grow/grow.jsonl"];
+  for (const bucket of Object.values(stale.buckets)) bucket.outputTokens += 1_000;
+  fs.writeFileSync(cache, `${JSON.stringify({ ...current, schemaVersion: 6 })}\n`);
+  assert.deepEqual(comparable(collectNode()), comparable(resumed));
+  assert.equal(JSON.parse(fs.readFileSync(cache, "utf8")).schemaVersion, 7);
+
+  // Claude Desktop's copy of a session that ran on another machine counts under that session, and a
+  // session another device already counted is left out when it is named.
+  writeTranscript("ssh-remote1/workflow-agent-a1.jsonl", [response("x1", sonnet, usage(5, 0, 0, 5), recent(4))]);
+  const withCopy = collectNode();
+  assert.ok(withCopy.sessions.includes("remote1"), JSON.stringify(withCopy.sessions));
+  assert.ok(withCopy.sessions.includes("grow"), JSON.stringify(withCopy.sessions));
+  assert.deepEqual(comparable(collectJQ()), comparable(withCopy));
+  const skip = path.join(root, "skip-sessions.json");
+  fs.writeFileSync(skip, JSON.stringify(["remote1"]));
+  const skipped = spawnSync("node", [usageHelper, transcripts, cache, skip], { encoding: "utf8" });
+  assert.equal(skipped.status, 0, skipped.stderr || skipped.stdout);
+  const without = checkTimeline(JSON.parse(skipped.stdout));
+  assert.equal(without.totalTokens, withCopy.totalTokens - 10);
+  assert.ok(!without.sessions.includes("remote1"));
   process.stdout.write("usage-summary regression tests passed\n");
 
 } finally {

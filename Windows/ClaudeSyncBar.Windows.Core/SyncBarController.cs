@@ -20,6 +20,7 @@ public sealed class SyncBarController : IDisposable
     private readonly SshDeviceService _ssh;
     private readonly WslDeviceService _wsl;
     private readonly UsageService _usage;
+    private readonly QuotaHistoryStore _history;
     private readonly AccountSwitchCoordinator _coordinator;
     private readonly Func<AppConfiguration, IReadOnlyList<IAccountTarget>>? _targetFactory;
     private readonly Func<AppConfiguration, CancellationToken, Task<IReadOnlyList<DashboardDevice>>>? _deviceQuery;
@@ -37,6 +38,7 @@ public sealed class SyncBarController : IDisposable
     private DateTimeOffset _lastUsageRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastDeviceRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastMaintenance = DateTimeOffset.MinValue;
+    private string? _recordedSwitch;
     private CancellationTokenSource? _maintenanceCancellation;
     private int _maintenancePauses;
     private string? _error;
@@ -57,10 +59,18 @@ public sealed class SyncBarController : IDisposable
         _ssh = new(_auth, paths, _local);
         _wsl = new(paths, _auth);
         _coordinator = new(paths);
+        _history = new(paths);
         _targetFactory = targetFactory;
         _deviceQuery = deviceQuery;
         var anchorSender = new WeeklyAnchorService(paths, _auth, new ClaudeAuthMaintenanceService(paths, _auth, _local));
-        WeeklyAnchor = new(paths, weeklySender ?? anchorSender.SendAsync, canSend: () =>
+        var send = weeklySender ?? anchorSender.SendAsync;
+        WeeklyAnchor = new(paths, async (profileId, token) =>
+        {
+            // The message uses the account's quota and leaves no log here: the rate leaves its time out.
+            var started = DateTimeOffset.UtcNow;
+            try { return await send(profileId, token); }
+            finally { RecordHistory(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Anchor, At = started, ProfileId = profileId }); }
+        }, canSend: () =>
         {
             lock (_gate) return !_switchRunning && _operation?.State != "recoveryRequired" && !_wsl.HasPendingBootstrap;
         });
@@ -68,6 +78,7 @@ public sealed class SyncBarController : IDisposable
         _coordinator.Progress += operation =>
         {
             lock (_gate) { _operation = operation; _deviceGeneration++; _lastDeviceRefresh = DateTimeOffset.MinValue; }
+            RecordSwitch(operation);
             Changed?.Invoke(this, EventArgs.Empty);
         };
         var cachePath = CachePath;
@@ -225,6 +236,7 @@ public sealed class SyncBarController : IDisposable
             // A login that changed outside this app stays "unknown" until the service names its account.
             try { await _auth.VerifyActiveOwnerAsync(_usage.FetchAccountAsync, cancellationToken); }
             catch (Exception) when (!cancellationToken.IsCancellationRequested) { }
+            var samples = new List<QuotaSample>();
             foreach (var account in configuration.Accounts.Where(account => !account.IsPending && !account.NeedsLogin))
             {
                 try
@@ -262,6 +274,8 @@ public sealed class SyncBarController : IDisposable
                     var current = _auth.ReadCredentials(account.Id);
                     if (current.AccountId != credentials.AccountId || current.AccessToken != credentials.AccessToken) continue;
                     lock (_gate) { _usageCache[account.Id] = ToDashboardUsage(usage); _snapshots[account.Id] = usage; }
+                    samples.Add(new QuotaSample(account.Id, usage.UpdatedAt, credentials.Plan, usage.FiveHour?.UsedPercent,
+                        usage.FiveHour?.ResetsAt, usage.Weekly?.UsedPercent, usage.Weekly?.ResetsAt));
                     _ = EvaluateWeeklyAnchorAsync(usage);
                 }
                 catch (Exception error) when (!cancellationToken.IsCancellationRequested)
@@ -277,6 +291,11 @@ public sealed class SyncBarController : IDisposable
             }
             lock (_gate) _lastUsageRefresh = DateTimeOffset.UtcNow;
             SaveCache();
+            RecordHistory(new QuotaHistoryEntry
+            {
+                Kind = QuotaHistoryEntry.Poll, At = DateTimeOffset.UtcNow, Samples = samples,
+                Devices = [LocalAccount(configuration)],
+            });
         }
         finally { _refreshGate.Release(); }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -424,6 +443,7 @@ public sealed class SyncBarController : IDisposable
         _local.RefreshClientStatus();
         var ssh = await _ssh.FetchStatusesAsync(configuration, _local.GetActiveProfileId(configuration.Accounts), cancellationToken);
         var wsl = await _wsl.FetchStatusesAsync(cancellationToken);
+        RecordDeviceAccounts(configuration, ssh);
         return ssh.Where(status => status.Id != "windows")
             .Select(status => new DashboardDevice("ssh:" + status.Id, status.DisplayName, "ssh", status.ProfileId, status.IsReachable, status.IsReachable ? null : "장치 연결 또는 활성 계정을 확인해 주세요."))
             .Concat(wsl.Select(status => new DashboardDevice(status.Id, status.DisplayName, "wsl", status.ProfileId, status.IsReachable, status.IsReachable ? null : "장치 연결 또는 활성 계정을 확인해 주세요."))).ToArray();
@@ -554,6 +574,75 @@ public sealed class SyncBarController : IDisposable
     }
 
     private static DashboardUsage ToDashboardUsage(UsageSnapshot usage) => new(usage.Weekly, usage.UpdatedAt, usage.FiveHour);
+
+    // Claude Code in Claude Desktop uses the desktop's own login: while it is another account, whose tokens these are is unknown.
+    private DeviceAccountObservation LocalAccount(AppConfiguration configuration)
+    {
+        var observed = DateTimeOffset.UtcNow;
+        try
+        {
+            if (_local.DesktopUsesOtherAccount) return new("local", null, observed);
+            if (_local.GetActiveProfileId(configuration.Accounts) is { } profile) return new("local", profile, observed);
+            // Signed in, to an account this app does not hold.
+            return new("local", null, observed, Unregistered: _auth.ReadActiveAuth() is not null);
+        }
+        catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new("local", null, observed);
+        }
+    }
+
+    // An SSH device's account is known by the fingerprint of its login, as the device list matches it.
+    private void RecordDeviceAccounts(AppConfiguration configuration, IReadOnlyList<DeviceStatus> statuses)
+    {
+        var identities = new Dictionary<string, int>(StringComparer.Ordinal);
+        // Only when every registered login could be read is a fingerprint matching none of them another account.
+        var complete = true;
+        foreach (var account in configuration.Accounts.Where(account => !account.IsPending && !account.NeedsLogin))
+        {
+            try { identities[Fingerprint(_auth.ReadCredentials(account.Id).AccountId)] = account.Id; }
+            catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException or JsonException) { complete = false; }
+        }
+
+        var observed = DateTimeOffset.UtcNow;
+        RecordDevices(statuses.Where(status => status.Id != "windows" && status.IsReachable)
+            .Select(status => status.AccountId is { } fingerprint && identities.TryGetValue(fingerprint, out var id)
+                ? new DeviceAccountObservation("ssh:" + status.Id, id, observed)
+                : new DeviceAccountObservation("ssh:" + status.Id, null, observed, Unregistered: complete && status.AccountId is not null))
+            .ToArray());
+    }
+
+    /// <summary>Keeps which account each device was seen to use, for the token page's rates.</summary>
+    public void RecordDevices(IReadOnlyList<DeviceAccountObservation> devices)
+    {
+        if (devices.Count > 0) RecordHistory(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Poll, At = devices.Max(device => device.ObservedAt), Devices = devices });
+    }
+
+    /// <summary>Keeps a completed switch, once: from then on its devices used its account.</summary>
+    public void RecordSwitch(SwitchOperation operation)
+    {
+        lock (_gate)
+        {
+            if (operation.State != "completed" || operation.Id == _recordedSwitch) return;
+            _recordedSwitch = operation.Id;
+        }
+
+        RecordHistory(new QuotaHistoryEntry
+        {
+            Kind = QuotaHistoryEntry.Switch, At = operation.FinishedAt ?? DateTimeOffset.UtcNow, ProfileId = operation.ProfileId,
+            DeviceIds = operation.Targets.Where(target => target.State == "verified")
+                .Select(target => target.Id == "windows" ? "local" : target.Id).ToArray(),
+        });
+    }
+
+    // The history only feeds a rate; failing to write it must not fail a refresh or a switch.
+    private void RecordHistory(QuotaHistoryEntry entry)
+    {
+        try { _history.Append(entry); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ClaudeSyncBarException) { }
+    }
+
+    private static string Fingerprint(string accountId) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(accountId)))[..12];
 
     private void SaveCache()
     {

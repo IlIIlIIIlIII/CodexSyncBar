@@ -47,6 +47,37 @@ public sealed class ManagementServiceIntegrationTests
         Assert.Equal("completed", (await fixture.Wait(await fixture.Call<OperationView>("refresh", new { kind = "usage" }))).State);
 
     [Fact]
+    public async Task TokensAreCutToTheChosenPeriodAndEveryUsageLookIsKept()
+    {
+        await using var fixture = new Fixture(withRemote: false, usage: _ => Quotas(12, 30));
+        await RefreshUsage(fixture);
+        var history = File.ReadAllLines(Path.Combine(fixture.Paths.StateRoot, "quota-history.jsonl"));
+        Assert.Contains(history, line => line.Contains("\"Samples\":[{\"ProfileId\"") && line.Contains("\"FiveHourUsed\":12") && line.Contains("\"DeviceId\":\"local\""));
+
+        var log = Path.Combine(fixture.Paths.ClaudeHome, "projects", "-work", "a.jsonl");
+        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+        File.WriteAllText(log, "{\"type\":\"assistant\",\"requestId\":\"r1\",\"timestamp\":\"" + DateTimeOffset.UtcNow.AddMinutes(-30).UtcDateTime.ToString("o")
+            + "\",\"message\":{\"id\":\"m1\",\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":1000,"
+            + "\"cache_creation_input_tokens\":200,\"output_tokens\":40}}}\n");
+        var collected = JsonSerializer.SerializeToElement(await fixture.Call<object>("tokens"), Wire.Json);
+        var month = collected.GetProperty("view");
+        Assert.Equal(720, month.GetProperty("hours").GetInt32());
+        Assert.Equal(1250, month.GetProperty("totals").GetProperty("totalTokens").GetInt64());
+        // The minutes stay in the backend; the screens get the period cut from them.
+        Assert.Equal(0, collected.GetProperty("devices")[0].GetProperty("summary").GetProperty("minutes").GetArrayLength());
+
+        var hour = JsonSerializer.SerializeToElement(await fixture.Call<object>("tokens.view", new { hours = 1, basis = "total" }), Wire.Json).GetProperty("view");
+        Assert.Equal(("total", 1), (hour.GetProperty("basis").GetString(), hour.GetProperty("hours").GetInt32()));
+        Assert.Equal(1250, hour.GetProperty("totals").GetProperty("totalTokens").GetInt64());
+        // The log began half an hour ago: the hour is divided by the time since then.
+        Assert.True(hour.GetProperty("clipped").GetBoolean());
+        Assert.Equal(1250 / hour.GetProperty("elapsedHours").GetDouble(), hour.GetProperty("throughput").GetProperty("total").GetDouble(), 6);
+        var settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
+        Assert.Equal(1, settings.GetProperty("tokenPeriodHours").GetInt32());
+        Assert.Equal("total", settings.GetProperty("tokenRateBasis").GetString());
+    }
+
+    [Fact]
     public async Task AutomaticSwitchLeavesAnAccountWithNothingLeftForTheNextInPriorityOrder()
     {
         var usage = new Dictionary<string, string>
@@ -460,6 +491,16 @@ public sealed class ManagementServiceIntegrationTests
         Assert.All(result.Targets, target => Assert.Equal("restored", target.State));
         Assert.Equal("fixture-account-1", fixture.Auth.ReadActiveAccountId());
         Assert.Equal("fixture-account-1", fixture.RemoteAccount());
+
+        // The token page's history learns when each device changed account, from completed switches only,
+        // and what account the remote device was seen to use.
+        var history = File.ReadAllLines(Path.Combine(fixture.Paths.StateRoot, "quota-history.jsonl"));
+        var switches = history.Where(line => line.Contains("\"Kind\":\"switch\"")).ToArray();
+        Assert.Equal(2, switches.Length);
+        Assert.Contains("\"ProfileId\":2", switches[0]);
+        Assert.Contains("\"local\"", switches[0]);
+        Assert.Contains("\"ssh:", switches[0]);
+        Assert.Contains(history, line => line.Contains("\"DeviceId\":\"ssh:") && line.Contains("\"ProfileId\":1"));
     }
 
     [Fact]
