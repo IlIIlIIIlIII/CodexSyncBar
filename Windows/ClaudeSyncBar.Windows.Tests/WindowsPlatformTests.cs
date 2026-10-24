@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Text.Json.Nodes;
 using ClaudeSyncBar.Ubuntu.Backend;
 using ClaudeSyncBar.Windows.Core;
+using ClaudeSyncBar.Windows.Core.Tests;
 using TestAuth = ClaudeSyncBar.Windows.Core.Tests.TestAuth;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
@@ -352,6 +353,101 @@ public sealed class WindowsPlatformTests : IDisposable
         accounts.Undo(swap);
         Assert.Equal(new[] { "local_1.json", "local_2.json" }, Directory.GetFiles(Records(first, "org-first")).Select(Path.GetFileName).Order());
         Assert.Equal(new[] { "local_3.json" }, Directory.GetFiles(Records(second, "org-second")).Select(Path.GetFileName));
+    }
+
+    [Fact]
+    public void DesktopPresetsAndFolderPermissionModesFollowTheSwitch()
+    {
+        const string first = "aaaaaaaa-1111";
+        const string second = "bbbbbbbb-2222";
+        const string presets = "persisted.ccd-session-presets.";
+        var profile = _paths.DesktopUserDataDirectory;
+        var storage = Path.Combine(profile, "Local Storage", "leveldb");
+        Directory.CreateDirectory(Path.Combine(profile, "Network"));
+        Directory.CreateDirectory(Path.Combine(profile, "claude-code-sessions", first, "org-first"));
+        WriteConfig(first, "token-first");
+        File.WriteAllText(Path.Combine(profile, "Network", "Cookies"), "cookie-first");
+        var settings = Path.Combine(profile, "claude_desktop_config.json");
+        File.WriteAllText(settings, new JsonObject
+        {
+            ["preferences"] = new JsonObject
+            {
+                ["epitaxyPrefs"] = new JsonObject
+                {
+                    [$"epitaxy-folder-permission-mode-v2.{first}"] = new JsonObject { [@"C:\Users\user\프로젝트"] = "bypassPermissions" },
+                    [$"epitaxy-perm-mode-acks-v2.{first}"] = new JsonArray(@"C:\Users\user\프로젝트:bypassPermissions"),
+                },
+            },
+        }.ToJsonString());
+        LevelDbFixture.CreateEmpty(storage);
+        LevelDbFixture.Put(storage, (presets + first, "{\"presets\":[\"컴퓨터 관리\"]}"), (presets + second, "{\"presets\":[]}"));
+        var accounts = new ClaudeDesktopAccounts(_paths, account => account == first ? "org-first" : "org-second", () => [first, second]);
+
+        var swap = accounts.Activate(new(second, "org-second"))!;
+        var epitaxy = JsonNode.Parse(File.ReadAllText(settings))!["preferences"]!["epitaxyPrefs"]!;
+        Assert.Equal("bypassPermissions", epitaxy[$"epitaxy-folder-permission-mode-v2.{second}"]![@"C:\Users\user\프로젝트"]!.GetValue<string>());
+        Assert.NotNull(epitaxy[$"epitaxy-perm-mode-acks-v2.{second}"]);
+        Assert.Equal("{\"presets\":[\"컴퓨터 관리\"]}", LevelDbFixture.Read(storage, presets + second));
+
+        accounts.Undo(swap);
+        Assert.Null(JsonNode.Parse(File.ReadAllText(settings))!["preferences"]!["epitaxyPrefs"]![$"epitaxy-folder-permission-mode-v2.{second}"]);
+        Assert.Equal("{\"presets\":[]}", LevelDbFixture.Read(storage, presets + second));
+
+        // While the app has its Local Storage open nothing is written to it, and the switch still goes ahead.
+        using (var app = new FileStream(Path.Combine(storage, "LOCK"), FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            app.Lock(0, long.MaxValue);
+            var logs = Directory.GetFiles(storage, "*.log").Length;
+            var held = accounts.Activate(new(second, "org-second"))!;
+            Assert.Empty(held.Stored!);
+            Assert.Equal(logs, Directory.GetFiles(storage, "*.log").Length);
+            Assert.True(Directory.Exists(Path.Combine(profile, "claude-code-sessions", second, "org-second")));
+        }
+
+        Assert.Equal("{\"presets\":[]}", LevelDbFixture.Read(storage, presets + second));
+    }
+
+    [Fact]
+    public void DesktopPresetsOfEveryRegisteredAccountComeTogetherOnce()
+    {
+        const string first = "aaaaaaaa-1111";
+        const string second = "bbbbbbbb-2222";
+        const string third = "cccccccc-3333";
+        const string presets = "persisted.ccd-session-presets.";
+        var profile = _paths.DesktopUserDataDirectory;
+        var storage = Path.Combine(profile, "Local Storage", "leveldb");
+        Directory.CreateDirectory(Path.Combine(profile, "Network"));
+        Directory.CreateDirectory(Path.Combine(profile, "claude-code-sessions", first, "org-first"));
+        WriteConfig(first, "token-first");
+        File.WriteAllText(Path.Combine(profile, "Network", "Cookies"), "cookie-first");
+        static JsonObject Preset(string id, string name, string cwd) => new()
+        {
+            ["id"] = id, ["name"] = name, ["createdAt"] = 1, ["lastUsedAt"] = 2, ["target"] = new JsonObject { ["kind"] = "local", ["cwd"] = cwd },
+        };
+        static string Stored(params JsonObject[] list) => new JsonObject
+        {
+            ["state"] = new JsonObject { ["presets"] = new JsonArray(list), ["fileMirrored"] = true }, ["version"] = 4,
+        }.ToJsonString();
+        File.WriteAllText(Path.Combine(profile, "ccd-session-presets.json"), new JsonObject
+        {
+            ["byAccount"] = new JsonObject { [third] = new JsonObject { ["presets"] = new JsonArray(Preset("t1", "encoders", @"C:\Users\user\encoders")) } },
+        }.ToJsonString());
+        LevelDbFixture.CreateEmpty(storage);
+        LevelDbFixture.Put(storage,
+            (presets + first, Stored(Preset("f1", "CodexSyncBar", @"C:\Users\user\CodexSyncBar"))),
+            (presets + second, Stored(Preset("s1", "컴퓨터 관리", @"C:\Users\user\컴퓨터 관리"), Preset("s2", "CodexSyncBar", @"C:\Users\user\CodexSyncBar"))));
+        var accounts = new ClaudeDesktopAccounts(_paths, account => account == first ? "org-first" : "org-second", () => [first, second, third]);
+        string[] Names(string account) => JsonNode.Parse(LevelDbFixture.Read(storage, presets + account)!)!["state"]!["presets"]!.AsArray()
+            .Select(preset => preset!["name"]!.GetValue<string>()).ToArray();
+
+        var swap = accounts.Activate(new(second, "org-second"))!;
+        Assert.True(swap.PresetsMerged);
+        Assert.Equal(new[] { "CodexSyncBar", "컴퓨터 관리", "encoders" }, Names(second));
+        Assert.True(File.Exists(Path.Combine(_paths.DesktopLoginsDirectory, ".presets-merged")));
+
+        accounts.Undo(swap);
+        Assert.Equal(new[] { "컴퓨터 관리", "CodexSyncBar" }, Names(second));
+        Assert.False(File.Exists(Path.Combine(_paths.DesktopLoginsDirectory, ".presets-merged")));
     }
 
     private void WriteConfig(string owner, string token)

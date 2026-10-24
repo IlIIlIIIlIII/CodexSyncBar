@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClaudeSyncBar.Windows.Core;
+using ClaudeSyncBar.Windows.Core.Tests;
 using Contracts = ClaudeSyncBar.Windows.Core.Tests.TestAuth;
 
 namespace ClaudeSyncBar.Ubuntu.Tests;
@@ -268,7 +269,13 @@ public sealed class DesktopSwitchTests : IDisposable
                     "account-b": { "/home/user/other": "auto" }
                   },
                   "dframe-code-sections": { "account-a/org-a": { "sections": [1, 2, 3] } },
-                  "epitaxy-perm-mode-acks": { "account-a": ["auto", "bypassPermissions"] }
+                  "epitaxy-perm-mode-acks": { "account-a": ["auto", "bypassPermissions"] },
+                  "epitaxy-folder-permission-mode-v2.account-a": { "wsl:ubuntu:/home/user/프로젝트": "bypassPermissions" },
+                  "epitaxy-folder-permission-mode-v2.account-b": { "/home/user/other": "auto" },
+                  "epitaxy-perm-mode-acks-v2.account-a": ["wsl:ubuntu:/home/user/프로젝트:bypassPermissions"],
+                  "epitaxy-auto-mode-denial-count.account-a": 3,
+                  "epitaxy-review-gate.account-a": true,
+                  "epitaxy-folder-permission-mode-v2.account-ab": { "/home/user/someone-else": "plan" }
                 }
               }
             }
@@ -284,6 +291,16 @@ public sealed class DesktopSwitchTests : IDisposable
         Assert.True(preferences["bypassPermissionsOptInByAccount"]!["account-b"]!.GetValue<bool>());
         Assert.Equal("[1,2,3]", preferences["epitaxyPrefs"]!["dframe-code-sections"]!["account-b/org-b"]!["sections"]!.ToJsonString());
         Assert.NotNull(preferences["epitaxyPrefs"]!["epitaxy-perm-mode-acks"]!["account-b"]);
+        // The app now files these as "<choice>.<account>"; they follow the same way.
+        var epitaxy = preferences["epitaxyPrefs"]!;
+        Assert.Equal("{\"wsl:ubuntu:/home/user/프로젝트\":\"bypassPermissions\"}",
+            epitaxy["epitaxy-folder-permission-mode-v2.account-b"]!.ToJsonString(new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        Assert.Equal(epitaxy["epitaxy-perm-mode-acks-v2.account-a"]!.ToJsonString(), epitaxy["epitaxy-perm-mode-acks-v2.account-b"]!.ToJsonString());
+        Assert.Equal(3, epitaxy["epitaxy-auto-mode-denial-count.account-b"]!.GetValue<int>());
+        Assert.Null(epitaxy["epitaxy-review-gate.account-b"]);
+        // An account whose name merely ends the same way is another account.
+        Assert.Equal("plan", epitaxy["epitaxy-folder-permission-mode-v2.account-ab"]!["/home/user/someone-else"]!.GetValue<string>());
+        Assert.Null(epitaxy["epitaxy-folder-permission-mode-v2.account-bb"]);
         // What the app decides for an account by itself is not copied.
         Assert.Null(preferences["bypassPermissionsGateByAccount"]!["account-b"]);
         // The rest is the same: servers, values, the first account's choices, the path as written.
@@ -312,6 +329,180 @@ public sealed class DesktopSwitchTests : IDisposable
         File.WriteAllText(settings, "{ not json");
         accounts.Activate(new("account-c", "org-c"));
         Assert.Equal("{ not json", File.ReadAllText(settings));
+    }
+
+    private string Storage => Path.Combine(Active, "Local Storage", "leveldb");
+
+    private const string Presets = "persisted.ccd-session-presets.";
+
+    [Fact]
+    public void PresetsTheAppKeepsInItsLocalStorageFollowTheSwitch()
+    {
+        var accounts = new ClaudeDesktopAccounts(Paths);
+        SignIn(Active, "account-a");
+        Directory.CreateDirectory(Records("claude-code-sessions", "account-a", "org-a"));
+        LevelDbFixture.CreateEmpty(Storage);
+        LevelDbFixture.Put(Storage, (Presets + "account-a", "{\"presets\":[\"컴퓨터 관리\",\"diet-help\"]}"),
+            (Presets + "account-b", "{\"presets\":[\"old of b\"]}"), (Presets + "account-b.org-b", "cloud presets of b"), ("unrelated", "kept"));
+
+        var swap = accounts.Activate(new("account-b", "org-b"))!;
+        Assert.Equal("{\"presets\":[\"컴퓨터 관리\",\"diet-help\"]}", LevelDbFixture.Read(Storage, Presets + "account-b"));
+        Assert.Equal("{\"presets\":[\"컴퓨터 관리\",\"diet-help\"]}", LevelDbFixture.Read(Storage, Presets + "account-a"));
+        // The cloud presets are kept by the server for each account; the rest is not SyncBar's.
+        Assert.Equal("cloud presets of b", LevelDbFixture.Read(Storage, Presets + "account-b.org-b"));
+        Assert.Equal("kept", LevelDbFixture.Read(Storage, "unrelated"));
+
+        // A rollback puts back what the account had.
+        accounts.Undo(swap);
+        Assert.Equal("{\"presets\":[\"old of b\"]}", LevelDbFixture.Read(Storage, Presets + "account-b"));
+
+        // What the app writes while the account is in use is the account's own, and a rollback keeps it.
+        var again = accounts.Activate(new("account-b", "org-b"))!;
+        LevelDbFixture.Put(Storage, (Presets + "account-b", "{\"presets\":[\"added in b\"]}"));
+        accounts.Undo(again);
+        Assert.Equal("{\"presets\":[\"added in b\"]}", LevelDbFixture.Read(Storage, Presets + "account-b"));
+
+        // From then on each switch takes the presets of the account in use along.
+        accounts.Activate(new("account-b", "org-b"));
+        Assert.Equal("{\"presets\":[\"컴퓨터 관리\",\"diet-help\"]}", LevelDbFixture.Read(Storage, Presets + "account-b"));
+        SignIn(Active, "account-b");
+        LevelDbFixture.Put(Storage, (Presets + "account-b", "{\"presets\":[\"컴퓨터 관리\",\"diet-help\",\"added in b\"]}"));
+        accounts.Activate(new("account-a", "org-a"));
+        Assert.Equal("{\"presets\":[\"컴퓨터 관리\",\"diet-help\",\"added in b\"]}", LevelDbFixture.Read(Storage, Presets + "account-a"));
+    }
+
+    // A presets entry as the app's page stores it.
+    private static string Stored(params (string Id, string Name, string Cwd, string? Distro)[] presets) => new JsonObject
+    {
+        ["state"] = new JsonObject
+        {
+            ["presets"] = new JsonArray(presets.Select(preset => (JsonNode)Preset(preset.Id, preset.Name, preset.Cwd, preset.Distro)).ToArray()),
+            ["builtIns"] = new JsonObject(),
+            ["fileMirrored"] = true,
+            ["seededFromHistory"] = 2,
+        },
+        ["version"] = 4,
+    }.ToJsonString();
+
+    private static JsonObject Preset(string id, string name, string cwd, string? distro = null)
+    {
+        var target = new JsonObject { ["kind"] = "local", ["cwd"] = cwd };
+        if (distro is not null) target["wslDistro"] = distro;
+        return new() { ["id"] = id, ["name"] = name, ["createdAt"] = 1, ["lastUsedAt"] = 2, ["target"] = target, ["settings"] = new JsonObject { ["effort"] = "xhigh" } };
+    }
+
+    private string[] StoredNames(string account) => JsonNode.Parse(LevelDbFixture.Read(Storage, Presets + account)!)!
+        ["state"]!["presets"]!.AsArray().Select(preset => preset!["name"]!.GetValue<string>()).ToArray();
+
+    [Fact]
+    public void ThePresetsOfEveryRegisteredAccountComeTogetherOnceOnTheNextSwitch()
+    {
+        var accounts = new ClaudeDesktopAccounts(Paths, knownAccounts: () => ["account-a", "account-b", "account-c"]);
+        SignIn(Active, "account-a");
+        Directory.CreateDirectory(Records("claude-code-sessions", "account-a", "org-a"));
+        // The third account's presets were never in Local Storage, only in the file.
+        File.WriteAllText(Path.Combine(Active, "ccd-session-presets.json"), new JsonObject
+        {
+            ["byAccount"] = new JsonObject
+            {
+                ["account-a"] = new JsonObject { ["presets"] = new JsonArray(Preset("a1", "CodexSyncBar", "/home/user/CodexSyncBar")) },
+                ["account-c"] = new JsonObject { ["presets"] = new JsonArray(Preset("c1", "encoders", "/home/user/encoders"), Preset("c2", "CodexSyncBar", "/home/user/CodexSyncBar")) },
+            },
+        }.ToJsonString());
+        LevelDbFixture.CreateEmpty(Storage);
+        LevelDbFixture.Put(Storage,
+            (Presets + "account-a", Stored(("a1", "CodexSyncBar", "/home/user/CodexSyncBar", null), ("a2", "translate", "/home/user/translate", "Ubuntu"))),
+            (Presets + "account-b", Stored(("b1", "translate", "/home/user/translate", "Ubuntu"), ("b2", "컴퓨터 관리", "/home/user/컴퓨터 관리", null),
+                ("b3", "translate", "/home/user/translate", "Debian"))),
+            (Presets + "account-z", Stored(("z1", "someone else's", "/home/other", null))));
+
+        var swap = accounts.Activate(new("account-b", "org-b"))!;
+        Assert.True(swap.PresetsMerged);
+        // The account in use first, then each folder only another account had; a folder on another distribution is another place.
+        Assert.Equal(new[] { "CodexSyncBar", "translate", "컴퓨터 관리", "translate", "encoders" }, StoredNames("account-b"));
+        var state = JsonNode.Parse(LevelDbFixture.Read(Storage, Presets + "account-b")!)!["state"]!;
+        Assert.Equal(new[] { "a1", "a2", "b2", "b3", "c1" }, state["presets"]!.AsArray().Select(preset => preset!["id"]!.GetValue<string>()));
+        Assert.Equal("Debian", state["presets"]![3]!["target"]!["wslDistro"]!.GetValue<string>());
+        Assert.Equal(2, state["seededFromHistory"]!.GetValue<int>());
+        Assert.True(state["fileMirrored"]!.GetValue<bool>());
+        // The account in use keeps its own entry, and an account not registered here is none of this.
+        Assert.Equal(new[] { "CodexSyncBar", "translate" }, StoredNames("account-a"));
+        Assert.Equal(new[] { "someone else's" }, StoredNames("account-z"));
+
+        // A rollback separates them again; the next switch brings them together.
+        accounts.Undo(swap);
+        Assert.Equal(new[] { "translate", "컴퓨터 관리", "translate" }, StoredNames("account-b"));
+        Assert.True(accounts.Activate(new("account-b", "org-b"))!.PresetsMerged);
+
+        // That happens once: a preset removed afterwards stays removed.
+        SignIn(Active, "account-b");
+        LevelDbFixture.Put(Storage, (Presets + "account-b", Stored(("a1", "CodexSyncBar", "/home/user/CodexSyncBar", null))));
+        var next = accounts.Activate(new("account-a", "org-a"))!;
+        Assert.False(next.PresetsMerged);
+        Assert.Equal(new[] { "CodexSyncBar" }, StoredNames("account-a"));
+    }
+
+    [Fact]
+    public void PresetsComeTogetherOnlyWhenTheAccountInUseHasThemInLocalStorage()
+    {
+        var accounts = new ClaudeDesktopAccounts(Paths, knownAccounts: () => ["account-a", "account-b"]);
+        SignIn(Active, "account-a");
+        Directory.CreateDirectory(Records("claude-code-sessions", "account-a", "org-a"));
+        LevelDbFixture.CreateEmpty(Storage);
+        LevelDbFixture.Put(Storage, (Presets + "account-a", "not what the page writes"), (Presets + "account-b", Stored(("b1", "own", "/home/user/own", null))));
+
+        var swap = accounts.Activate(new("account-b", "org-b"))!;
+        // Copied as it is, and tried again with a later switch.
+        Assert.False(swap.PresetsMerged);
+        Assert.Equal("not what the page writes", LevelDbFixture.Read(Storage, Presets + "account-b"));
+        SignIn(Active, "account-b");
+        LevelDbFixture.Put(Storage, (Presets + "account-b", Stored(("b1", "own", "/home/user/own", null))),
+            (Presets + "account-a", Stored(("a1", "first", "/home/user/first", null))));
+        Assert.True(accounts.Activate(new("account-a", "org-a"))!.PresetsMerged);
+        Assert.Equal(new[] { "own", "first" }, StoredNames("account-a"));
+    }
+
+    [Fact]
+    public void WithoutStoredPresetsOfTheAccountInUseTheNewAccountReadsThePresetsFile()
+    {
+        var accounts = new ClaudeDesktopAccounts(Paths);
+        SignIn(Active, "account-a");
+        Directory.CreateDirectory(Records("claude-code-sessions", "account-a", "org-a"));
+        File.WriteAllText(Path.Combine(Active, "ccd-session-presets.json"),
+            "{\"byAccount\":{\"account-a\":{\"presets\":[{\"id\":\"p1\",\"name\":\"리뷰\"}]},\"account-b\":{\"presets\":[]}}}");
+        LevelDbFixture.CreateEmpty(Storage);
+        LevelDbFixture.Put(Storage, (Presets + "account-b", "{\"presets\":[\"old of b\"]}"));
+
+        var swap = accounts.Activate(new("account-b", "org-b"))!;
+        // Its stored entry is gone, so the app takes up the file, which now has the first account's presets.
+        Assert.Null(LevelDbFixture.Read(Storage, Presets + "account-b"));
+        Assert.Equal("리뷰", JsonNode.Parse(File.ReadAllText(Path.Combine(Active, "ccd-session-presets.json")))!
+            ["byAccount"]!["account-b"]!["presets"]![0]!["name"]!.GetValue<string>());
+
+        accounts.Undo(swap);
+        Assert.Equal("{\"presets\":[\"old of b\"]}", LevelDbFixture.Read(Storage, Presets + "account-b"));
+    }
+
+    [Fact]
+    public void ALocalStorageThatIsNotAsExpectedIsLeftAloneAndTheSwitchGoesAhead()
+    {
+        var accounts = new ClaudeDesktopAccounts(Paths);
+        SignIn(Active, "account-a");
+        Directory.CreateDirectory(Records("claude-code-sessions", "account-a", "org-a"));
+        LevelDbFixture.CreateEmpty(Storage);
+        LevelDbFixture.Put(Storage, (Presets + "account-a", "presets of a"), (Presets + "account-b", "presets of b"));
+        var log = Directory.GetFiles(Storage, "*.log").Single();
+        var damaged = File.ReadAllBytes(log);
+        damaged[^1] ^= 0xFF;
+        File.WriteAllBytes(log, damaged);
+        var files = Directory.GetFiles(Storage).Order().ToArray();
+
+        var swap = accounts.Activate(new("account-b", "org-b"));
+        Assert.NotNull(swap);
+        Assert.Empty(swap.Stored!);
+        Assert.Equal(files, Directory.GetFiles(Storage).Order());
+        Assert.Equal(damaged, File.ReadAllBytes(log));
+        Assert.True(Directory.Exists(Records("claude-code-sessions", "account-b", "org-b")));
     }
 
     [Fact]

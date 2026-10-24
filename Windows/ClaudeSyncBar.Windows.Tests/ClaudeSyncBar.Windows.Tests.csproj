@@ -18,6 +18,7 @@
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/AuthRefreshTests.cs" Link="Contracts/AuthRefreshTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/CliBatchUpdaterTests.cs" Link="Contracts/CliBatchUpdaterTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/AuthVaultTests.cs" Link="Contracts/AuthVaultTests.cs" />
+    <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/ChromiumLocalStorageTests.cs" Link="Contracts/ChromiumLocalStorageTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/LoginProtocolTests.cs" Link="Contracts/LoginProtocolTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/UsagePreferencesMigrationTests.cs" Link="Contracts/UsagePreferencesMigrationTests.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Core.Tests/QuotaResetFormattingTests.cs" Link="Contracts/QuotaResetFormattingTests.cs" />

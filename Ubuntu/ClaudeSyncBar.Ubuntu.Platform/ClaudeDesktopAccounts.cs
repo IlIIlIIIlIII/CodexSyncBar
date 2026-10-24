@@ -23,11 +23,17 @@ internal sealed record DesktopSessionMerge(string From, string To, string Name);
 /// </summary>
 internal sealed record DesktopPreferenceChange(IReadOnlyList<string> Path, string? Previous, string? File = null);
 
+/// <summary>An entry of the app's Local Storage one switch wrote, what it held before, and what was written (null: none).</summary>
+internal sealed record DesktopStorageChange(string Name, byte[]? Previous, byte[]? Written);
+
 /// <summary>What one switch changed in the profile, so that exactly that can be put back.</summary>
 /// <param name="Tokens">The entries of the app's own config.json the switch overwrote, by name.</param>
+/// <param name="Stored">The entries of the app's Local Storage the switch wrote.</param>
+/// <param name="PresetsMerged">Whether this switch was the one that brought the presets of every account together.</param>
 internal sealed record DesktopLoginSwap(
     string TargetAccount, string? PreviousMarker, string? PreviousLogin, IReadOnlyList<DesktopSessionMove> Moved,
-    IReadOnlyList<DesktopSessionMerge> Merged, IReadOnlyList<DesktopPreferenceChange> Preferences, IReadOnlyList<DesktopPreferenceChange> Tokens);
+    IReadOnlyList<DesktopSessionMerge> Merged, IReadOnlyList<DesktopPreferenceChange> Preferences, IReadOnlyList<DesktopPreferenceChange> Tokens,
+    IReadOnlyList<DesktopStorageChange>? Stored = null, bool PresetsMerged = false);
 
 internal enum DesktopSignIn { Settled, Needed, OtherAccount }
 
@@ -70,8 +76,17 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
     private static readonly JsonSerializerOptions ConfigFormat = new(SettingsFormat) { IndentCharacter = '\t', IndentSize = 1 };
     // Other files in which the app keeps choices by account: the presets for
     // new sessions and which tools of each connector are turned off.
+    private const string PresetsFile = "ccd-session-presets.json";
     private static readonly (string Name, JsonSerializerOptions Format)[] ChoiceFiles =
-        [("ccd-session-presets.json", ConfigFormat), ("mcp-user-tool-toggles.json", SettingsFormat)];
+        [(PresetsFile, ConfigFormat), ("mcp-user-tool-toggles.json", SettingsFormat)];
+    // The app's page keeps the presets for new sessions in its Local Storage too,
+    // one entry per account. The presets file is read only the first time an
+    // account is used; from then on the page writes its entry over the file.
+    private const string StorageOrigin = "https://claude.ai";
+    private const string PresetStorage = "persisted.ccd-session-presets.";
+    private static readonly string[] StoredChoices = [PresetStorage];
+    // How the app's page writes the values it keeps there.
+    private static readonly JsonSerializerOptions StoredFormat = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private const long MaximumCookieBytes = 64 * 1024 * 1024;
     private const long MaximumSettingsBytes = 4 * 1024 * 1024;
     private static readonly string[] LoginFiles = [CookieFile, "Cookies-journal"];
@@ -86,6 +101,9 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
 
     public string ActiveDirectory => paths.DesktopUserDataDirectory;
     private string MarkerPath => Path.Combine(ActiveDirectory, MarkerFile);
+    private ChromiumLocalStorage LocalStorage => new(Path.Combine(ActiveDirectory, "Local Storage", "leveldb"));
+    // Present once the presets of every registered account have been brought together.
+    private string PresetsMergedPath => Path.Combine(paths.DesktopLoginsDirectory, ".presets-merged");
 
     /// <summary>The account the app last saw signed in to this profile. It records that unencrypted.</summary>
     public static string? SignedInOwner(string directory)
@@ -190,6 +208,8 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
         var merged = new List<DesktopSessionMerge>();
         var preferences = new List<DesktopPreferenceChange>();
         var tokens = new List<DesktopPreferenceChange>();
+        var stored = new List<DesktopStorageChange>();
+        var presetsMerged = false;
         try
         {
             if (HasKeptLogin(target.Account))
@@ -204,12 +224,18 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
 
             WriteMarker(new(target.Account, SignedInOwner(ActiveDirectory), MoveSessions(previous, target, moved, merged)));
             if (previous is not null)
+            {
+                // What the presets file held for each account before the mirror below rewrote it.
+                var presetsBefore = ReadJsonObject(Path.Combine(ActiveDirectory, PresetsFile))?["byAccount"]?.DeepClone() as JsonObject;
                 MirrorPreferences(previous, previousOrganization, target.Account, KeptOrganization(target.Account) ?? target.Organization, preferences);
-            return new(target.Account, previousMarker, previousLogin, moved, merged, preferences, tokens);
+                presetsMerged = CarryStoredChoices(previous, target.Account, presetsBefore, stored);
+            }
+
+            return new(target.Account, previousMarker, previousLogin, moved, merged, preferences, tokens, stored, presetsMerged);
         }
         catch
         {
-            Restore(previousMarker, previousLogin, moved, merged, preferences, tokens);
+            Restore(previousMarker, previousLogin, moved, merged, preferences, tokens, stored, presetsMerged);
             throw;
         }
     }
@@ -221,12 +247,15 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
         // the ones kept from before would no longer be accepted.
         if (File.Exists(Path.Combine(ActiveDirectory, CookieFile)) && Attributable() == swap.TargetAccount)
             KeepLogin(ActiveDirectory, swap.TargetAccount);
-        Restore(swap.PreviousMarker, swap.PreviousLogin, swap.Moved, swap.Merged, swap.Preferences, swap.Tokens);
+        Restore(swap.PreviousMarker, swap.PreviousLogin, swap.Moved, swap.Merged, swap.Preferences, swap.Tokens, swap.Stored ?? [], swap.PresetsMerged);
     }
 
     private void Restore(string? marker, string? login, IReadOnlyList<DesktopSessionMove> moved, IReadOnlyList<DesktopSessionMerge> merged,
-        IReadOnlyList<DesktopPreferenceChange> preferences, IReadOnlyList<DesktopPreferenceChange> tokens)
+        IReadOnlyList<DesktopPreferenceChange> preferences, IReadOnlyList<DesktopPreferenceChange> tokens, IReadOnlyList<DesktopStorageChange> stored, bool presetsMerged)
     {
+        RestoreStoredChoices(stored);
+        // The presets are brought together again with a later switch.
+        if (presetsMerged) File.Delete(PresetsMergedPath);
         RestoreTokens(tokens);
         RestorePreferences(preferences);
         foreach (var merge in merged.Reverse())
@@ -488,7 +517,8 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
     // made in: whether the mode that skips permission prompts is enabled, the
     // permission mode of each folder, the sidebar's sections, the presets for
     // new sessions, the connector tools turned off. The new account gets those
-    // of the account that was in use, replacing its own.
+    // of the account that was in use, replacing its own. The presets need their
+    // Local Storage entry as well; see CarryStoredChoices.
     private void MirrorPreferences(string source, string? sourceOrganization, string target, string? targetOrganization,
         List<DesktopPreferenceChange> changes)
     {
@@ -519,9 +549,10 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
         {
             // A gate is the app's own decision, which can follow an organization's
             // policy; it is left for the app to make for the new account.
-            if (key.Contains("gate", StringComparison.OrdinalIgnoreCase) || renames.ContainsValue(key)) continue;
-            if (renames.TryGetValue(key, out var renamed))
+            if (key.Contains("gate", StringComparison.OrdinalIgnoreCase) || renames.Values.Any(to => FiledUnder(key, to))) continue;
+            if (renames.FirstOrDefault(rename => FiledUnder(key, rename.Key)) is { Key: { } from, Value: { } to })
             {
+                var renamed = key[..^from.Length] + to;
                 var previous = node[renamed]?.ToJsonString();
                 if (previous == value?.ToJsonString()) continue;
                 changes.Add(new([.. path, renamed], previous, file));
@@ -533,6 +564,156 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
             }
         }
     }
+
+    // The app files a choice under the account either as an entry named after
+    // it or, as with the permission mode of each folder, as "<choice>.<account>".
+    private static bool FiledUnder(string key, string account) =>
+        key == account || key.Length > account.Length + 1 && key.EndsWith("." + account, StringComparison.Ordinal);
+
+    // The new account's Local Storage entries become those of the account in
+    // use, as the presets file does. One the account in use does not have is
+    // removed, so that the app reads the file again. A database that is in use
+    // or not as expected is left as it is, and the presets stay where they were.
+    // Until that has been done once, the presets each registered account
+    // gathered on its own join those of the account in use on the way; returns
+    // whether it happened now.
+    private bool CarryStoredChoices(string source, string target, JsonObject? presetsFile, List<DesktopStorageChange> changes)
+    {
+        var storage = LocalStorage;
+        if (source == target || !Name.IsMatch(source) || !Name.IsMatch(target) || !storage.Exists) return false;
+        List<string> gathered = File.Exists(PresetsMergedPath) ? [] :
+        [
+            target,
+            .. (knownAccounts?.Invoke() ?? []).Where(account => Name.IsMatch(account) && account != source && account != target)
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal),
+        ];
+        var names = StoredChoices.SelectMany(prefix => new[] { source, target }.Concat(gathered).Select(account => prefix + account));
+        var written = new List<DesktopStorageChange>();
+        var merged = false;
+        try
+        {
+            storage.Update(StorageOrigin, names, current =>
+            {
+                foreach (var prefix in StoredChoices)
+                {
+                    var value = current.GetValueOrDefault(prefix + source);
+                    // An account without an entry there has its presets in the file only.
+                    if (prefix == PresetStorage && gathered.Count > 0 && value is not null
+                        && MergedPresets(value, gathered.Select(account => current.TryGetValue(prefix + account, out var kept)
+                            ? StoredPresets(kept) : presetsFile?[account]?["presets"] as JsonArray)) is { } all)
+                    {
+                        value = all;
+                        merged = true;
+                    }
+
+                    var previous = current.GetValueOrDefault(prefix + target);
+                    if (!SameBytes(value, previous)) written.Add(new(prefix + target, previous, value));
+                }
+
+                return written.Select(change => (change.Name, change.Written));
+            });
+        }
+        catch (Exception error) when (error is ChromiumLocalStorageException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        changes.AddRange(written);
+        if (!merged) return false;
+        try
+        {
+            WritePrivate(PresetsMergedPath, Encoding.UTF8.GetBytes(DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) + "\n"));
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Not on record: they are brought together again with a later switch, which changes nothing more.
+            return false;
+        }
+    }
+
+    // The presets of the account in use first, then each one only another
+    // account has, every place once. Of presets with one name but different
+    // places the app makes names of their own when it reads them.
+    private static byte[]? MergedPresets(byte[] value, IEnumerable<JsonArray?> others)
+    {
+        if (ParseStored(value) is not { } stored || stored["state"]?["presets"] is not JsonArray presets) return null;
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var places = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var preset in presets.OfType<JsonObject>())
+        {
+            if (PresetId(preset) is { } id) ids.Add(id);
+            if (PlaceOf(preset) is { } place) places.Add(place);
+        }
+
+        foreach (var preset in others.SelectMany(list => list?.OfType<JsonObject>() ?? []))
+            if (PresetId(preset) is { } id && PlaceOf(preset) is { } place && !ids.Contains(id) && places.Add(place))
+            {
+                ids.Add(id);
+                presets.Add(preset.DeepClone());
+            }
+
+        return StoredValue(stored.ToJsonString(StoredFormat));
+    }
+
+    private static JsonArray? StoredPresets(byte[] value) => ParseStored(value)?["state"]?["presets"] as JsonArray;
+
+    // Chromium keeps a value as Latin-1 behind a 1 when it can, and as UTF-16 behind a 0 otherwise.
+    private static JsonObject? ParseStored(byte[] value)
+    {
+        string text;
+        if (value.Length > 0 && value[0] == 1) text = Encoding.Latin1.GetString(value, 1, value.Length - 1);
+        else if (value.Length % 2 == 1 && value[0] == 0) text = Encoding.Unicode.GetString(value, 1, value.Length - 1);
+        else return null;
+        try
+        {
+            return JsonNode.Parse(text) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static byte[] StoredValue(string text) => text.All(character => character <= '\u00FF')
+        ? [1, .. Encoding.Latin1.GetBytes(text)]
+        : [0, .. Encoding.Unicode.GetBytes(text)];
+
+    private static string? PresetId(JsonObject preset) =>
+        preset["id"] is JsonValue id && id.TryGetValue<string>(out var text) && text.Length > 0 ? text : null;
+
+    // Where a preset starts its sessions, as the app tells two apart: the
+    // folder and the WSL distribution or SSH host it is on.
+    private static string? PlaceOf(JsonObject preset)
+    {
+        if (preset["target"] is not JsonObject target) return null;
+        string Part(string name) => target[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : "";
+        return Part("kind") switch
+        {
+            "local" => string.Join('\n', "local", Part("cwd"), Part("wslDistro"), Part("variant")),
+            "ssh" => string.Join('\n', "ssh", Part("sshConfigId"), Part("cwd")),
+            _ => null,
+        };
+    }
+
+    // What the app has written to an entry since is the account's own and stays.
+    private void RestoreStoredChoices(IReadOnlyList<DesktopStorageChange> changes)
+    {
+        var storage = LocalStorage;
+        if (changes.Count == 0 || !storage.Exists) return;
+        try
+        {
+            storage.Update(StorageOrigin, changes.Select(change => change.Name), current => changes.Reverse()
+                .Where(change => SameBytes(current.GetValueOrDefault(change.Name), change.Written))
+                .Select(change => (change.Name, change.Previous)).ToList());
+        }
+        catch (Exception error) when (error is ChromiumLocalStorageException or IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static bool SameBytes(byte[]? first, byte[]? second) =>
+        first is null ? second is null : second is not null && first.AsSpan().SequenceEqual(second);
 
     private void RestorePreferences(IReadOnlyList<DesktopPreferenceChange> changes)
     {
