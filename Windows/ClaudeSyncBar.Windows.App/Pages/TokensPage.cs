@@ -6,6 +6,7 @@ using ClaudeSyncBar.Windows.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace ClaudeSyncBar.App.Pages;
 
@@ -155,6 +156,12 @@ public sealed class TokensPage : SyncPage
             foreach (var (preset, label) in Presets) made.Items.Add(new SelectorBarItem { Text = label, Tag = preset });
             made.Items.Add(new SelectorBarItem { Text = "직접", Tag = 0 });
             AutomationProperties.SetName(made, "기간");
+            // The template slides its items in from wherever they were last laid out, and the bar is placed
+            // again on every drawing: each choice sent the periods in from the lower right.
+            made.Loaded += (_, _) =>
+            {
+                if (VisualTreeHelper.GetChildrenCount(made) > 0 && VisualTreeHelper.GetChild(made, 0) is Panel root) root.ChildrenTransitions?.Clear();
+            };
             made.SelectionChanged += (_, _) =>
             {
                 if (_syncing || made.SelectedItem?.Tag is not int chosen) return;
@@ -189,8 +196,10 @@ public sealed class TokensPage : SyncPage
         bar.SelectedItem = bar.Items.FirstOrDefault(item => item.Tag is int tag && (_custom ? tag == 0 : tag == hours)) ?? bar.Items[^1];
         if (box.Value != hours) box.Value = hours;
         _syncing = false;
-        bar.IsEnabled = view is not null;
-        box.IsEnabled = view is not null;
+        // Switched on while out of the page, the periods kept the grey they took while the logs were read
+        // until each was chosen once; they are switched once placed.
+        var enabled = view is not null;
+        DispatcherQueue.TryEnqueue(() => { bar.IsEnabled = enabled; box.IsEnabled = enabled; });
 
         var custom = _custom ? Ui.Stack(8, true, Centered(Ui.Text("최근")), box, Centered(Ui.Text("시간")), Centered(Ui.Caption("1~720시간", wrap: false))) : null;
         var range = view is null ? null : Range(view, Wide);
