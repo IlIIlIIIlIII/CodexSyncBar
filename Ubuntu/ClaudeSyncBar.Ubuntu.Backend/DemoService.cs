@@ -45,15 +45,17 @@ public sealed class DemoService : IManagementService
             fiveHour is null ? null : new(fiveHour.Value, fiveHourReset is null ? null : DateTimeOffset.Parse(fiveHourReset), 18000));
         _accounts =
         [
-            new(1, "p***@example.com", "개인 계정", false, false, Usage(54, 81, "2026-10-03T06:10:00Z")),
-            new(2, "w***@example.com", "업무 계정", false, false, Usage(42, 0, null)),
+            // Every demo account counts as a $200 Max account, so each starts as a smart switch candidate.
+            new(1, "p***@example.com", "개인 계정", false, false, Usage(54, 81, "2026-10-03T06:10:00Z"), SmartCandidate: true),
+            new(2, "w***@example.com", "업무 계정", false, false, Usage(42, 0, null), SmartCandidate: true),
         ];
     }
 
     /// <summary>The same fixture with other accounts; the Windows app shows fresh values relative to now.</summary>
     public DemoService(IEnumerable<AccountView> accounts, int activeProfileId)
     {
-        _accounts = [.. accounts];
+        // As in the service, the $200 Max accounts start as the smart switch's candidates.
+        _accounts = [.. accounts.Select(a => a with { SmartCandidate = a.SmartCandidate || SmartSwitch.IsCandidate(a.Plan, null) })];
         _local = activeProfileId;
         foreach (var device in _remoteAccounts.Keys.ToArray()) _remoteAccounts[device] = activeProfileId;
     }
@@ -84,10 +86,11 @@ public sealed class DemoService : IManagementService
                 Revision, DateTimeOffset.UtcNow, null, Settings, _accounts.ToDictionary(a => a.Id.ToString(), a => a.Usage), true);
             case "smart.preview":
             {
-                // Every demo account counts as a $200 Max account, and every demo value as fresh.
+                // Every demo value counts as fresh.
+                if (!_accounts.Any(a => a.SmartCandidate)) return new { found = false, message = SmartSwitch.NoCandidateMessage };
                 var now = DateTimeOffset.UtcNow;
                 DateTimeOffset? Reset(AccountView a) => a.Usage?.Weekly?.ResetsAt is { } reset && reset > now ? reset : null;
-                var best = _accounts.Where(a => !a.NeedsLogin && a.Usage is { Weekly.RemainingPercent: > 0, FiveHour.RemainingPercent: > SmartSwitch.FiveHourMinimum })
+                var best = _accounts.Where(a => a.SmartCandidate && !a.NeedsLogin && !a.IsPending && a.Usage is { Weekly.RemainingPercent: > 0, FiveHour.RemainingPercent: > SmartSwitch.FiveHourMinimum })
                     .OrderBy(a => Reset(a) ?? DateTimeOffset.MaxValue).ThenByDescending(a => a.Usage!.Weekly!.RemainingPercent).FirstOrDefault();
                 if (best is null) return new { found = false, message = SmartSwitch.NoneMessage };
                 var reason = SmartSwitch.Reason($"{best.Usage!.Weekly!.RemainingPercent:0}%", $"{best.Usage.FiveHour!.RemainingPercent:0}%", Reset(best));
@@ -163,6 +166,15 @@ public sealed class DemoService : IManagementService
                 if (alias.Length > 5) throw new RpcException("invalid_alias", "별칭은 5글자 이하로 입력해 주세요.");
                 _accounts[index] = _accounts[index] with { Alias = alias.Length == 0 ? _accounts[index].Email : alias };
                 _revision++;
+                return new { saved = true };
+            }
+            case "account.smart":
+            {
+                var index = _accounts.FindIndex(a => a.Id == Wire.Number(p, "profileId"));
+                if (index < 0) throw new RpcException("account_unavailable", "계정을 찾지 못했습니다.");
+                if (Wire.Item(p, "enabled").ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new RpcException("invalid_request", "후보로 둘지 정해 주세요.");
+                _accounts[index] = _accounts[index] with { SmartCandidate = Wire.Flag(p, "enabled") };
                 return new { saved = true };
             }
             case "account.move":

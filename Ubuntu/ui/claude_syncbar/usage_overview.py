@@ -182,7 +182,7 @@ class UsageAccountRow(Gtk.ListBoxRow):
         usage = account_usage(account, keys=keys, **state)
         self.name.set_text(account.get('alias') or account.get('email') or '계정')
         email = account.get('email') or ''
-        # The plan decides which accounts the smart switch may choose.
+        # The plan decides which accounts start as the smart switch's candidates.
         self.email.set_text(' · '.join(part for part in [email if email != self.name.get_text() else '', account.get('plan') or ''] if part))
         self.email.set_visible(bool(self.email.get_text()))
         self.active.set_visible(active)
@@ -236,7 +236,7 @@ class UsageOverview(Gtk.Box):
         self.refresh.connect('clicked', lambda *_: on_refresh())
         actions = box(False, 8)
         actions.set_valign(Gtk.Align.START)
-        # One click to the best $200 Max account: most weekly quota left among those with five-hour room.
+        # One click to the best ticked candidate: among those with weekly and five-hour room, the one whose week resets first.
         self.smart = Gtk.Button()
         smart_content = box(False, 8)
         smart_content.append(Gtk.Image.new_from_icon_name('emblem-synchronizing-symbolic'))
@@ -244,7 +244,7 @@ class UsageOverview(Gtk.Box):
         smart_content.append(self.smart_text)
         self.smart.set_child(smart_content)
         self.smart.add_css_class('suggested-action')
-        self.smart.set_tooltip_text('Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환합니다.')
+        self.smart.set_tooltip_text('스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환합니다. 후보는 계정 관리에서 고릅니다.')
         self.smart.update_property([Gtk.AccessibleProperty.LABEL], ['스마트 전환'])
         self.smart.connect('clicked', lambda *_: on_smart and on_smart())
         self.smart.set_visible(on_smart is not None)

@@ -195,19 +195,19 @@ public sealed class ManagementServiceIntegrationTests
     }
 
     [Fact]
-    public void SmartSwitchPicksTheMaxAccountWhoseWeekResetsFirstAmongThoseWithBothQuotasLeft()
+    public void SmartSwitchPicksTheCandidateWhoseWeekResetsFirstAmongThoseWithBothQuotasLeft()
     {
         var now = DateTimeOffset.UtcNow;
         DashboardUsage Usage(double fiveHourLeft, double weeklyLeft, double resetDays, double minutesOld = 0) => new(
             new(100 - weeklyLeft, now.AddDays(resetDays), 604800), now.AddMinutes(-minutesOld), new(100 - fiveHourLeft, now.AddHours(2), 18000));
-        AccountView Account(int id, DashboardUsage? usage, string? plan = SmartSwitch.Plan, bool needsLogin = false) =>
-            new(id, $"{id}@example.invalid", $"계정{id}", false, needsLogin, usage, plan);
+        AccountView Account(int id, DashboardUsage? usage, bool candidate = true, bool needsLogin = false) =>
+            new(id, $"{id}@example.invalid", $"계정{id}", false, needsLogin, usage, SmartSwitch.Plan, candidate);
         var accounts = new[]
         {
             Account(1, Usage(80, 90, 5)),
             Account(2, Usage(0, 99, 1)),                       // five-hour used up
             Account(3, Usage(90, 0, 1)),                       // week used up
-            Account(4, Usage(90, 95, 0.5), plan: "Max 5x"),    // not the $200 plan
+            Account(4, Usage(90, 95, 0.5), candidate: false),  // not ticked on the account list
             Account(5, Usage(90, 96, 0.5), needsLogin: true),
             Account(6, Usage(90, 97, 0.5, minutesOld: 20)),    // too old to trust
             Account(7, Usage(26, 0.5, 2)),                     // a sliver of the week is room; resets first of the rest
@@ -231,6 +231,74 @@ public sealed class ManagementServiceIntegrationTests
         var unknown = SmartSwitch.Choose([Account(1, weekReset), accounts[7]], now)!;
         Assert.Equal(8, unknown.Account.Id);
         Assert.Null(SmartSwitch.Choose([Account(1, weekReset)], now)!.WeeklyReset);
+
+        // Untouched, only the $200 Max plan is a candidate; a tick or a cleared box wins over the plan.
+        Assert.True(SmartSwitch.IsCandidate(SmartSwitch.Plan, null));
+        Assert.False(SmartSwitch.IsCandidate("Max 5x", null));
+        Assert.False(SmartSwitch.IsCandidate(null, null));
+        Assert.True(SmartSwitch.IsCandidate("Pro", true));
+        Assert.False(SmartSwitch.IsCandidate(SmartSwitch.Plan, false));
+    }
+
+    [Fact]
+    public async Task SmartSwitchCandidatesAreTickedOnTheAccountListAndKeptApartFromTheAutomaticSwitch()
+    {
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(20, 60), ["synthetic-access-2"] = Quotas(50, 10) };
+        await using var fixture = new Fixture(withRemote: false, usage: token => usage[token]);
+        async Task<bool[]> Candidates() => (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Select(account => account.SmartCandidate).ToArray();
+        async Task<JsonElement> Smart() => JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
+
+        // Both fixture accounts are on the $200 Max plan, so both start ticked; the wire names the field for the screens.
+        Assert.Equal(new[] { true, true }, await Candidates());
+        Assert.True(JsonSerializer.SerializeToElement(await fixture.Call<ManagementSnapshot>("snapshot"), Wire.Json)
+            .GetProperty("accounts")[0].GetProperty("smartCandidate").GetBoolean());
+        Assert.Equal(2, (await Smart()).GetProperty("profileId").GetInt32());
+
+        // Clearing account 2 leaves account 1, the one in use.
+        await fixture.Call<object>("account.smart", new { profileId = 2, enabled = false });
+        Assert.Equal(new[] { true, false }, await Candidates());
+        var smart = await Smart();
+        Assert.Equal(1, smart.GetProperty("profileId").GetInt32());
+        Assert.True(smart.GetProperty("alreadyActive").GetBoolean());
+
+        // With nothing ticked, the switch says so before looking anything up.
+        await fixture.Call<object>("account.smart", new { profileId = 1, enabled = false });
+        smart = await Smart();
+        Assert.False(smart.GetProperty("found").GetBoolean());
+        Assert.Equal(SmartSwitch.NoCandidateMessage, smart.GetProperty("message").GetString());
+
+        // The choice stays in its own file, which the automatic switch never rewrites.
+        await fixture.Call<object>("settings.save", new { autoSwitchEnabled = true });
+        var file = Path.Combine(fixture.Paths.StateRoot, "smart-switch.json");
+        Assert.Equal(new Dictionary<int, bool> { [1] = false, [2] = false }, new SmartSwitchStore(fixture.Paths).Load().Candidates);
+        Assert.DoesNotContain("candidates", File.ReadAllText(Path.Combine(fixture.Paths.StateRoot, "auto-switch.json")), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+
+        // Ticking it again brings it back; the setting needs a yes or no and a registered account.
+        await fixture.Call<object>("account.smart", new { profileId = 2, enabled = true });
+        Assert.Equal(new[] { false, true }, await Candidates());
+        var missing = await Assert.ThrowsAsync<RpcException>(() => fixture.Call<object>("account.smart", new { profileId = 2 }));
+        Assert.Equal("invalid_request", missing.Code);
+        var unknown = await Assert.ThrowsAsync<RpcException>(() => fixture.Call<object>("account.smart", new { profileId = 9, enabled = true }));
+        Assert.Equal("account_unavailable", unknown.Code);
+        Assert.Equal(new[] { false, true }, await Candidates());
+    }
+
+    [Fact]
+    public async Task ADeletedAccountTakesItsSmartSwitchChoiceWithIt()
+    {
+        await using var fixture = new Fixture(withRemote: false);
+        var store = new SmartSwitchStore(fixture.Paths);
+        // A choice left over from an account removed some other way is dropped at the next tick.
+        store.Save(new() { Candidates = { [7] = true } });
+        await fixture.Call<object>("account.smart", new { profileId = 2, enabled = false });
+        Assert.Equal(new Dictionary<int, bool> { [2] = false }, store.Load().Candidates);
+
+        // A logged-out account is the only kind that can be deleted.
+        fixture.Auth.DeleteProfile(2);
+        await fixture.Call<object>("account.delete", new { profileId = 2 });
+        Assert.Empty(store.Load().Candidates);
+        Assert.Equal(new[] { 1 }, (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Select(account => account.Id));
     }
 
     [Fact]
@@ -270,7 +338,7 @@ public sealed class ManagementServiceIntegrationTests
         await RefreshUsage(fixture);
         smart = JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
         Assert.False(smart.GetProperty("found").GetBoolean());
-        Assert.Equal("Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.", smart.GetProperty("message").GetString());
+        Assert.Equal("스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.", smart.GetProperty("message").GetString());
     }
 
     [Fact]

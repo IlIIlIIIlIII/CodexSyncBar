@@ -4,6 +4,7 @@ using ClaudeSyncBar.App.Model;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 
 namespace ClaudeSyncBar.App.Pages;
 
@@ -19,6 +20,8 @@ public sealed class AccountsPage : SyncPage
     private static bool _visited;
     // Aliases being typed, so a redraw never loses them.
     private readonly Dictionary<int, string> _aliases = [];
+    // The smart switch boxes of the last drawing, by account.
+    private readonly Dictionary<int, CheckBox> _smartBoxes = [];
 
     protected override void Render()
     {
@@ -49,8 +52,10 @@ public sealed class AccountsPage : SyncPage
 
         var list = new StackPanel { Spacing = 4 };
         AutomationProperties.SetName(list, "등록된 계정");
+        _smartBoxes.Clear();
         for (var i = 0; i < accounts.Count; i++) list.Children.Add(Account(accounts[i], i, accounts.Count, busy));
         Add(list);
+        Add(Ui.Caption("스마트 전환은 체크한 계정 중에서만 골라요. 처음에는 Max 20x 계정이 체크돼 있어요."));
         Add(Ui.Caption("로그인한 계정은 사용량을 따로 보지만, 세션 기록과 설정은 모든 계정이 함께 써요. 계정을 바꿔도 작업이 그대로 이어져요."));
     }
 
@@ -96,11 +101,44 @@ public sealed class AccountsPage : SyncPage
             if (!Open.Remove(id)) Open.Add(id);
             Redraw();
         });
-        var header = Ui.Row(Ui.Columns(12, 0, Ui.Identity(account, 40, badge: badge), status, chevron), current);
+        // The tick sits next to the chevron, so the boxes line up whatever the status says.
+        var header = Ui.Row(Ui.Columns(12, 0, Ui.Identity(account, 40, badge: badge), status, SmartCandidate(account, id, name, busy), chevron), current);
         header.MinHeight = 60;
         header.Padding = new Thickness(16, 10, 16, 10);
         AutomationProperties.SetName(header, $"{index + 1}번째, {name}");
         return open ? Ui.Expander(header, Details(account, id, name, index, count, busy)) : header;
+    }
+
+    // Whether the smart switch may choose this account, ticked right on the list. It saves the moment it changes,
+    // by mouse, keyboard or a screen reader; each drawing makes a new box, so nothing else ever sets it.
+    // A narrow window shows the box alone; its tip and name still say what it is.
+    private CheckBox SmartCandidate(JsonObject account, int id, string name, bool busy)
+    {
+        var box = new CheckBox
+        {
+            Content = Wide ? "스마트 전환" : null, IsChecked = QuotaFormat.Flag(account["smartCandidate"]), MinWidth = 0,
+            IsEnabled = !busy && State.Error is null,
+        };
+        _smartBoxes[id] = box;
+        ToolTipService.SetToolTip(box, "체크한 계정 중에서 스마트 전환이 전환할 계정을 골라요");
+        AutomationProperties.SetName(box, $"{name} 스마트 전환 후보");
+        async void Changed(object sender, RoutedEventArgs args)
+        {
+            var on = box.IsChecked == true;
+            var focus = box.FocusState;
+            // A redraw before the service answers keeps the tick; the next poll puts back what was saved.
+            if (State.Lookup(id) is { } current) current["smartCandidate"] = on;
+            await State.CommandAsync("account.smart", new { profileId = id, enabled = on });
+            // The answer redraws the page with a new box. Focus goes on from it, so the keyboard can tick the
+            // next account, unless it has since moved to another control.
+            if (focus == FocusState.Unfocused || _smartBoxes.GetValueOrDefault(id) is not { XamlRoot: { } root } next
+                || ReferenceEquals(next, box)) return;
+            if (FocusManager.GetFocusedElement(root) is not UIElement now || !Within(now, Body)) next.Focus(focus);
+        }
+
+        box.Checked += Changed;
+        box.Unchecked += Changed;
+        return box;
     }
 
     private List<UIElement> Details(JsonObject account, int id, string name, int index, int count, bool busy)

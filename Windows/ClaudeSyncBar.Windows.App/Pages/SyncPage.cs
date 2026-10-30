@@ -77,7 +77,7 @@ public abstract class SyncPage : Page
         if (restore) DispatcherQueue.TryEnqueue(() => { if (focused!.XamlRoot is not null) focused.Focus(state); });
     }
 
-    private static bool Within(DependencyObject element, FrameworkElement ancestor)
+    protected static bool Within(DependencyObject element, FrameworkElement ancestor)
     {
         for (var node = element; node is not null; node = VisualTreeHelper.GetParent(node))
             if (ReferenceEquals(node, ancestor)) return true;

@@ -48,7 +48,7 @@ def snapshot():
                 'fiveHour': {'usedPercent': 100 - five_hour, 'resetsAt': None if five_hour_reset is None else in_hours(five_hour_reset)},
                 'updatedAt': datetime.now(timezone.utc).isoformat()}
             accounts.append({'id': identity, 'alias': alias, 'email': email, 'plan': 'Max 5x' if identity == 3 else 'Max 20x',
-                             'needsLogin': remaining is None, 'isPending': False, 'usage': usage})
+                             'needsLogin': remaining is None, 'isPending': False, 'usage': usage, 'smartCandidate': identity != 3})
         if SCENARIO == 'usage-overflow':
             accounts[1]['alias'] = '아주 긴 계정 표시 이름을 사용하는 업무 계정'
             accounts[1]['email'] = 'long-account-name@department.example.com'

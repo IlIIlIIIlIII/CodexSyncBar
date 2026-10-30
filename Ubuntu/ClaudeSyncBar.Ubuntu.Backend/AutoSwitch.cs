@@ -27,23 +27,39 @@ internal sealed record ResumeHooks(
         new(now => AutoResume.Find(paths, now), AutoResume.StillOpen, session => AutoResume.Launch(session, paths));
 }
 
-internal sealed class AutoSwitchStore(WindowsPaths paths)
+/// <summary>
+/// Which accounts the smart switch may choose, where the user set it on the
+/// account list. An account not set here follows its plan.
+/// </summary>
+public sealed class SmartSwitchSettings
+{
+    public Dictionary<int, bool> Candidates { get; set; } = [];
+
+    public bool? Chosen(int profileId) => Candidates.TryGetValue(profileId, out var chosen) ? chosen : null;
+}
+
+internal sealed class AutoSwitchStore(WindowsPaths paths) : SettingsFile<AutoSwitchSettings>(paths, "auto-switch.json", "자동 전환 설정 파일");
+
+// Its own file: the automatic switch rewrites auto-switch.json long after reading it.
+internal sealed class SmartSwitchStore(WindowsPaths paths) : SettingsFile<SmartSwitchSettings>(paths, "smart-switch.json", "스마트 전환 설정 파일");
+
+internal class SettingsFile<T>(WindowsPaths paths, string name, string description) where T : new()
 {
     private static readonly JsonSerializerOptions Format = new(Wire.Json) { WriteIndented = true };
-    private string FilePath => Path.Combine(paths.StateRoot, "auto-switch.json");
+    private string FilePath => Path.Combine(paths.StateRoot, name);
 
-    public AutoSwitchSettings Load()
+    public T Load()
     {
-        WindowsPathSafety.EnsureFile(FilePath, "자동 전환 설정 파일");
+        WindowsPathSafety.EnsureFile(FilePath, description);
         if (!File.Exists(FilePath)) return new();
-        try { return JsonSerializer.Deserialize<AutoSwitchSettings>(File.ReadAllBytes(FilePath), Format) ?? new(); }
-        // An unreadable file leaves automatic switching off rather than guessing.
+        try { return JsonSerializer.Deserialize<T>(File.ReadAllBytes(FilePath), Format) ?? new(); }
+        // An unreadable file leaves the defaults, such as automatic switching off, rather than guessing.
         catch (JsonException) { return new(); }
     }
 
-    public void Save(AutoSwitchSettings settings)
+    public void Save(T settings)
     {
-        WindowsPathSafety.EnsureFile(FilePath, "자동 전환 설정 파일");
+        WindowsPathSafety.EnsureFile(FilePath, description);
         var temporary = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -58,9 +74,10 @@ internal sealed class AutoSwitchStore(WindowsPaths paths)
 }
 
 /// <summary>
-/// The smart switch: among the $200 Max accounts with some of the weekly and
-/// more than a quarter of the five-hour quota left, the one whose week resets
-/// first, so the quota that would lapse soonest is used first.
+/// The smart switch: among its candidates (the accounts ticked on the account
+/// list, at first the $200 Max ones) with some of the weekly and more than a
+/// quarter of the five-hour quota left, the one whose week resets first, so
+/// the quota that would lapse soonest is used first.
 /// </summary>
 internal static class SmartSwitch
 {
@@ -71,9 +88,12 @@ internal static class SmartSwitch
 
     internal sealed record Choice(AccountView Account, double FiveHour, double Weekly, DateTimeOffset? WeeklyReset);
 
+    /// <summary>Whether the smart switch may choose an account: as the user ticked it, else only on the $200 Max plan.</summary>
+    internal static bool IsCandidate(string? plan, bool? chosen) => chosen ?? plan == Plan;
+
     /// <summary>The best account, which can be the one in use; null when none qualifies.</summary>
     internal static Choice? Choose(IEnumerable<AccountView> accounts, DateTimeOffset now) => accounts
-        .Where(account => account.Plan == Plan && !account.IsPending && !account.NeedsLogin)
+        .Where(account => account.SmartCandidate && !account.IsPending && !account.NeedsLogin)
         .Select(account => (Account: account,
             FiveHour: AutoSwitchPolicy.TrustedRemaining(account.Usage?.FiveHour, account.Usage, now),
             Weekly: AutoSwitchPolicy.TrustedRemaining(account.Usage?.Weekly, account.Usage, now),
@@ -99,7 +119,8 @@ internal static class SmartSwitch
     internal static string Reason(string weekly, string fiveHour, DateTimeOffset? reset) =>
         $"주간 {weekly} · 5시간 {fiveHour} 남음" + (reset is { } next ? $" · 주간 초기화 {When(next)}" : "");
 
-    internal const string NoneMessage = Plan + " 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.";
+    internal const string NoneMessage = "스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.";
+    internal const string NoCandidateMessage = "스마트 전환 후보로 고른 계정이 없습니다. 계정 목록에서 후보를 골라 주세요.";
 }
 
 /// <summary>

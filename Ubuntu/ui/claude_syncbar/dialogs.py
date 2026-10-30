@@ -107,10 +107,12 @@ class ManagerDialog(Adw.Dialog):
         actions.append(button('인증 파일 가져오기', callback=self.import_auth))
         actions.append(button('목록 새로고침', callback=lambda *_: self.reload_accounts(None, None)))
         self.body.append(actions)
-        self.account_group = self.group('등록된 계정', '계정을 선택해도 실제 적용 계정은 바뀌지 않습니다.')
+        self.account_group = self.group('등록된 계정', '계정을 선택해도 실제 적용 계정은 바뀌지 않습니다. '
+                                        '스마트 전환은 체크한 계정 중에서만 고르며, 처음에는 Max 20x 계정이 체크되어 있습니다.')
         for account in self.app.accounts:
             profile_id = account['id']
             group = Adw.ExpanderRow(title=account_name(account), subtitle=account.get('email', ''))
+            group.add_suffix(self.smart_candidate(account))
             self.account_group.add(group)
             alias = Adw.EntryRow(title='별칭 (최대 5자)')
             alias.set_text(account.get('alias') or '')
@@ -148,6 +150,18 @@ class ManagerDialog(Adw.Dialog):
             if account.get('isPending') or account.get('needsLogin'):
                 logout_row.append(button('계정 삭제', callback=lambda _b,p=profile_id: self.confirm('계정을 삭제할까요?', '선택한 계정의 보관 정보가 제거됩니다.', '삭제', lambda: self.run('account.delete', {'profileId':p}, self.reload_accounts), True)))
             group.add_row(logout_row)
+
+    # Whether the smart switch may choose the account, ticked right on the list; it saves the moment it is toggled.
+    def smart_candidate(self, account):
+        check = Gtk.CheckButton(label='스마트 전환')
+        check.set_active(bool(account.get('smartCandidate')))
+        check.set_valign(Gtk.Align.CENTER)
+        check.set_tooltip_text('체크한 계정 중에서 스마트 전환이 전환할 계정을 고릅니다.')
+        check.update_property([Gtk.AccessibleProperty.LABEL], [f'{account_name(account)} 스마트 전환 후보'])
+        # A refused change puts back what was saved.
+        check.connect('toggled', lambda button, p=account['id']: self.run(
+            'account.smart', {'profileId': p, 'enabled': button.get_active()}, lambda *_: self.reload_accounts(None, None)))
+        return check
 
     def reload_accounts(self, result, error):
         if error:

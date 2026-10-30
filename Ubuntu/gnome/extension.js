@@ -51,7 +51,7 @@ export default class SyncBarExtension extends Extension {
         header.add_child(titles);
         const smart = new St.BoxLayout({style_class: 'clsb-smart-content'});
         smart.add_child(icon('emblem-synchronizing-symbolic', 18)); smart.add_child(label('스마트 전환'));
-        this._smartButton = button(smart, 'Max 20x 계정 중 주간이 남고 5시간을 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 장치 전환', () => this._smartSwitch(), 'clsb-smart');
+        this._smartButton = button(smart, '스마트 전환 후보 중 주간이 남고 5시간을 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 장치 전환', () => this._smartSwitch(), 'clsb-smart');
         header.add_child(this._smartButton);
         this._refreshButton = button(icon('view-refresh-symbolic', 24), '사용량 새로고침', () => this._refreshUsage(), 'clsb-refresh');
         header.add_child(this._refreshButton);

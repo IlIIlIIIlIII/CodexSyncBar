@@ -97,7 +97,7 @@ public sealed class TrayFlyout : Window
         _smart = Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) =>
         {
             if (_app.Tray is { } tray) await tray.SmartSwitchAsync();
-        }, tip: "Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요.");
+        }, tip: "스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요. 후보는 계정 화면에서 골라요.");
         _smart.HorizontalAlignment = HorizontalAlignment.Stretch;
         var openFooter = Ui.Button("앱 열기", click: (_, _) => { Hide(); _app.ShowMainWindow(); });
         var quit = Ui.IconButton(Glyphs.Power, "Claude SyncBar 완전히 종료", (_, _) => _app.Quit());

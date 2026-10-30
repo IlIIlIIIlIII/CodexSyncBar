@@ -29,6 +29,7 @@ public sealed class ManagementService : IManagementService
     private readonly Task _initialization;
     private Task? _job;
     private readonly AutoSwitchStore _autoSwitch;
+    private readonly SmartSwitchStore _smartSwitch;
     private readonly QuotaHistoryStore _quotaHistory;
     // The last token collection; a new period or basis is cut from it without reading every log again.
     private TokenUsageSnapshot? _tokenSnapshot;
@@ -59,6 +60,7 @@ public sealed class ManagementService : IManagementService
         _browser = new(paths);
         _controller = new(paths, usageService);
         _autoSwitch = new(paths);
+        _smartSwitch = new(paths);
         _quotaHistory = new(paths);
         _resume = resume ?? ResumeHooks.For(paths);
         // A home given explicitly is a test's; its events never reach the desktop.
@@ -179,8 +181,12 @@ public sealed class ManagementService : IManagementService
     {
         lock (_state) if (_busy) throw new RpcException("busy", "진행 중인 작업을 먼저 완료해 주세요.");
         var (c, accounts, active) = await AccountsAsync(token);
+        if (!accounts.Any(account => account.SmartCandidate))
+            return new { found = false, message = SmartSwitch.NoCandidateMessage };
         var now = DateTimeOffset.UtcNow;
-        if (accounts.Any(account => !account.IsPending && !account.NeedsLogin && (account.Usage is null || account.Usage.UpdatedAt < now.AddMinutes(-2))))
+        // Only the candidates' usage decides, so only theirs being old starts a lookup (which looks at every account).
+        if (accounts.Any(account => account.SmartCandidate && !account.IsPending && !account.NeedsLogin
+                && (account.Usage is null || account.Usage.UpdatedAt < now.AddMinutes(-2))))
         {
             await _controller.RefreshUsageAsync(token);
             (c, accounts, active) = await AccountsAsync(token);
@@ -243,10 +249,35 @@ public sealed class ManagementService : IManagementService
     {
         var c = _config.LoadOrCreate();
         var dashboard = await _controller.GetSnapshotAsync(token);
-        // Account order is the priority order.
-        var accounts = c.Accounts.Select(a => new AccountView(a.Id, a.Email, a.CustomAlias ?? a.Email, a.IsPending, a.NeedsLogin,
-            dashboard.Accounts.FirstOrDefault(x => x.ProfileId == a.Id)?.Usage, PlanOf(a.Id))).ToArray();
-        return (c, accounts, _local.GetActiveProfileId(c.Accounts));
+        return (c, Views(c, dashboard), _local.GetActiveProfileId(c.Accounts));
+    }
+
+    // Account order is the priority order.
+    private AccountView[] Views(AppConfiguration c, DashboardSnapshot dashboard)
+    {
+        var smart = _smartSwitch.Load();
+        return c.Accounts.Select(a =>
+        {
+            var plan = PlanOf(a.Id);
+            return new AccountView(a.Id, a.Email, a.CustomAlias ?? a.Email, a.IsPending, a.NeedsLogin,
+                dashboard.Accounts.FirstOrDefault(x => x.ProfileId == a.Id)?.Usage, plan, SmartSwitch.IsCandidate(plan, smart.Chosen(a.Id)));
+        }).ToArray();
+    }
+
+    // Ticking or clearing an account on the list; the choice stays when the account's plan changes.
+    private object SetSmartCandidate(JsonElement p)
+    {
+        if (Wire.Item(p, "enabled").ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new RpcException("invalid_request", "후보로 둘지 정해 주세요.");
+        var c = _config.LoadOrCreate();
+        var id = RequiredAccount(c, p).Id;
+        var smart = _smartSwitch.Load();
+        // An account removed since is forgotten.
+        foreach (var gone in smart.Candidates.Keys.Where(key => c.Accounts.All(account => account.Id != key)).ToArray())
+            smart.Candidates.Remove(gone);
+        smart.Candidates[id] = Wire.Flag(p, "enabled");
+        _smartSwitch.Save(smart);
+        return new { saved = true };
     }
 
     private void Record(AutoSwitchSettings settings, AutoSwitchResult result)
@@ -327,6 +358,7 @@ public sealed class ManagementService : IManagementService
                 _config.ReorderAccounts(c, ids);
                 return new { saved = true };
             }, token);
+            case "account.smart": return await MutateAsync(() => SetSmartCandidate(p), token);
             case "account.delete": return await MutateAsync(() =>
             {
                 var c = _config.LoadOrCreate();
@@ -334,6 +366,8 @@ public sealed class ManagementService : IManagementService
                 if (_auth.ProfileArtifactExists(account.Id)) throw new RpcException("logout_required", "먼저 계정을 로그아웃해 주세요.");
                 try { _browser.ClearProfile(account.Id); } catch { _browser.MarkCleanupPending(account.Id); }
                 _config.RemoveAccount(c, account.Id);
+                var smart = _smartSwitch.Load();
+                if (smart.Candidates.Remove(account.Id)) _smartSwitch.Save(smart);
                 return new { removed = true };
             }, token);
             case "account.logout": return StartJob("logout", Wire.Number(p, "profileId"), async ct =>
@@ -423,9 +457,7 @@ public sealed class ManagementService : IManagementService
         {
             dashboard = new DashboardSnapshot { Error = "비밀 저장소 또는 계정 상태를 확인하지 못했습니다. 잠금 해제 후 복구를 다시 시도해 주세요." };
         }
-        var accounts = c.Accounts.Select(a => new AccountView(a.Id, a.Email,
-            a.CustomAlias ?? a.Email, a.IsPending, a.NeedsLogin,
-            dashboard.Accounts.FirstOrDefault(x => x.ProfileId == a.Id)?.Usage, PlanOf(a.Id))).ToArray();
+        var accounts = Views(c, dashboard);
         int? active = null;
         try { active = _local.GetActiveProfileId(c.Accounts); } catch (Exception) when (!token.IsCancellationRequested) { }
         // A device removed since the last look is gone at once, not at the next refresh.

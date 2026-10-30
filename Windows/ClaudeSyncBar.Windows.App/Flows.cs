@@ -39,9 +39,9 @@ public static class Flows
     }
 
     /// <summary>
-    /// The smart switch: among Max 20x accounts with some of both the weekly
-    /// and the five-hour quota left, the one whose week resets first, applied
-    /// to every active device after a confirmation.
+    /// The smart switch: among the accounts ticked on the account list with
+    /// some of both the weekly and the five-hour quota left, the one whose week
+    /// resets first, applied to every active device after a confirmation.
     /// </summary>
     public static async Task SmartSwitchAsync(XamlRoot root)
     {
@@ -76,7 +76,7 @@ public static class Flows
         var from = State.Active is { } active ? AppState.AccountName(active) + "에서 " : "";
         content.Children.Add(Ui.Text($"{from}{label}(으)로 모든 활성 장치를 전환할까요?"));
         if (target is not null) content.Children.Add(TargetSummary(target));
-        content.Children.Add(Ui.Caption($"Max 20x 계정 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까워요. ({AppState.Str(result["reason"])})"));
+        content.Children.Add(Ui.Caption($"스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까워요. ({AppState.Str(result["reason"])})"));
         if (AppState.Str(preview["desktopNotice"]) is { } notice)
         {
             var row = Ui.Stack(10, true, Ui.Glyph(Glyphs.Info, 14, "SyncBarGlyphMuted"), Ui.Caption(notice));
