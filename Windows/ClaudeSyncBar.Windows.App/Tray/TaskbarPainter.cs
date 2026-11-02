@@ -107,7 +107,7 @@ internal static class TaskbarPainter
         return rect.Width;
     }
 
-    /// <summary>"전체 주간 45%" with premultiplied alpha, 40 px tall at 100%.</summary>
+    /// <summary>"이 계정 주간 24% │ 전체 주간 45%" with premultiplied alpha, 40 px tall at 100%.</summary>
     public static TaskbarFrame Readout(TaskbarUsage usage, double scale, bool light, bool hover)
     {
         var palette = light ? LightBar : DarkBar;

@@ -50,20 +50,22 @@ public sealed class TaskbarUsageTests
     }
 
     [Fact]
-    public void TheTaskbarShowsEveryAccountsWeekTogether()
+    public void TheTaskbarShowsTheAccountInUsesWeekAndEveryAccountsWeekTogether()
     {
         var usage = TaskbarUsage.Of(Settings(), Accounts, activeId: 2, Now, unavailable: false)!;
         // The taskbar keeps to the numbers; the reset countdown is in the quick view and the app.
-        Assert.Equal(new[] { new TaskbarPart("전체 주간", "45%", Tone.Healthy) }, usage.Parts);
+        Assert.Equal(new[] { new TaskbarPart("이 계정 주간", "24%", Tone.Warning), new TaskbarPart("전체 주간", "45%", Tone.Healthy) }, usage.Parts);
         Assert.Equal("업무 · 사용 중", usage.Title);
-        Assert.Equal("45% 남음", usage.Rows[0].Value);
-        Assert.Equal("4개 계정 합산, 계정 1.8개만큼", usage.Rows[0].Detail);
+        Assert.Equal("24% 남음", usage.Rows[0].Value);
+        Assert.Equal($"{QuotaFormat.Date(Now + TimeSpan.FromDays(4))} 초기화", usage.Rows[0].Detail);
+        Assert.Equal("45% 남음", usage.Rows[1].Value);
+        Assert.Equal("4개 계정 합산, 계정 1.8개만큼", usage.Rows[1].Detail);
         Assert.Contains($"가장 먼저 초기화: 실험 · {QuotaFormat.Date(Now + SoonestReset)} (2일 5시간 후)", usage.Notes);
         Assert.Contains("재로그인이 필요해 빠진 계정: 보조", usage.Notes);
         Assert.Contains("아직 조회되지 않아 빠진 계정: 새 계정", usage.Notes);
         Assert.Contains("이전 수치로 더한 계정: 연구", usage.Notes);
         Assert.EndsWith("클릭하면 빠른 보기", usage.Notes[^1]);
-        Assert.Equal("Claude SyncBar 사용량, 전체 주간 45% 남음", usage.Spoken);
+        Assert.Equal("Claude SyncBar 사용량, 이 계정 주간 24% 남음, 전체 주간 45% 남음", usage.Spoken);
     }
 
     [Fact]
@@ -125,27 +127,45 @@ public sealed class TaskbarUsageTests
     {
         Assert.Null(TaskbarUsage.Of(Settings(taskbar: false), Accounts, 2, Now, false));
         Assert.Null(TaskbarUsage.Of(Settings(weekly: false), Accounts, 2, Now, false));
-        Assert.Equal(new[] { "전체 주간" }, TaskbarUsage.Of(Settings(), Accounts, 2, Now, false)!.Parts.Select(part => part.Label));
+        Assert.Equal(new[] { "이 계정 주간", "전체 주간" }, TaskbarUsage.Of(Settings(), Accounts, 2, Now, false)!.Parts.Select(part => part.Label));
         // Settings from before the readout existed show it, and a retired five-hour setting changes nothing.
-        Assert.Equal(new[] { "전체 주간" }, TaskbarUsage.Of(new JsonObject { ["claudeFiveHour"] = false }, Accounts, 2, Now, false)!.Parts.Select(part => part.Label));
+        Assert.Equal(new[] { "이 계정 주간", "전체 주간" }, TaskbarUsage.Of(new JsonObject { ["claudeFiveHour"] = false }, Accounts, 2, Now, false)!.Parts.Select(part => part.Label));
     }
 
     [Fact]
-    public void AnAccountThatNeedsSigningInAgainIsNamedAndLeftOutOfTheSum()
+    public void AnAccountThatNeedsSigningInAgainSaysSoInsteadOfANumber()
     {
         var usage = TaskbarUsage.Of(Settings(), Accounts, activeId: 5, Now, unavailable: false)!;
-        Assert.Equal("45%", usage.Parts[0].Value);
+        Assert.Equal(new TaskbarPart("이 계정 주간", "재로그인 필요", Tone.Warning), usage.Parts[0]);
+        Assert.Equal("45%", usage.Parts[1].Value);
         Assert.Contains("재로그인이 필요해 빠진 계정: 보조", usage.Notes);
-        Assert.Equal("Claude SyncBar 사용량, 전체 주간 45% 남음", usage.Spoken);
+        Assert.Equal("Claude SyncBar 사용량, 이 계정 주간 재로그인 필요, 전체 주간 45% 남음", usage.Spoken);
+    }
+
+    [Fact]
+    public void AnOldValueOfTheAccountInUseIsMutedAndExplained()
+    {
+        var usage = TaskbarUsage.Of(Settings(), Accounts, activeId: 4, Now, unavailable: false)!;
+        Assert.Equal(new TaskbarPart("이 계정 주간", "81%", Tone.Muted), usage.Parts[0]);
+        Assert.Contains("연구 · 갱신 지연 · 이전 수치", usage.Notes);
+    }
+
+    [Fact]
+    public void AWeekPastItsResetIsFullAgainForTheAccountInUse()
+    {
+        var usage = TaskbarUsage.Of(Settings(), [Account(1, "개인", 3, weeklyReset: TimeSpan.FromMinutes(-5))], activeId: 1, Now, false)!;
+        Assert.Equal(new TaskbarPart("이 계정 주간", "100%", Tone.Healthy), usage.Parts[0]);
+        Assert.Equal("초기화됨", usage.Rows[0].Detail);
     }
 
     [Fact]
     public void WithoutAnAccountInUseOrAnyWeeklyValueTheNumbersAreDashes()
     {
         var usage = TaskbarUsage.Of(Settings(), [Account(6, "새 계정", null)], activeId: null, Now, unavailable: false)!;
-        Assert.Equal(new[] { new TaskbarPart("전체 주간", "—", Tone.Muted) }, usage.Parts);
+        Assert.Equal(new[] { new TaskbarPart("이 계정 주간", "—", Tone.Muted), new TaskbarPart("전체 주간", "—", Tone.Muted) }, usage.Parts);
         Assert.Equal("적용된 계정 없음", usage.Title);
-        Assert.Equal("합산할 계정이 없어요", usage.Rows[0].Detail);
-        Assert.Equal("Claude SyncBar 사용량, 전체 주간 정보 없음", usage.Spoken);
+        Assert.Equal("적용된 계정이 없어요", usage.Rows[0].Detail);
+        Assert.Equal("합산할 계정이 없어요", usage.Rows[1].Detail);
+        Assert.Equal("Claude SyncBar 사용량, 이 계정 주간 정보 없음, 전체 주간 정보 없음", usage.Spoken);
     }
 }

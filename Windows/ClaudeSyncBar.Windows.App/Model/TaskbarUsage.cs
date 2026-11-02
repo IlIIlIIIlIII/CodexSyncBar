@@ -11,13 +11,13 @@ public sealed record TaskbarPart(string Label, string Value, Tone Tone);
 public sealed record TaskbarRow(string Label, string Value, Tone Tone, string Detail);
 
 /// <summary>
-/// What the taskbar shows: the weekly quota of every account together, and the
-/// tooltip that explains it.
+/// What the taskbar shows: the weekly quota of the account in use and that of
+/// every account together, and the tooltip that explains both.
 /// </summary>
 public sealed record TaskbarUsage(IReadOnlyList<TaskbarPart> Parts, string Title, IReadOnlyList<TaskbarRow> Rows,
     IReadOnlyList<string> Notes, string Spoken)
 {
-    public const string WeeklyLabel = WeeklyPool.Label;
+    public const string AccountLabel = "이 계정 주간", WeeklyLabel = WeeklyPool.Label;
 
     /// <summary>Null when the user turned the taskbar off or chose to see no quota at all.</summary>
     public static TaskbarUsage? Of(JsonNode? settings, IReadOnlyList<JsonObject> accounts, int? activeId, DateTimeOffset now, bool unavailable)
@@ -32,6 +32,26 @@ public sealed record TaskbarUsage(IReadOnlyList<TaskbarPart> Parts, string Title
 
         if (keys.Contains("weekly"))
         {
+            if (active is null)
+            {
+                parts.Add(new(AccountLabel, "—", Tone.Muted));
+                rows.Add(new(AccountLabel, "정보 없음", Tone.Muted, "적용된 계정이 없어요"));
+            }
+            else if (AppState.NeedsLogin(active))
+            {
+                parts.Add(new(AccountLabel, "재로그인 필요", Tone.Warning));
+                rows.Add(new(AccountLabel, "재로그인 필요", Tone.Warning, ""));
+            }
+            else
+            {
+                var usage = QuotaFormat.Account(active, ["weekly"], now, unavailable);
+                var quota = usage.Quotas[0];
+                var known = quota.Remaining is not null;
+                parts.Add(new(AccountLabel, known ? quota.Value : "—", quota.Tone));
+                rows.Add(new(AccountLabel, known ? quota.Value + " 남음" : "정보 없음", quota.Tone, known ? quota.Caption : ""));
+                if (usage.Status.Length > 0) notes.Add($"{AppState.AccountName(active)} · {usage.Status}");
+            }
+
             var pool = WeeklyPool.Of(accounts, now, unavailable);
             parts.Add(new(WeeklyLabel, pool.Remaining is { } left ? QuotaFormat.Percent(left) : "—", pool.Tone));
             var detail = pool.Counted switch

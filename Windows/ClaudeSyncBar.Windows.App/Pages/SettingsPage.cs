@@ -24,7 +24,7 @@ public sealed class SettingsPage : SyncPage
         display.Children.Add(Ui.SettingRow(Glyphs.Calendar, "주간 사용량 표시", "계정별 주간 한도 잔여량을 앱, 트레이, 작업 표시줄에 표시해요.",
             Switch(settings, "claudeWeekly", "주간 사용량 표시", fallback: true)));
         display.Children.Add(Ui.Expander(Ui.SettingRow(Glyphs.Chart, "작업 표시줄에 사용량 표시",
-                "모든 계정의 주간 한도 합계를 작업 표시줄 맨 왼쪽에 보여 줘요.",
+                "지금 계정의 주간 한도와 모든 계정의 주간 한도 합계를 작업 표시줄 맨 왼쪽에 한 줄로 보여 줘요.",
                 Switch(settings, "taskbarUsage", "작업 표시줄에 사용량 표시", fallback: true)),
             [Ui.SubRow(null, Ui.Caption("전체 주간은 재로그인이 필요한 계정을 빼고, 계정마다 같은 비중으로 남은 양을 더한 값이에요. 플랜마다 실제 한도 크기는 달라요. 위에서 주간 사용량을 끄면 작업 표시줄에도 나오지 않아요."), 56)]));
 
