@@ -26,7 +26,6 @@ public sealed class DemoService : IManagementService
     private bool _failRecovery;
     private bool _busy;
     private bool _weekly = true;
-    private bool _fiveHour = true;
     private bool _taskbar = true;
     private bool _autoSwitch;
     private bool _autoResume;
@@ -40,14 +39,13 @@ public sealed class DemoService : IManagementService
 
     public DemoService()
     {
-        DashboardUsage Usage(double week, double? fiveHour, string? fiveHourReset) => new(
-            new(week, DateTimeOffset.Parse("2026-10-06T00:00:00Z"), 604800), DateTimeOffset.Parse("2026-10-03T03:40:00Z"),
-            fiveHour is null ? null : new(fiveHour.Value, fiveHourReset is null ? null : DateTimeOffset.Parse(fiveHourReset), 18000));
+        DashboardUsage Usage(double week) => new(
+            new(week, DateTimeOffset.Parse("2026-10-06T00:00:00Z"), 604800), DateTimeOffset.Parse("2026-10-03T03:40:00Z"));
         _accounts =
         [
             // Every demo account counts as a $200 Max account, so each starts as a smart switch candidate.
-            new(1, "p***@example.com", "개인 계정", false, false, Usage(54, 81, "2026-10-03T06:10:00Z"), SmartCandidate: true),
-            new(2, "w***@example.com", "업무 계정", false, false, Usage(42, 0, null), SmartCandidate: true),
+            new(1, "p***@example.com", "개인 계정", false, false, Usage(54), SmartCandidate: true),
+            new(2, "w***@example.com", "업무 계정", false, false, Usage(42), SmartCandidate: true),
         ];
     }
 
@@ -61,7 +59,7 @@ public sealed class DemoService : IManagementService
     }
 
     private string Revision => "demo-" + _revision;
-    private object Settings => new { claudeFiveHour = _fiveHour, claudeWeekly = _weekly, taskbarUsage = _taskbar, tokenPeriodHours = _tokenHours, tokenRateBasis = _tokenBasis, autoSwitchEnabled = _autoSwitch, autoSwitchLast = (object?)null, autoResumeEnabled = _autoResume, autoResumeLast = (object?)null, launchAtLogin = _autostart, weekly = new { preferences = new { }, records = new { } }, isDemo = true };
+    private object Settings => new { claudeWeekly = _weekly, taskbarUsage = _taskbar, tokenPeriodHours = _tokenHours, tokenRateBasis = _tokenBasis, autoSwitchEnabled = _autoSwitch, autoSwitchLast = (object?)null, autoResumeEnabled = _autoResume, autoResumeLast = (object?)null, launchAtLogin = _autostart, weekly = new { preferences = new { }, records = new { } }, isDemo = true };
     private string Label(int id) => _accounts.FirstOrDefault(a => a.Id == id)?.Alias ?? "알 수 없음";
     private IReadOnlyList<DeviceView> Devices => new DeviceView[]
     {
@@ -90,10 +88,10 @@ public sealed class DemoService : IManagementService
                 if (!_accounts.Any(a => a.SmartCandidate)) return new { found = false, message = SmartSwitch.NoCandidateMessage };
                 var now = DateTimeOffset.UtcNow;
                 DateTimeOffset? Reset(AccountView a) => a.Usage?.Weekly?.ResetsAt is { } reset && reset > now ? reset : null;
-                var best = _accounts.Where(a => a.SmartCandidate && !a.NeedsLogin && !a.IsPending && a.Usage is { Weekly.RemainingPercent: > 0, FiveHour.RemainingPercent: > SmartSwitch.FiveHourMinimum })
+                var best = _accounts.Where(a => a.SmartCandidate && !a.NeedsLogin && !a.IsPending && a.Usage is { Weekly.RemainingPercent: >= SmartSwitch.WeeklyMinimum })
                     .OrderBy(a => Reset(a) ?? DateTimeOffset.MaxValue).ThenByDescending(a => a.Usage!.Weekly!.RemainingPercent).FirstOrDefault();
                 if (best is null) return new { found = false, message = SmartSwitch.NoneMessage };
-                var reason = SmartSwitch.Reason($"{best.Usage!.Weekly!.RemainingPercent:0}%", $"{best.Usage.FiveHour!.RemainingPercent:0}%", Reset(best));
+                var reason = SmartSwitch.Reason($"{best.Usage!.Weekly!.RemainingPercent:0}%", Reset(best));
                 if (best.Id == _local) return new { found = true, alreadyActive = true, profileId = best.Id, accountLabel = best.Alias, reason, message = $"이미 조건에 가장 맞는 {best.Alias}을(를) 쓰고 있습니다. ({reason})" };
                 using var document = JsonDocument.Parse($"{{\"profileId\":{best.Id}}}");
                 return new { found = true, alreadyActive = false, profileId = best.Id, accountLabel = best.Alias, reason, preview = Dispatch("preview", document.RootElement.Clone()), message = $"{best.Alias}(으)로 전환합니다. ({reason})" };
@@ -147,7 +145,6 @@ public sealed class DemoService : IManagementService
             case "settings.get": return Settings;
             case "settings.save":
                 _weekly = Wire.Flag(p, "claudeWeekly", _weekly);
-                _fiveHour = Wire.Flag(p, "claudeFiveHour", _fiveHour);
                 _taskbar = Wire.Flag(p, "taskbarUsage", _taskbar);
                 _autoSwitch = Wire.Flag(p, "autoSwitchEnabled", _autoSwitch);
                 _autoResume = Wire.Flag(p, "autoResumeEnabled", _autoResume);
@@ -196,7 +193,7 @@ public sealed class DemoService : IManagementService
                 var devices = _tokens.Devices(_offline);
                 var view = TokenRateCalculator.Calculate(new(_tokens.CollectedAt, _tokenHours, _tokenBasis, devices, _tokens.History,
                     _tokens.History.FirstOrDefault()?.At, _accounts.Where(a => !a.IsPending).Select(a => new TokenAccountInput(a.Id, a.Alias, a.Plan)).ToArray(),
-                    _local, _fiveHour, _weekly));
+                    _local, _weekly));
                 if (method == "tokens.view") return new { collectedAt = _tokens.CollectedAt, view };
                 return new
                 {
@@ -276,7 +273,7 @@ public sealed class DemoService : IManagementService
 
 /// <summary>
 /// Five days of made-up session logs and quota readings, shaped like heavy real use: about 81M tokens an hour,
-/// nineteen in twenty of them cache reads. The account in use moves to the next once its five hours run low,
+/// nineteen in twenty of them cache reads. The account in use moves to the next once 60% of its week is used,
 /// the app is off for a night (no readings) and for an afternoon nobody knows which account the desktop used.
 /// </summary>
 internal sealed class DemoTokens
@@ -331,7 +328,7 @@ internal sealed class DemoTokens
             var slot = (int)((CollectedAt - time).TotalMinutes / 5);
             var total = hourly[Math.Min(k, Hours - 1)] * scale / 12 * (0.6 + 0.8 * Noise(slot, 9.7));
             foreach (var state in quota.Values) state.Expire(time);
-            var user = order.FirstOrDefault(a => quota[a.Id] is { FiveHour: < 97, Weekly: < 97 }) ?? order[0];
+            var user = order.FirstOrDefault(a => quota[a.Id].Weekly < 60) ?? order[0];
             if (user.Id != holder && !(time >= off.From && time < off.To))
                 history.Add(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Switch, At = time, ProfileId = user.Id, DeviceIds = ["local", "ssh:dev"] });
             holder = user.Id;
@@ -340,7 +337,7 @@ internal sealed class DemoTokens
             if (quiet >= 5 && !chatted && k is > 20 and < 48)
             {
                 chatted = true;
-                quota[order[0].Id].Chat(time);
+                quota[order[0].Id].Chat();
             }
 
             if (total > 0)
@@ -361,7 +358,7 @@ internal sealed class DemoTokens
                     }
                 }
 
-                quota[user.Id].Use(uncached, time, Noise(slot, 3.7), Noise(slot, 5.3));
+                quota[user.Id].Use(uncached, Noise(slot, 5.3));
             }
 
             // The app looks every five minutes while it runs; for an afternoon the desktop's account is unknown.
@@ -414,42 +411,30 @@ internal sealed class DemoTokens
         };
     }
 
-    /// <summary>One account's five-hour and weekly use as the service would report it, in whole percent.</summary>
+    /// <summary>One account's weekly use as the service would report it, in whole percent.</summary>
     private sealed class Quota(string? plan, (double Used, DateTimeOffset ResetsAt) weekly)
     {
-        // Percent of each quota per million uncached tokens, by plan; a smaller plan's 1% is a smaller amount.
-        private readonly (double FiveHour, double Weekly) _rate = plan switch
+        // Percent of the week per million uncached tokens, by plan; a smaller plan's 1% is a smaller amount.
+        private readonly double _rate = plan switch
         {
-            "Max 5x" => (18.4, 1.04),
-            "Pro" => (92, 5.2),
-            _ => (4.6, 0.26),
+            "Max 5x" => 1.04,
+            "Pro" => 5.2,
+            _ => 0.26,
         };
-        private DateTimeOffset? _fiveHourReset;
         private DateTimeOffset _weeklyReset = weekly.ResetsAt;
-        public double FiveHour { get; private set; }
         public double Weekly { get; private set; } = weekly.Used;
 
         public void Expire(DateTimeOffset time)
         {
-            if (_fiveHourReset is { } reset && time >= reset) { FiveHour = 0; _fiveHourReset = null; }
             while (time >= _weeklyReset) { Weekly = 0; _weeklyReset += TimeSpan.FromDays(7); }
         }
 
-        public void Use(double uncached, DateTimeOffset time, double noiseFive, double noiseWeek)
-        {
-            _fiveHourReset ??= time + TimeSpan.FromHours(5);
-            FiveHour = Math.Min(100, FiveHour + uncached / 1e6 * _rate.FiveHour * (0.85 + 0.3 * noiseFive));
-            Weekly = Math.Min(100, Weekly + uncached / 1e6 * _rate.Weekly * (0.85 + 0.3 * noiseWeek));
-        }
+        public void Use(double uncached, double noise) =>
+            Weekly = Math.Min(100, Weekly + uncached / 1e6 * _rate * (0.85 + 0.3 * noise));
 
-        public void Chat(DateTimeOffset time)
-        {
-            _fiveHourReset ??= time + TimeSpan.FromHours(5);
-            FiveHour = Math.Min(100, FiveHour + 4);
-            Weekly = Math.Min(100, Weekly + 0.4);
-        }
+        public void Chat() => Weekly = Math.Min(100, Weekly + 4);
 
         public QuotaSample Sample(int profileId, DateTimeOffset at) =>
-            new(profileId, at, plan, Math.Floor(FiveHour), _fiveHourReset, Math.Floor(Weekly), _weeklyReset);
+            new(profileId, at, plan, Math.Floor(Weekly), _weeklyReset);
     }
 }

@@ -13,7 +13,7 @@ MAXIMUM_HOURS = 720
 PRESETS = ((1, '1시간'), (5, '5시간'), (24, '24시간'), (168, '7일'), (720, '30일'))
 PRESET_HOURS = tuple(hours for hours, _ in PRESETS)
 PERIOD_LABELS = tuple(name for _, name in PRESETS) + ('직접',)
-QUOTA_KEYS = ('fiveHour', 'weekly')
+QUOTA_KEYS = ('weekly',)
 
 INTRO = 'Claude Code 세션 기록을 고른 기간으로 집계합니다. 비용은 API 요금으로 환산한 추정치라 실제 청구 금액과 다릅니다.'
 AGAIN = '다시 집계'
@@ -26,7 +26,7 @@ HOURS_TITLE = '기간(시간)'
 HOURS_SUBTITLE = '최근 1~720시간'
 THROUGHPUT_TITLE = '시간당 평균'
 BURN_TITLE = '1M 토큰당 한도 소모'
-BURN_DESCRIPTION = ('고른 기간에 계정의 5시간·주간 사용률이 오른 만큼을 그동안 그 계정으로 쓴 토큰으로 나눈 평균입니다. '
+BURN_DESCRIPTION = ('고른 기간에 계정의 주간 사용률이 오른 만큼을 그동안 그 계정으로 쓴 토큰으로 나눈 평균입니다. '
                     '요금제마다 1%의 크기가 달라 계정별로 보여 줍니다.')
 BASIS_TITLE = '기준 토큰'
 CURRENT = '사용 중'
@@ -421,7 +421,7 @@ def waiting(since):
     caption = (f'기록 시작 · {moment(since)} · 처리량과 합계는 그 전 기록으로도 바로 보입니다.' if since
                else '아직 기록이 없습니다 · 처리량과 합계는 지난 기록으로 바로 보입니다.')
     return Waiting('한도 기록을 모으고 있습니다',
-                   '앱이 켜져 있는 동안 5분마다 계정별 5시간·주간 사용률을 기록합니다. 토큰을 쓰는 동안 기록이 쌓이면 보통 몇 시간 안에 첫 값이 나옵니다.',
+                   '앱이 켜져 있는 동안 5분마다 계정별 주간 사용률을 기록합니다. 토큰을 쓰는 동안 사용률이 3%p 오르면 첫 값이 나옵니다.',
                    caption)
 
 
@@ -452,15 +452,15 @@ def burn_notes(data, chosen, word=' 토큰'):
 
 
 def burn(view):
-    """Each account's five-hour and weekly use per million tokens, or the wait for the first readings."""
+    """Each account's weekly use per million tokens, or the wait for the first readings."""
     data = _dict(_dict(view).get('burn'))
     chosen = basis(_dict(view).get('basis'))
     weighted = chosen.id == 'weighted'
     per = '환산 1M 토큰당' if weighted else '1M 토큰당'
     word = ' 환산 토큰' if weighted else ' 토큰'
     accounts = _dicts(data.get('accounts'))
-    # The settings decide which quotas show (a backend without the flags shows both); with neither there is nothing.
-    shown = tuple(key for key, setting in zip(QUOTA_KEYS, ('showFiveHour', 'showWeekly')) if data.get(setting) is not False)
+    # The settings decide whether the quota shows (a backend without the flag shows it); without it there is nothing.
+    shown = QUOTA_KEYS if data.get('showWeekly') is not False else ()
     if not shown:
         return Burn(chosen, per, word, None, (), (), ())
     rated = any(_state(account.get(key)) in ('ok', 'low') for account in accounts for key in QUOTA_KEYS)

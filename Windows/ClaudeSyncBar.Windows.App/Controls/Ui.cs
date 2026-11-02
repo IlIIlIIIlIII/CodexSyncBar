@@ -13,7 +13,7 @@ namespace ClaudeSyncBar.App.Controls;
 public static class Glyphs
 {
     public const string Refresh = "", Settings = "", Add = "", Sync = "", Check = "",
-        Completed = "", Warning = "", Error = "", Info = "", Lock = "", Stopwatch = "",
+        Completed = "", Warning = "", Error = "", Info = "", Lock = "",
         Calendar = "", Pc = "", Terminal = "", Server = "", Code = "", Download = "",
         Send = "", OpenWindow = "", Power = "", Delete = "", Folder = "", Shield = "",
         Back = "", ChevronRight = "", ChevronDown = "", ChevronUp = "", ArrowRight = "",

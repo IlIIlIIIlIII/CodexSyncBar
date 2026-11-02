@@ -4,10 +4,9 @@ using System.Text.Json;
 
 namespace ClaudeSyncBar.Windows.Core;
 
-/// <summary>One account's five-hour and weekly usage as one look at the service saw it.</summary>
+/// <summary>One account's weekly usage as one look at the service saw it.</summary>
 public sealed record QuotaSample(
-    int ProfileId, DateTimeOffset SampledAt, string? Plan,
-    double? FiveHourUsed, DateTimeOffset? FiveHourResetsAt, double? WeeklyUsed, DateTimeOffset? WeeklyResetsAt);
+    int ProfileId, DateTimeOffset SampledAt, string? Plan, double? WeeklyUsed, DateTimeOffset? WeeklyResetsAt);
 
 /// <summary>
 /// Which account a device used, as last seen. A null profile is not known, unless <paramref name="Unregistered"/>
@@ -33,7 +32,7 @@ public sealed record QuotaHistoryEntry
 }
 
 /// <summary>
-/// Five-hour and weekly usage over time, which the usage service gives only as of now. One JSON line per entry
+/// Weekly usage over time, which the usage service gives only as of now. One JSON line per entry
 /// in the state folder, kept 31 days, so a rate over a chosen period can be read back from it.
 /// </summary>
 public sealed class QuotaHistoryStore(WindowsPaths paths)

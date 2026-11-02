@@ -190,7 +190,7 @@ public sealed class SwitchPage : SyncPage
         foreach (var quota in account.Quotas)
         {
             tiles.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var label = Ui.Stack(6, true, Ui.Glyph(quota.Key == "fiveHour" ? Glyphs.Stopwatch : Glyphs.Calendar, 14, "SyncBarGlyphMuted"), Ui.Text(quota.Title, secondary: true));
+            var label = Ui.Stack(6, true, Ui.Glyph(Glyphs.Calendar, 14, "SyncBarGlyphMuted"), Ui.Text(quota.Title, secondary: true));
             var value = Ui.Stack(6, true, Ui.ToneText(quota.Value, quota.Tone, 28));
             if (quota.Remaining is not null)
             {

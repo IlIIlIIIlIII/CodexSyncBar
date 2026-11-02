@@ -6,11 +6,11 @@ namespace ClaudeSyncBar.Windows.Core.Tests;
 public sealed class UsagePreferencesMigrationTests
 {
     [Fact]
-    public void NewPreferencesShowBothClaudeQuotas()
+    public void NewPreferencesShowTheWeeklyQuota()
     {
         using var fixture = new Fixture();
         var store = new UsageDisplayPreferencesStore(fixture.Paths);
-        Assert.Equal(new[] { UsageDisplayItem.ClaudeWeekly, UsageDisplayItem.ClaudeFiveHour }, Enum.GetValues<UsageDisplayItem>());
+        Assert.Equal(new[] { UsageDisplayItem.ClaudeWeekly }, Enum.GetValues<UsageDisplayItem>());
         Assert.Equal(new[] { UsageDisplayItem.ClaudeWeekly }, store.LoadMenuPreferences().NormalizedItems());
         Assert.All(Enum.GetValues<UsageDisplayItem>(), item => Assert.True(store.LoadUsagePreferences().IsVisible(item)));
         Assert.True(store.LoadUsagePreferences().TaskbarUsage);
@@ -28,7 +28,7 @@ public sealed class UsagePreferencesMigrationTests
         store.SaveUsagePreferences(preferences);
         var saved = store.LoadUsagePreferences();
         Assert.False(saved.TaskbarUsage);
-        Assert.False(saved.ClaudeFiveHour);
+        Assert.DoesNotContain("claudeFiveHour", File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -36,16 +36,14 @@ public sealed class UsagePreferencesMigrationTests
     {
         using var fixture = new Fixture();
         File.WriteAllText(fixture.Paths.UsageDisplayPreferencesFile, """
-            {"fiveHour":false,"claudeWeekly":true,"sparkFiveHour":true,"SPARKWEEKLY":false,
+            {"fiveHour":false,"claudeFiveHour":false,"claudeWeekly":true,"sparkFiveHour":true,"SPARKWEEKLY":false,
              "futureOption":{"SparkWeekly":"unrelated nested data","enabled":true}}
             """);
         var store = new UsageDisplayPreferencesStore(fixture.Paths);
         var preferences = store.LoadUsagePreferences();
         Assert.True(preferences.ClaudeWeekly);
-        // The Codex version's retired key is dropped; it never turns into the Claude five-hour setting.
-        Assert.True(preferences.ClaudeFiveHour);
         using var migrated = JsonDocument.Parse(File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile));
-        Assert.DoesNotContain(migrated.RootElement.EnumerateObject(), property => property.Name.Equals("fiveHour", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(migrated.RootElement.EnumerateObject(), property => property.Name.EndsWith("fiveHour", StringComparison.OrdinalIgnoreCase));
         Assert.DoesNotContain(migrated.RootElement.EnumerateObject(), property => property.Name.StartsWith("spark", StringComparison.OrdinalIgnoreCase));
         Assert.Equal("unrelated nested data", migrated.RootElement.GetProperty("futureOption").GetProperty("SparkWeekly").GetString());
         store.SaveUsagePreferences(preferences);
@@ -74,10 +72,11 @@ public sealed class UsagePreferencesMigrationTests
     public void RetiredOnlyMenuSelectionReceivesSupportedDefaults()
     {
         using var fixture = new Fixture();
-        File.WriteAllText(fixture.Paths.MenuBarUsagePreferencesFile, """{"items":["FiveHour","SparkFiveHour","sparkWeekly"]}""");
+        File.WriteAllText(fixture.Paths.MenuBarUsagePreferencesFile, """{"items":["FiveHour","claudeFiveHour","SparkFiveHour","sparkWeekly"]}""");
         var preferences = new UsageDisplayPreferencesStore(fixture.Paths).LoadMenuPreferences();
         Assert.Equal(new[] { UsageDisplayItem.ClaudeWeekly }, preferences.NormalizedItems());
         Assert.DoesNotContain("spark", File.ReadAllText(fixture.Paths.MenuBarUsagePreferencesFile), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("fiveHour", File.ReadAllText(fixture.Paths.MenuBarUsagePreferencesFile), StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -105,7 +104,6 @@ public sealed class UsagePreferencesMigrationTests
             """, credentials);
         Assert.Equal(25, usage.Weekly!.UsedPercent);
         Assert.Equal(604800, usage.Weekly.DurationSeconds);
-        Assert.Null(usage.FiveHour);
         var serialized = JsonSerializer.Serialize(usage);
         Assert.DoesNotContain("18000", serialized);
         Assert.DoesNotContain(":80", serialized);
@@ -118,6 +116,7 @@ public sealed class UsagePreferencesMigrationTests
         using var fixture = new Fixture();
         File.WriteAllText(Path.Combine(fixture.Paths.StateRoot, "dashboard-usage.json"), """
             {"1":{"Session":{"UsedPercent":25,"ResetsAt":null,"DurationSeconds":18000},
+                  "FiveHour":{"UsedPercent":3,"ResetsAt":null,"DurationSeconds":18000},
                   "Weekly":{"UsedPercent":70,"ResetsAt":null,"DurationSeconds":604800},
                   "SparkSession":{"UsedPercent":10,"ResetsAt":null,"DurationSeconds":18000},
                   "SparkWeekly":{"UsedPercent":15,"ResetsAt":null,"DurationSeconds":604800},
@@ -130,6 +129,7 @@ public sealed class UsagePreferencesMigrationTests
         Assert.DoesNotContain("Session", JsonSerializer.Serialize(cached), StringComparison.OrdinalIgnoreCase);
         var saved = File.ReadAllText(Path.Combine(fixture.Paths.StateRoot, "dashboard-usage.json"));
         Assert.DoesNotContain("Session", saved, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FiveHour", saved, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Spark", saved, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ResetCredit", saved, StringComparison.OrdinalIgnoreCase);
     }

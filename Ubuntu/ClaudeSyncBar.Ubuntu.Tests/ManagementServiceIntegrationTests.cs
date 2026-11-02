@@ -11,19 +11,19 @@ namespace ClaudeSyncBar.Ubuntu.Tests;
 public sealed class ManagementServiceIntegrationTests
 {
     [Fact]
-    public async Task SettingsShowBothClaudeQuotasAndNeverEchoTheRetiredCodexKeys()
+    public async Task SettingsShowTheWeeklyQuotaAndNeverEchoTheRetiredKeys()
     {
         await using var fixture = new Fixture(withRemote: false);
         var settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
-        Assert.True(settings.GetProperty("claudeFiveHour").GetBoolean());
         Assert.True(settings.GetProperty("claudeWeekly").GetBoolean());
-        // The Codex version's retired key is not this quota and is never stored.
-        await fixture.Call<object>("settings.save", new { fiveHour = true, claudeFiveHour = false, claudeWeekly = true });
+        Assert.False(settings.TryGetProperty("claudeFiveHour", out _));
+        // The retired keys are no quota any more and are never stored.
+        await fixture.Call<object>("settings.save", new { fiveHour = true, claudeFiveHour = false, claudeWeekly = false });
         settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
         Assert.False(settings.TryGetProperty("fiveHour", out _));
-        Assert.False(settings.GetProperty("claudeFiveHour").GetBoolean());
-        Assert.True(settings.GetProperty("claudeWeekly").GetBoolean());
-        Assert.DoesNotContain("\"fiveHour\"", File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile));
+        Assert.False(settings.TryGetProperty("claudeFiveHour", out _));
+        Assert.False(settings.GetProperty("claudeWeekly").GetBoolean());
+        Assert.DoesNotContain("fiveHour", File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -35,13 +35,11 @@ public sealed class ManagementServiceIntegrationTests
         await fixture.Call<object>("settings.save", new { taskbarUsage = false });
         settings = JsonSerializer.SerializeToElement(await fixture.Call<object>("settings.get"), Wire.Json);
         Assert.False(settings.GetProperty("taskbarUsage").GetBoolean());
-        Assert.True(settings.GetProperty("claudeFiveHour").GetBoolean());
         Assert.True(settings.GetProperty("claudeWeekly").GetBoolean());
     }
 
-    private static string Quotas(double fiveHour, double weekly) =>
-        "{\"five_hour\":{\"utilization\":" + fiveHour + ",\"resets_at\":\"2099-01-01T05:00:00Z\"},"
-        + "\"seven_day\":{\"utilization\":" + weekly + ",\"resets_at\":\"2099-01-07T00:00:00Z\"}}";
+    private static string Quotas(double weekly) =>
+        "{\"seven_day\":{\"utilization\":" + weekly + ",\"resets_at\":\"2099-01-07T00:00:00Z\"}}";
 
     private static async Task RefreshUsage(Fixture fixture) =>
         Assert.Equal("completed", (await fixture.Wait(await fixture.Call<OperationView>("refresh", new { kind = "usage" }))).State);
@@ -49,10 +47,10 @@ public sealed class ManagementServiceIntegrationTests
     [Fact]
     public async Task TokensAreCutToTheChosenPeriodAndEveryUsageLookIsKept()
     {
-        await using var fixture = new Fixture(withRemote: false, usage: _ => Quotas(12, 30));
+        await using var fixture = new Fixture(withRemote: false, usage: _ => Quotas(30));
         await RefreshUsage(fixture);
         var history = File.ReadAllLines(Path.Combine(fixture.Paths.StateRoot, "quota-history.jsonl"));
-        Assert.Contains(history, line => line.Contains("\"Samples\":[{\"ProfileId\"") && line.Contains("\"FiveHourUsed\":12") && line.Contains("\"DeviceId\":\"local\""));
+        Assert.Contains(history, line => line.Contains("\"Samples\":[{\"ProfileId\"") && line.Contains("\"WeeklyUsed\":30") && line.Contains("\"DeviceId\":\"local\""));
 
         var log = Path.Combine(fixture.Paths.ClaudeHome, "projects", "-work", "a.jsonl");
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
@@ -82,8 +80,8 @@ public sealed class ManagementServiceIntegrationTests
     {
         var usage = new Dictionary<string, string>
         {
-            ["synthetic-access-1"] = Quotas(100, 40),
-            ["synthetic-access-2"] = Quotas(10, 20),
+            ["synthetic-access-1"] = Quotas(100),
+            ["synthetic-access-2"] = Quotas(20),
         };
         var notices = new List<string>();
         await using var fixture = new Fixture(withRemote: false, usage: token => usage[token], notify: notices.Add);
@@ -103,16 +101,16 @@ public sealed class ManagementServiceIntegrationTests
         Assert.True(settings.GetProperty("autoSwitchEnabled").GetBoolean());
         var last = settings.GetProperty("autoSwitchLast");
         Assert.True(last.GetProperty("succeeded").GetBoolean());
-        Assert.Equal("계정1의 5시간 한도가 소진되어 계정2(으)로 자동 전환했습니다.", last.GetProperty("message").GetString());
+        Assert.Equal("계정1의 주간 한도가 소진되어 계정2(으)로 자동 전환했습니다.", last.GetProperty("message").GetString());
         Assert.Equal(last.GetProperty("message").GetString(), Assert.Single(notices));
 
         // The account switched to has room left; there is nothing more to do.
         Assert.False(await fixture.WatchOnce());
         Assert.Single(notices);
 
-        // A weekly quota used up counts the same, and the order of the account list is the priority.
-        usage["synthetic-access-2"] = Quotas(10, 100);
-        usage["synthetic-access-1"] = Quotas(0, 40);
+        // Once that week is used up too it moves on the same way, in the order of the account list.
+        usage["synthetic-access-2"] = Quotas(100);
+        usage["synthetic-access-1"] = Quotas(40);
         await RefreshUsage(fixture);
         Assert.True(await fixture.WatchOnce());
         Assert.Equal("fixture-account-1", fixture.Auth.ReadActiveAccountId());
@@ -124,8 +122,8 @@ public sealed class ManagementServiceIntegrationTests
     {
         var usage = new Dictionary<string, string>
         {
-            ["synthetic-access-1"] = Quotas(100, 40),
-            ["synthetic-access-2"] = Quotas(30, 100),
+            ["synthetic-access-1"] = Quotas(100),
+            ["synthetic-access-2"] = Quotas(100),
         };
         var notices = new List<string>();
         await using var fixture = new Fixture(withRemote: false, usage: token => usage[token], notify: notices.Add);
@@ -134,13 +132,13 @@ public sealed class ManagementServiceIntegrationTests
 
         Assert.False(await fixture.WatchOnce());
         Assert.Equal("fixture-account-1", fixture.Auth.ReadActiveAccountId());
-        Assert.Equal("계정1의 5시간 한도가 소진됐지만 지금 쓸 수 있는 다른 계정이 없습니다.", Assert.Single(notices));
+        Assert.Equal("계정1의 주간 한도가 소진됐지만 지금 쓸 수 있는 다른 계정이 없습니다.", Assert.Single(notices));
         // Said once, not on every look.
         Assert.False(await fixture.WatchOnce());
         Assert.Single(notices);
 
         // Twenty minutes on, the values are too old to leave an account or choose one on.
-        usage["synthetic-access-2"] = Quotas(30, 20);
+        usage["synthetic-access-2"] = Quotas(20);
         Assert.False(await fixture.WatchOnce(DateTimeOffset.UtcNow.AddMinutes(20)));
         Assert.Single(notices);
         Assert.Equal("fixture-account-1", fixture.Auth.ReadActiveAccountId());
@@ -149,7 +147,7 @@ public sealed class ManagementServiceIntegrationTests
     [Fact]
     public async Task StoppedSessionsContinueOncePerStopOnlyWhileTheAccountHasRoom()
     {
-        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(100, 40), ["synthetic-access-2"] = Quotas(10, 20) };
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(100), ["synthetic-access-2"] = Quotas(20) };
         var stops = new List<StoppedSession> { new("aaaaaaaa-0000-4000-8000-000000000001", "/work/one", "error-1", DateTimeOffset.UtcNow.AddMinutes(-3)) };
         var open = new HashSet<string>();
         var launched = new List<StoppedSession>();
@@ -163,7 +161,7 @@ public sealed class ManagementServiceIntegrationTests
         Assert.False(await fixture.WatchOnce());
         Assert.Empty(launched);
 
-        usage["synthetic-access-1"] = Quotas(0, 40);
+        usage["synthetic-access-1"] = Quotas(40);
         await RefreshUsage(fixture);
         var now = DateTimeOffset.UtcNow;
         await fixture.WatchOnce(now);
@@ -189,45 +187,40 @@ public sealed class ManagementServiceIntegrationTests
         Assert.Equal(3, launched.Count);
         // A day later the count starts over.
         stops[0] = stops[0] with { ErrorId = "error-5" };
-        usage["synthetic-access-1"] = Quotas(0, 40);
+        usage["synthetic-access-1"] = Quotas(40);
         Assert.Equal(1, fixture.Resume(now.AddHours(25)));
         Assert.Equal(4, launched.Count);
     }
 
     [Fact]
-    public void SmartSwitchPicksTheCandidateWhoseWeekResetsFirstAmongThoseWithBothQuotasLeft()
+    public void SmartSwitchPicksTheCandidateWhoseWeekResetsFirstAmongThoseWithAtLeastOnePercentLeft()
     {
         var now = DateTimeOffset.UtcNow;
-        DashboardUsage Usage(double fiveHourLeft, double weeklyLeft, double resetDays, double minutesOld = 0) => new(
-            new(100 - weeklyLeft, now.AddDays(resetDays), 604800), now.AddMinutes(-minutesOld), new(100 - fiveHourLeft, now.AddHours(2), 18000));
+        DashboardUsage Usage(double weeklyLeft, double resetDays, double minutesOld = 0) => new(
+            new(100 - weeklyLeft, now.AddDays(resetDays), 604800), now.AddMinutes(-minutesOld));
         AccountView Account(int id, DashboardUsage? usage, bool candidate = true, bool needsLogin = false) =>
             new(id, $"{id}@example.invalid", $"계정{id}", false, needsLogin, usage, SmartSwitch.Plan, candidate);
         var accounts = new[]
         {
-            Account(1, Usage(80, 90, 5)),
-            Account(2, Usage(0, 99, 1)),                       // five-hour used up
-            Account(3, Usage(90, 0, 1)),                       // week used up
-            Account(4, Usage(90, 95, 0.5), candidate: false),  // not ticked on the account list
-            Account(5, Usage(90, 96, 0.5), needsLogin: true),
-            Account(6, Usage(90, 97, 0.5, minutesOld: 20)),    // too old to trust
-            Account(7, Usage(26, 0.5, 2)),                     // a sliver of the week is room; resets first of the rest
-            Account(8, Usage(60, 70, 4)),
+            Account(1, Usage(90, 5)),
+            Account(2, Usage(0.9, 1)),                     // under 1% of the week left
+            Account(3, Usage(0, 1)),                       // week used up
+            Account(4, Usage(95, 0.5), candidate: false),  // not ticked on the account list
+            Account(5, Usage(96, 0.5), needsLogin: true),
+            Account(6, Usage(97, 0.5, minutesOld: 20)),    // too old to trust
+            Account(7, Usage(1, 2)),                       // exactly 1% counts; resets first of the rest
+            Account(8, Usage(70, 4)),
             Account(9, null),
-            Account(16, Usage(25, 99, 1)),                     // 75% of five hours used
         };
         var choice = SmartSwitch.Choose(accounts, now)!;
-        Assert.Equal((7, 26d, 0.5), (choice.Account.Id, Math.Round(choice.FiveHour, 6), Math.Round(choice.Weekly, 6)));
+        Assert.Equal((7, 1d), (choice.Account.Id, Math.Round(choice.Weekly, 6)));
         Assert.Equal(now.AddDays(2), choice.WeeklyReset);
         Assert.Null(SmartSwitch.Choose(accounts[1..6], now));
-        // The same reset: the most weekly left, then the most five-hour left, then the list order.
-        Assert.Equal(11, SmartSwitch.Choose([Account(10, Usage(90, 40, 2)), Account(11, Usage(50, 60, 2))], now)!.Account.Id);
-        Assert.Equal(13, SmartSwitch.Choose([Account(12, Usage(50, 60, 2)), Account(13, Usage(70, 60, 2))], now)!.Account.Id);
-        Assert.Equal(14, SmartSwitch.Choose([Account(14, Usage(50, 60, 2)), Account(15, Usage(50, 60, 2))], now)!.Account.Id);
-        // A five-hour quota whose reset time has passed is whole again.
-        var fiveHourReset = new DashboardUsage(new(10, now.AddDays(3), 604800), now, new(100, now.AddMinutes(-1), 18000));
-        Assert.Equal(1, SmartSwitch.Choose([Account(1, fiveHourReset)], now)!.Account.Id);
-        // A week past its reset is whole too, but when it next resets is unknown, so a known reset comes first.
-        var weekReset = new DashboardUsage(new(100, now.AddMinutes(-1), 604800), now, new(10, now.AddHours(1), 18000));
+        // The same reset: the most weekly left, then the list order.
+        Assert.Equal(11, SmartSwitch.Choose([Account(10, Usage(40, 2)), Account(11, Usage(60, 2))], now)!.Account.Id);
+        Assert.Equal(14, SmartSwitch.Choose([Account(14, Usage(60, 2)), Account(15, Usage(60, 2))], now)!.Account.Id);
+        // A week past its reset is whole again, but when it next resets is unknown, so a known reset comes first.
+        var weekReset = new DashboardUsage(new(100, now.AddMinutes(-1), 604800), now);
         var unknown = SmartSwitch.Choose([Account(1, weekReset), accounts[7]], now)!;
         Assert.Equal(8, unknown.Account.Id);
         Assert.Null(SmartSwitch.Choose([Account(1, weekReset)], now)!.WeeklyReset);
@@ -243,7 +236,7 @@ public sealed class ManagementServiceIntegrationTests
     [Fact]
     public async Task SmartSwitchCandidatesAreTickedOnTheAccountListAndKeptApartFromTheAutomaticSwitch()
     {
-        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(20, 60), ["synthetic-access-2"] = Quotas(50, 10) };
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(60), ["synthetic-access-2"] = Quotas(10) };
         await using var fixture = new Fixture(withRemote: false, usage: token => usage[token]);
         async Task<bool[]> Candidates() => (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Select(account => account.SmartCandidate).ToArray();
         async Task<JsonElement> Smart() => JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
@@ -304,7 +297,7 @@ public sealed class ManagementServiceIntegrationTests
     [Fact]
     public async Task SmartPreviewNamesTheChoiceAndAppliesLikeAnyOtherSwitch()
     {
-        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(20, 60), ["synthetic-access-2"] = Quotas(50, 10) };
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(60), ["synthetic-access-2"] = Quotas(10) };
         await using var fixture = new Fixture(withRemote: false, usage: token => usage[token]);
         // Usage that was never looked up is looked up first.
         var smart = JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
@@ -312,7 +305,7 @@ public sealed class ManagementServiceIntegrationTests
         Assert.False(smart.GetProperty("alreadyActive").GetBoolean());
         Assert.Equal(2, smart.GetProperty("profileId").GetInt32());
         // Both weeks reset at the same time here, so the one with more left is chosen.
-        Assert.Equal($"주간 90% · 5시간 50% 남음 · 주간 초기화 {SmartSwitch.When(DateTimeOffset.Parse("2099-01-07T00:00:00Z"))}", smart.GetProperty("reason").GetString());
+        Assert.Equal($"주간 90% 남음 · 주간 초기화 {SmartSwitch.When(DateTimeOffset.Parse("2099-01-07T00:00:00Z"))}", smart.GetProperty("reason").GetString());
         var preview = smart.GetProperty("preview").Deserialize<SwitchPreview>(Wire.Json)!;
         Assert.Equal(2, preview.ProfileId);
         Assert.True(preview.CanApply, preview.BlockingReason);
@@ -326,47 +319,46 @@ public sealed class ManagementServiceIntegrationTests
         Assert.True(smart.GetProperty("alreadyActive").GetBoolean());
         Assert.False(smart.TryGetProperty("preview", out _));
 
-        // Just under 75% of five hours used still counts.
-        usage["synthetic-access-1"] = Quotas(74, 10);
-        usage["synthetic-access-2"] = Quotas(100, 10);
+        // Exactly 1% of the week left still counts.
+        usage["synthetic-access-1"] = Quotas(99);
+        usage["synthetic-access-2"] = Quotas(100);
         await RefreshUsage(fixture);
         smart = JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
         Assert.Equal(1, smart.GetProperty("profileId").GetInt32());
 
-        // 75% of five hours used passes an account over, so none is left.
-        usage["synthetic-access-1"] = Quotas(75, 10);
+        // Less than 1% passes an account over, so none is left.
+        usage["synthetic-access-1"] = Quotas(99.5);
         await RefreshUsage(fixture);
         smart = JsonSerializer.SerializeToElement(await fixture.Call<object>("smart.preview"), Wire.Json);
         Assert.False(smart.GetProperty("found").GetBoolean());
-        Assert.Equal("스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.", smart.GetProperty("message").GetString());
+        Assert.Equal("스마트 전환 후보 중 주간 한도가 1% 이상 남은 계정이 없습니다.", smart.GetProperty("message").GetString());
     }
 
     [Fact]
     public void AutomaticSwitchPolicyTrustsOnlyFreshValuesAndTreatsAPassedResetAsWhole()
     {
         var now = DateTimeOffset.UtcNow;
-        UsageWindow Window(double used, double resetHours) => new(used, now.AddHours(resetHours), 18000);
-        var empty = new DashboardUsage(Window(30, 24), now, Window(100, 2));
-        Assert.Equal("5시간", AutoSwitchPolicy.UsedUp(empty, now));
-        Assert.Null(AutoSwitchPolicy.UsedUp(empty with { Error = "사용량 갱신 실패" }, now));
-        Assert.Null(AutoSwitchPolicy.UsedUp(empty, now.AddMinutes(16)));
-        // Its reset time has passed: the five-hour quota is whole again.
-        Assert.Null(AutoSwitchPolicy.UsedUp(empty, now.AddHours(3)));
-        Assert.Equal("주간", AutoSwitchPolicy.UsedUp(new DashboardUsage(Window(100, 24), now, null), now));
-        // A sliver left is not used up, and an account with a sliver left can be switched to.
-        var sliver = new DashboardUsage(Window(99.8, 24), now, Window(99.8, 2));
-        Assert.Null(AutoSwitchPolicy.UsedUp(sliver, now));
+        UsageWindow Window(double used, double resetHours) => new(used, now.AddHours(resetHours), 604800);
+        var empty = new DashboardUsage(Window(100, 24), now);
+        Assert.True(AutoSwitchPolicy.UsedUp(empty, now));
+        Assert.False(AutoSwitchPolicy.UsedUp(empty with { Error = "사용량 갱신 실패" }, now));
+        Assert.False(AutoSwitchPolicy.UsedUp(empty, now.AddMinutes(16)));
+        // Its reset time has passed: the week is whole again.
+        Assert.False(AutoSwitchPolicy.UsedUp(new DashboardUsage(Window(100, -1), now), now));
+        // A sliver left is not used up, and the automatic switch can still move to an account with a sliver left.
+        var sliver = new DashboardUsage(Window(99.8, 24), now);
+        Assert.False(AutoSwitchPolicy.UsedUp(sliver, now));
         Assert.True(AutoSwitchPolicy.HasRoom(sliver, now));
-        Assert.Equal("5시간", AutoSwitchPolicy.UsedUp(new DashboardUsage(Window(30, 24), now, Window(100.4, 2)), now));
-        Assert.False(AutoSwitchPolicy.HasRoom(new DashboardUsage(null, now, Window(0, 2)), now));
-        Assert.True(AutoSwitchPolicy.HasRoom(new DashboardUsage(Window(99, 24), now, null), now));
-        Assert.Equal(1, AutoSwitchPolicy.Lowest(new DashboardUsage(Window(99, 24), now, Window(10, 2)), now)!.Value, 3);
+        Assert.True(AutoSwitchPolicy.UsedUp(new DashboardUsage(Window(100.4, 24), now), now));
+        Assert.False(AutoSwitchPolicy.HasRoom(new DashboardUsage(null, now), now));
+        Assert.True(AutoSwitchPolicy.HasRoom(new DashboardUsage(Window(99, 24), now), now));
+        Assert.Equal(1, AutoSwitchPolicy.Remaining(Window(99, 24), now)!.Value, 3);
         var accounts = new[]
         {
-            new AccountView(3, "c", "c", false, true, new DashboardUsage(Window(0, 24), now, null)),
-            new AccountView(1, "a", "a", false, false, new DashboardUsage(Window(0, 24), now, Window(100, 2))),
-            new AccountView(4, "d", "d", false, false, new DashboardUsage(Window(100, 24), now, null)),
-            new AccountView(2, "b", "b", false, false, new DashboardUsage(Window(50, 24), now, Window(0, 2))),
+            new AccountView(3, "c", "c", false, true, new DashboardUsage(Window(0, 24), now)),
+            new AccountView(1, "a", "a", false, false, new DashboardUsage(Window(0, 24), now)),
+            new AccountView(4, "d", "d", false, false, new DashboardUsage(Window(100, 24), now)),
+            new AccountView(2, "b", "b", false, false, new DashboardUsage(Window(50, 24), now)),
         };
         // In list order, skipping the account in use, one needing login and one used up.
         Assert.Equal(2, AutoSwitchPolicy.NextAccount(accounts, active: 1, now));

@@ -1,10 +1,10 @@
-"""Five-hour and weekly quota presentation, independent of GTK and account mutation."""
+"""Weekly quota presentation, independent of GTK and account mutation."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import math
 
 # Usage key in the snapshot, title, settings key that shows it.
-QUOTAS = (('fiveHour', '5시간', 'claudeFiveHour'), ('weekly', '주간', 'claudeWeekly'))
+QUOTAS = (('weekly', '주간', 'claudeWeekly'),)
 TITLES = {key: title for key, title, _ in QUOTAS}
 # Older than this, a value is shown as the previous one.
 STALE_SECONDS = 600
@@ -56,16 +56,6 @@ def tone_of(remaining):
     return 'critical' if remaining <= 10 else 'warning' if remaining <= 25 else 'healthy'
 
 
-def until(moment, now):
-    minutes = max(0, math.ceil((moment - now).total_seconds() / 60))
-    hours, minutes = divmod(minutes, 60)
-    if hours and minutes:
-        return f'{hours}시간 {minutes}분 후'
-    if hours:
-        return f'{hours}시간 후'
-    return f'{minutes}분 후' if minutes else '곧'
-
-
 @dataclass(frozen=True)
 class Quota:
     key: str
@@ -110,14 +100,11 @@ def quota(window, key, *, now, previous=False):
     if resets is None:
         caption = '사용 전' if remaining >= 100 else '초기화 시각 미정'
         return Quota(key, title, remaining, tone, caption, caption)
-    if key == 'fiveHour':
-        clock = f'{resets:%H:%M} 초기화'
-        return Quota(key, title, remaining, tone, clock if previous else f'{clock} · {until(resets, now)}', clock)
     return Quota(key, title, remaining, tone, f'{resets.month}월 {resets.day}일 {resets:%H:%M} 초기화',
                  f'{resets.month}월 {resets.day}일 초기화')
 
 
-def account_usage(account, *, keys=('fiveHour', 'weekly'), now=None, unavailable=False, refreshing=False):
+def account_usage(account, *, keys=('weekly',), now=None, unavailable=False, refreshing=False):
     now = now or datetime.now(timezone.utc)
     usage = account.get('usage') or {}
     updated = timestamp(usage.get('updatedAt'))

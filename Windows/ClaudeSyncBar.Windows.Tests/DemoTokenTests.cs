@@ -17,7 +17,7 @@ public sealed class DemoTokenTests
     private static DemoService Service()
     {
         var now = DateTimeOffset.UtcNow;
-        DashboardUsage Usage(double week) => new(new(week, now.AddDays(2), 604800), now, new(10, now.AddHours(1), 18000));
+        DashboardUsage Usage(double week) => new(new(week, now.AddDays(2), 604800), now);
         return new DemoService(
         [
             new(1, "main@example.com", "개인 계정", false, false, Usage(32), "Max 20x"),
@@ -38,17 +38,17 @@ public sealed class DemoTokenTests
         Assert.InRange(month.Burn.AttributedTokens / month.Burn.BasisTokens, 0.8, 0.97);
         var work = month.Burn.Accounts[0];
         Assert.True(work.IsCurrent);
-        Assert.Equal("ok", work.FiveHour.State);
-        // Made with 4.6% of five hours and 0.26% of the week per million uncached tokens.
-        Assert.InRange(work.FiveHour.RatePerMillion!.Value, 4.3, 4.9);
+        Assert.Equal("ok", work.Weekly.State);
+        // Made with 0.26% of the week per million uncached tokens, and 1.04% on the smaller plan.
         Assert.InRange(work.Weekly.RatePerMillion!.Value, 0.23, 0.29);
-        Assert.Equal(4, work.FiveHour.UntrackedPercent);
+        Assert.InRange(month.Burn.Accounts.Single(account => account.Name == "실험 계정").Weekly.RatePerMillion!.Value, 0.9, 1.2);
+        Assert.Equal(4, work.Weekly.UntrackedPercent);
         Assert.Contains("보조 계정", month.Burn.IdleAccounts);
 
         var hour = await ViewAsync(service, 1);
         Assert.Equal("collecting", hour.Burn.Accounts[0].Weekly.State);
         Assert.False(hour.Clipped);
-        var total = (await ViewAsync(service, 720, TokenBurnBasis.Total)).Burn.Accounts[0].FiveHour.RatePerMillion!.Value;
-        Assert.InRange(total, 0.15, 0.25);
+        var total = (await ViewAsync(service, 720, TokenBurnBasis.Total)).Burn.Accounts[0].Weekly.RatePerMillion!.Value;
+        Assert.InRange(total, 0.009, 0.014);
     }
 }

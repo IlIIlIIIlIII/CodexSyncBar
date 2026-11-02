@@ -8,7 +8,7 @@ using Microsoft.UI.Xaml.Input;
 
 namespace ClaudeSyncBar.App.Pages;
 
-/// <summary>Every account's five-hour and weekly quota side by side. Choosing a row only opens its switch preview.</summary>
+/// <summary>Every account's weekly quota, one under another. Choosing a row only opens its switch preview.</summary>
 public sealed class UsagePage : SyncPage
 {
     protected override void Render()
@@ -16,7 +16,7 @@ public sealed class UsagePage : SyncPage
         var keys = State.VisibleQuotas;
         var busy = State.Busy || State.RefreshRequested;
         var smart = Keep("smart", () => Ui.Button("스마트 전환", Glyphs.Lightning, accent: true, click: async (_, _) => await Flows.SmartSwitchAsync(XamlRoot),
-            tip: "스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요. 후보는 계정 화면에서 골라요."));
+            tip: "스마트 전환 후보 중 주간 한도가 1% 이상 남은 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환해요. 후보는 계정 화면에서 골라요."));
         smart.IsEnabled = !busy && State.Error is null && State.Accounts.Count > 1;
         var refresh = Keep("refresh", () =>
         {
@@ -26,12 +26,9 @@ public sealed class UsagePage : SyncPage
         });
         Ui.Relabel(refresh, State.Refreshing ? "갱신 중…" : "새로고침");
         refresh.IsEnabled = !busy;
-        var subtitle = keys.Count switch
-        {
-            0 => "설정에서 표시할 사용량을 켜 주세요.",
-            2 => "계정마다 5시간·주간 한도가 얼마나 남았는지 비교해요. 계정을 고르면 전환 화면이 열려요.",
-            _ => $"계정마다 {QuotaFormat.Title(keys[0])} 한도가 얼마나 남았는지 비교해요. 계정을 고르면 전환 화면이 열려요.",
-        };
+        var subtitle = keys.Count == 0
+            ? "설정에서 표시할 사용량을 켜 주세요."
+            : "계정마다 주간 한도가 얼마나 남았는지 비교해요. 계정을 고르면 전환 화면이 열려요.";
         Header("사용량", subtitle, smart, refresh);
         ErrorBar();
 
@@ -102,7 +99,6 @@ public sealed class UsagePage : SyncPage
         var grid = new Grid { ColumnSpacing = 20 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.3, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
         return grid;
     }
@@ -130,7 +126,6 @@ public sealed class UsagePage : SyncPage
         var grid = Columns();
         if (!Wide)
         {
-            grid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowSpacing = 14;
@@ -153,7 +148,7 @@ public sealed class UsagePage : SyncPage
         if (pills.Children.Count > 0) names.Children.Add(pills);
         Grid.SetColumn(names, 1);
         identity.Children.Add(names);
-        if (!Wide) Grid.SetColumnSpan(identity, 3);
+        if (!Wide) Grid.SetColumnSpan(identity, 2);
         grid.Children.Add(identity);
 
         for (var i = 0; i < usage.Quotas.Count; i++)
@@ -163,7 +158,7 @@ public sealed class UsagePage : SyncPage
             else
             {
                 Grid.SetRow(cell, 1);
-                Grid.SetColumn(cell, i);
+                Grid.SetColumnSpan(cell, 2);
             }
 
             grid.Children.Add(cell);
@@ -171,7 +166,7 @@ public sealed class UsagePage : SyncPage
 
         var chevron = Ui.Glyph(Glyphs.ChevronRight, 12, "SyncBarGlyphMuted");
         chevron.VerticalAlignment = VerticalAlignment.Center;
-        Grid.SetColumn(chevron, 3);
+        Grid.SetColumn(chevron, 2);
         Grid.SetRowSpan(chevron, 2);
         grid.Children.Add(chevron);
 

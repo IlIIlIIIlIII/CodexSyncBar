@@ -37,23 +37,21 @@ VIEW = {
         'accounts': [
             {'profileId': 2, 'name': '업무 계정', 'plan': 'Max 5x', 'isCurrent': False, 'attributedTokens': 19_629_576.4,
              'devices': ['이 Ubuntu PC'],
-             'fiveHour': {'state': 'ok', 'ratePerMillion': 18.4, 'deltaPercent': 361, 'tokens': 19_620_000, 'windows': 2,
-                          'runs': 4, 'untrackedPercent': 0, 'planChanged': True},
              'weekly': {'state': 'collecting', 'ratePerMillion': None, 'deltaPercent': 2, 'tokens': 19_620_000, 'windows': 1,
-                        'runs': 4, 'untrackedPercent': 0, 'planChanged': False}},
+                        'runs': 4, 'untrackedPercent': 0, 'planChanged': True}},
             {'profileId': 1, 'name': '개인 계정', 'plan': 'Max 20x', 'isCurrent': True, 'attributedTokens': 52_300_000,
              'devices': ['개발 서버', '이 Ubuntu PC'],
-             'fiveHour': {'state': 'ok', 'ratePerMillion': 4.62, 'deltaPercent': 240, 'tokens': 51_948_000, 'windows': 3,
-                          'runs': 12, 'untrackedPercent': 4, 'planChanged': False},
              'weekly': {'state': 'low', 'ratePerMillion': 0.27, 'deltaPercent': 14, 'tokens': 51_948_000, 'windows': 1,
-                        'runs': 12, 'untrackedPercent': 0, 'planChanged': False}},
+                        'runs': 12, 'untrackedPercent': 4, 'planChanged': False}},
+            {'profileId': 3, 'name': '연구 계정', 'plan': 'Pro', 'isCurrent': False, 'attributedTokens': 0,
+             'devices': ['이 Ubuntu PC'],
+             'weekly': {'state': 'ok', 'ratePerMillion': 5.2, 'deltaPercent': 21, 'tokens': 4_000_000, 'windows': 1,
+                        'runs': 2, 'untrackedPercent': 0, 'planChanged': False}},
         ],
         'idleAccounts': ['실험 계정'],
     },
 }
 RESULT = {'collectedAt': '2026-10-25T03:12:00.1234567+00:00', 'estimatedCostUsd': 1487.62, 'view': VIEW, 'devices': []}
-HIDDEN = {'state': 'hidden', 'ratePerMillion': None, 'deltaPercent': 0, 'tokens': 0, 'windows': 0, 'runs': 0,
-          'untrackedPercent': 0, 'planChanged': False}
 
 
 def setUpModule():
@@ -177,56 +175,52 @@ class BurnTests(unittest.TestCase):
     def test_current_account_first_with_ok_low_and_collecting_cells(self):
         model = tv.burn(VIEW)
         self.assertIsNone(model.waiting)
-        self.assertEqual(('fiveHour', 'weekly'), model.shown)
-        self.assertEqual(['개인 계정', '업무 계정'], [line.name for line in model.accounts])
-        mine, work = model.accounts
+        self.assertEqual(('weekly',), model.shown)
+        self.assertEqual(['개인 계정', '업무 계정', '연구 계정'], [line.name for line in model.accounts])
+        mine, work, research = model.accounts
         self.assertTrue(mine.is_current)
         self.assertEqual('Max 20x · 52.30M 토큰', mine.detail)
         self.assertEqual('Max 5x · 19.63M 토큰', work.detail)
-        five, week = mine.cells
-        self.assertEqual(('5시간 · 1M 토큰당', 'ok', '4.6%p', '100% ≈ 21.65M 토큰', None),
-                         (five.title, five.state, five.value, five.caption, five.tooltip))
+        (week,) = mine.cells
         self.assertEqual(('주간 · 1M 토큰당', 'low', '약 0.27%p', '참고용 · 변화 14%p', tv.ROUGH_TIP),
                          (week.title, week.state, week.value, week.caption, week.tooltip))
-        self.assertEqual(('ok', '18%p', '100% ≈ 5.43M 토큰'), (work.cells[0].state, work.cells[0].value, work.cells[0].caption))
         self.assertEqual(('collecting', '모으는 중', '변화 2%p · 3%p부터 보입니다'),
-                         (work.cells[1].state, work.cells[1].value, work.cells[1].caption))
-        self.assertEqual('5시간 · 1M 토큰당 4.6%p, 100% ≈ 21.65M 토큰, 주간 · 1M 토큰당 약 0.27%p, 참고용 · 변화 14%p, 사용 중',
-                         mine.spoken)
+                         (work.cells[0].state, work.cells[0].value, work.cells[0].caption))
+        self.assertEqual(('ok', '5.2%p', '100% ≈ 19.23M 토큰'), (research.cells[0].state, research.cells[0].value, research.cells[0].caption))
+        self.assertEqual('주간 · 1M 토큰당 약 0.27%p, 참고용 · 변화 14%p, 사용 중', mine.spoken)
 
     def test_evidence_says_how_each_rate_was_made(self):
-        mine, work = tv.burn(VIEW).accounts
-        self.assertEqual((('5시간', '창 3개 · 사용률 +240%p ÷ 51.95M 토큰'), ('주간', '창 1개 · 사용률 +14%p ÷ 51.95M 토큰'),
-                          ('장치', '개발 서버, 이 Ubuntu PC'), ('뺀 구간', '토큰 기록 없이 오른 5시간 4%p')), mine.evidence)
+        mine, work, _ = tv.burn(VIEW).accounts
+        self.assertEqual((('주간', '창 1개 · 사용률 +14%p ÷ 51.95M 토큰'),
+                          ('장치', '개발 서버, 이 Ubuntu PC'), ('뺀 구간', '토큰 기록 없이 오른 주간 4%p')), mine.evidence)
         self.assertEqual(('뺀 구간', '요금제가 바뀌기 전 기록'), work.evidence[-1])
 
     def test_weighted_basis_reads_converted_tokens(self):
         model = tv.burn(variant(lambda v: v.update(basis='weighted')))
         self.assertEqual(('환산 1M 토큰당', ' 환산 토큰', '요금 환산'), (model.per, model.word, model.basis.label))
-        five = model.accounts[0].cells[0]
-        self.assertEqual(('5시간 · 환산 1M 토큰당', '100% ≈ 21.65M 환산 토큰'), (five.title, five.caption))
+        rated = model.accounts[2].cells[0]
+        self.assertEqual(('주간 · 환산 1M 토큰당', '100% ≈ 19.23M 환산 토큰'), (rated.title, rated.caption))
         self.assertEqual('Max 20x · 52.30M 환산 토큰', model.accounts[0].detail)
         self.assertTrue(model.notes[0].startswith('이 기간 요금 환산 토큰 84.41M 중 85%'))
         total = tv.burn(variant(lambda v: v.update(basis='total')))
         self.assertEqual(('1M 토큰당', ' 토큰', '전체 토큰'), (total.per, total.word, total.basis.short))
 
-    def test_hidden_quota_drops_its_column_and_lines(self):
+    def test_a_hidden_quota_leaves_nothing_to_work_out(self):
+        # Not even the wait for readings.
         def hide(view):
-            view['burn']['showFiveHour'] = False
-            for account in view['burn']['accounts']:
-                account['fiveHour'] = dict(HIDDEN)
-        model = tv.burn(variant(hide))
-        self.assertEqual(('weekly',), model.shown)
-        self.assertEqual([['weekly'], ['weekly']], [[cell.key for cell in line.cells] for line in model.accounts])
-        self.assertEqual(['주간', '장치'], [label for label, _ in model.accounts[0].evidence])
-
-        # With both turned off there is nothing to work out, not even the wait for readings.
-        def neither(view):
-            hide(view)
             view['burn']['showWeekly'] = False
             view['burn']['historyStartedAt'] = None
-        none = tv.burn(variant(neither))
+        none = tv.burn(variant(hide))
         self.assertEqual(((), (), None), (none.shown, none.accounts, none.waiting))
+
+    def test_a_retired_five_hour_rate_is_not_shown(self):
+        def old(view):
+            view['burn']['showFiveHour'] = True
+            for account in view['burn']['accounts']:
+                account['fiveHour'] = {'state': 'ok', 'ratePerMillion': 4.62}
+        model = tv.burn(variant(old))
+        self.assertEqual(('weekly',), model.shown)
+        self.assertEqual({'weekly'}, {cell.key for line in model.accounts for cell in line.cells})
 
     def test_notes_name_what_no_rate_can_hold(self):
         def apart(view):
@@ -241,12 +235,11 @@ class BurnTests(unittest.TestCase):
             def change(view):
                 view['burn']['historyStartedAt'] = since
                 for account in view['burn']['accounts']:
-                    for key in ('fiveHour', 'weekly'):
-                        account[key].update(state='collecting', ratePerMillion=None)
+                    account['weekly'].update(state='collecting', ratePerMillion=None)
             return variant(change)
         fresh = tv.burn(collecting('2026-10-24T09:40:00+00:00'))
         self.assertEqual('한도 기록을 모으고 있습니다', fresh.waiting.title)
-        self.assertIn('5분마다 계정별 5시간·주간 사용률을 기록합니다.', fresh.waiting.body)
+        self.assertIn('5분마다 계정별 주간 사용률을 기록합니다.', fresh.waiting.body)
         self.assertEqual('기록 시작 · 10월 24일 18:40 · 처리량과 합계는 그 전 기록으로도 바로 보입니다.', fresh.waiting.caption)
         self.assertEqual(((), ()), (fresh.accounts, fresh.notes))
         none = tv.burn(collecting(None))

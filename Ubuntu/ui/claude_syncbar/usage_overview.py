@@ -161,7 +161,7 @@ class UsageAccountRow(Gtk.ListBoxRow):
         self._layout = None
 
     def reflow(self, layout):
-        """'wide' puts quotas beside the account, 'stacked' below it side by side, 'narrow' one under another."""
+        """'wide' puts the quota beside the account, 'stacked' and 'narrow' below it."""
         if layout == self._layout:
             return
         self._layout = layout
@@ -236,7 +236,7 @@ class UsageOverview(Gtk.Box):
         self.refresh.connect('clicked', lambda *_: on_refresh())
         actions = box(False, 8)
         actions.set_valign(Gtk.Align.START)
-        # One click to the best ticked candidate: among those with weekly and five-hour room, the one whose week resets first.
+        # One click to the best ticked candidate: among those with at least 1% of the week left, the one whose week resets first.
         self.smart = Gtk.Button()
         smart_content = box(False, 8)
         smart_content.append(Gtk.Image.new_from_icon_name('emblem-synchronizing-symbolic'))
@@ -244,7 +244,7 @@ class UsageOverview(Gtk.Box):
         smart_content.append(self.smart_text)
         self.smart.set_child(smart_content)
         self.smart.add_css_class('suggested-action')
-        self.smart.set_tooltip_text('스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환합니다. 후보는 계정 관리에서 고릅니다.')
+        self.smart.set_tooltip_text('스마트 전환 후보 중 주간 한도가 1% 이상 남은 계정에서 주간 초기화가 가장 가까운 계정으로 모든 활성 장치를 전환합니다. 후보는 계정 관리에서 고릅니다.')
         self.smart.update_property([Gtk.AccessibleProperty.LABEL], ['스마트 전환'])
         self.smart.connect('clicked', lambda *_: on_smart and on_smart())
         self.smart.set_visible(on_smart is not None)
@@ -300,12 +300,7 @@ class UsageOverview(Gtk.Box):
             title = label(f'{TITLES[key]} 한도', 'usage-column-title muted')
             self.column_boxes.append(title)
             self.column_titles[key] = title
-        if not keys:
-            self.subtitle.set_text('설정에서 표시할 사용량을 켜 주세요.')
-        elif len(keys) == 2:
-            self.subtitle.set_text('계정마다 5시간 한도와 주간 한도가 얼마나 남았는지 비교하세요.')
-        else:
-            self.subtitle.set_text(f'계정마다 {TITLES[keys[0]]} 한도가 얼마나 남았는지 비교하세요.')
+        self.subtitle.set_text('계정마다 주간 한도가 얼마나 남았는지 비교하세요.' if keys else '설정에서 표시할 사용량을 켜 주세요.')
         for row in self.rows.values():
             row.set_quotas(keys)
             row.reflow(self.layout)

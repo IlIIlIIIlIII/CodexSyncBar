@@ -174,7 +174,7 @@ class ManagerDialog(Adw.Dialog):
         self.app.client.submit('snapshot', callback=loaded)
 
     def build_auto_switch(self, settings):
-        group = self.group('자동 전환', '지금 쓰는 계정의 5시간 또는 주간 한도가 0%가 되면, 아래 순서에서 지금 쓸 수 있는 첫 계정으로 모든 활성 장치를 전환합니다. '
+        group = self.group('자동 전환', '지금 쓰는 계정의 주간 한도가 0%가 되면, 아래 순서에서 지금 쓸 수 있는 첫 계정으로 모든 활성 장치를 전환합니다. '
                            'Claude 데스크톱 앱은 다시 시작되며, 우선순위가 더 높은 계정이 다시 쓸 수 있게 되어도 자동으로 돌아가지는 않습니다.')
         enabled = Adw.SwitchRow(title='사용량이 바닥나면 자동 전환', subtitle='5분마다, 10% 이하로 남으면 1분마다 사용량을 확인합니다.')
         enabled.set_active(bool(settings.get('autoSwitchEnabled')))
@@ -444,7 +444,7 @@ class ManagerDialog(Adw.Dialog):
         settings = self.app.snapshot.get('settings') or {}
         group = self.group('표시와 실행')
         switches = {}
-        for key,title,subtitle,default in [('claudeFiveHour','5시간 사용량 표시','계정별 5시간 한도 잔여량을 앱과 상단 바에 표시합니다.',True),('claudeWeekly','주간 사용량 표시','계정별 주간 한도 잔여량을 앱과 상단 바에 표시합니다.',True),('launchAtLogin','로그인 시 자동 시작','창을 열지 않고 백그라운드 서비스를 시작합니다. 상단 바 확장이 켜져 있으면 확장이 대신 시작합니다.',False)]:
+        for key,title,subtitle,default in [('claudeWeekly','주간 사용량 표시','계정별 주간 한도 잔여량을 앱과 상단 바에 표시합니다.',True),('launchAtLogin','로그인 시 자동 시작','창을 열지 않고 백그라운드 서비스를 시작합니다. 상단 바 확장이 켜져 있으면 확장이 대신 시작합니다.',False)]:
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
             row.set_active(settings.get(key, default))
             group.add(row)

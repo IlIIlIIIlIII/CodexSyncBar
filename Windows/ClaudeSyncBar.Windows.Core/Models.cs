@@ -116,8 +116,7 @@ public sealed record UsageSnapshot(
     string Email,
     string Plan,
     UsageWindow? Weekly,
-    DateTimeOffset UpdatedAt,
-    UsageWindow? FiveHour = null)
+    DateTimeOffset UpdatedAt)
 {
     public int? MenuRemainingPercent => Weekly is null
         ? null

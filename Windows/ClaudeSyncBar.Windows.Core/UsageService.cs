@@ -11,7 +11,6 @@ public sealed class UsageService
     private const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
     private const string ProfileUrl = "https://api.anthropic.com/api/oauth/profile";
     private const int WeeklySeconds = 604800;
-    private const int FiveHourSeconds = 18000;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -70,15 +69,14 @@ public sealed class UsageService
         return ToSnapshot(payload, credentials, updatedAt ?? DateTimeOffset.UtcNow);
     }
 
-    // The service names each quota by its period and sends no duration. The
-    // five-hour and seven-day entries are read; model-specific entries are not.
+    // The service names each quota by its period and sends no duration. Only the
+    // seven-day entry is read; other periods and model-specific entries are not.
     private static UsageSnapshot ToSnapshot(UsagePayload payload, ProfileCredentials credentials, DateTimeOffset updatedAt) => new(
         credentials.ProfileId,
         credentials.Email,
         string.IsNullOrWhiteSpace(credentials.Plan) ? "Claude" : credentials.Plan,
         ReadWindow(payload.SevenDay, WeeklySeconds),
-        updatedAt,
-        ReadOptionalWindow(payload.FiveHour, FiveHourSeconds));
+        updatedAt);
 
     private async Task<T> GetAsync<T>(
         string url,
@@ -117,13 +115,6 @@ public sealed class UsageService
         }
     }
 
-    // A malformed five-hour entry hides only that quota; the weekly one still shows.
-    private static UsageWindow? ReadOptionalWindow(JsonElement window, int durationSeconds)
-    {
-        try { return ReadWindow(window, durationSeconds); }
-        catch (ClaudeSyncBarException) { return null; }
-    }
-
     private static UsageWindow? ReadWindow(JsonElement window, int durationSeconds)
     {
         if (window.ValueKind != JsonValueKind.Object
@@ -144,9 +135,6 @@ public sealed class UsageService
 
     private sealed class UsagePayload
     {
-        [JsonPropertyName("five_hour")]
-        public JsonElement FiveHour { get; set; }
-
         [JsonPropertyName("seven_day")]
         public JsonElement SevenDay { get; set; }
     }

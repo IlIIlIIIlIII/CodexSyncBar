@@ -21,11 +21,10 @@ def in_hours(hours):
 
 def snapshot():
     accounts = []
-    for identity, alias, weekly, five_hour in [(1, '개인 계정', 39, 81), (2, '업무 계정', 58, 22)]:
+    for identity, alias, weekly in [(1, '개인 계정', 39), (2, '업무 계정', 58)]:
         accounts.append({'id': identity, 'email': 'p***@example.com' if identity == 1 else 'w***@example.com', 'alias': alias,
                          'isPending': False, 'needsLogin': False,
                          'usage': {'weekly': {'usedPercent': 100-weekly, 'resetsAt': '2026-10-06T00:00:00Z'},
-                                   'fiveHour': {'usedPercent': 100-five_hour, 'resetsAt': '2026-10-03T06:10:00Z'},
                                    'updatedAt': UPDATED}})
     devices = [{'id': key, 'displayName': title, 'kind': kind, 'enabled': True, 'isReachable': True,
                 'currentProfileId': 1, 'currentAccountLabel': '개인 계정', 'observedAt': UPDATED, 'status': 'ready'}
@@ -37,15 +36,14 @@ def snapshot():
         devices += [dict(devices[1], id=f'ssh:qa-{i}', displayName=f'장치 {i} · 아주 긴 개발 서버 이름', currentAccountLabel='다른 계정 · 확인 필요') for i in range(4, 25)]
     if SCENARIO in ('usage', 'usage-overflow', 'usage-empty'):
         accounts = []
-        for identity, alias, email, remaining, reset_day, five_hour, five_hour_reset in [
-            (1, '개인 계정', 'main@example.com', 68, 2.3, 72, 1.7),
-            (2, '업무 계정', 'work@example.com', 24, 4.6, 9, .6),
-            (3, '실험 계정', 'lab@example.com', 5, 5.2, 100, None),
-            (4, '보조 계정', 'backup@example.com', None, None, None, None),
+        for identity, alias, email, remaining, reset_day in [
+            (1, '개인 계정', 'main@example.com', 68, 2.3),
+            (2, '업무 계정', 'work@example.com', 24, 4.6),
+            (3, '실험 계정', 'lab@example.com', 5, 5.2),
+            (4, '보조 계정', 'backup@example.com', None, None),
         ]:
             usage = None if remaining is None else {
                 'weekly': {'usedPercent': 100 - remaining, 'resetsAt': in_hours(reset_day * 24)},
-                'fiveHour': {'usedPercent': 100 - five_hour, 'resetsAt': None if five_hour_reset is None else in_hours(five_hour_reset)},
                 'updatedAt': datetime.now(timezone.utc).isoformat()}
             accounts.append({'id': identity, 'alias': alias, 'email': email, 'plan': 'Max 5x' if identity == 3 else 'Max 20x',
                              'needsLogin': remaining is None, 'isPending': False, 'usage': usage, 'smartCandidate': identity != 3})
@@ -57,10 +55,10 @@ def snapshot():
             accounts = []
     return {'schemaVersion': 1, 'accounts': accounts, 'devices': devices, 'activeProfileId': 1,
             'isBusy': False, 'operation': None, 'configurationRevision': 'visual-fixture-1',
-            'updatedAt': UPDATED, 'error': None, 'settings': {'claudeFiveHour': True, 'claudeWeekly': True, 'autoSwitchEnabled': True, 'autoResumeEnabled': True,
+            'updatedAt': UPDATED, 'error': None, 'settings': {'claudeWeekly': True, 'autoSwitchEnabled': True, 'autoResumeEnabled': True,
                          'autoResumeLast': {'at': UPDATED, 'succeeded': True, 'message': '한도로 멈춘 세션 1개를 이어서 실행했습니다: CodexSyncBar'},
                          'autoSwitchLast': {'at': UPDATED, 'fromProfileId': 2, 'toProfileId': 1, 'succeeded': True,
-                                            'message': '업무 계정의 5시간 한도가 소진되어 개인 계정(으)로 자동 전환했습니다.'}},
+                                            'message': '업무 계정의 주간 한도가 소진되어 개인 계정(으)로 자동 전환했습니다.'}},
             'isDemo': True}
 
 

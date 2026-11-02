@@ -2,56 +2,54 @@ import assert from 'node:assert/strict';
 import {quota, usage, percent, visibleQuotas, panelUsage, subtitle, switchable, switchLocal, smartSwitch, localNotice} from '../../gnome/model.js';
 const now = Date.now();
 const at = hours => new Date(now + hours * 3600000).toISOString();
-const account = (weekly, fiveHour = 72) => ({id: 2, usage: {
-    weekly: {remainingPercent: weekly, resetsAt: at(24)}, fiveHour: {remainingPercent: fiveHour, resetsAt: at(1.5)},
+const account = weekly => ({id: 2, usage: {
+    weekly: {remainingPercent: weekly, resetsAt: at(24)},
     updatedAt: new Date(now).toISOString()}});
-const both = ['fiveHour', 'weekly'];
-const shown = (item, keys = both, time = now, unavailable = false) => usage(item, keys, time, unavailable);
-// Both quotas are read from their own entries, in display order.
-assert.deepEqual(shown(account(68, 40)).quotas.map(item => [item.title, item.value]), [['5시간', '40%'], ['주간', '68%']]);
-assert.equal(shown(account(0)).quotas[1].value, '0%');
-assert.equal(shown(account(null)).quotas[1].value, '—');
-assert.equal(shown(account(NaN)).quotas[1].caption, '정보 없음');
-assert.equal(shown(account(68)).quotas[1].tone, 'healthy');
-assert.equal(shown(account(20)).quotas[1].tone, 'warning');
-assert.equal(shown(account(5)).quotas[1].tone, 'critical');
-assert.match(shown(account(68)).quotas[0].caption, /^\d\d:\d\d 초기화$/);
-assert.match(shown(account(68)).quotas[1].caption, /^\d+월 \d+일 초기화$/);
-// A five-hour window nobody has used yet, and one whose reset time has passed.
-assert.equal(quota({remainingPercent: 100, resetsAt: null}, 'fiveHour', now).caption, '사용 전');
-assert.deepEqual([quota({usedPercent: 90, resetsAt: at(-0.1)}, 'fiveHour', now).value, quota({usedPercent: 90, resetsAt: at(-0.1)}, 'fiveHour', now).caption], ['100%', '초기화됨']);
-// Account-level reasons are said once and mute every quota.
-assert.equal(shown({...account(null, null), needsLogin: true}).status, '재로그인 필요');
+const keys = ['weekly'];
+const shown = (item, time = now, unavailable = false) => usage(item, keys, time, unavailable);
+// The quota is read from its own entry; a retired five-hour entry is not.
+assert.deepEqual(shown({id: 2, usage: {...account(68).usage, fiveHour: {remainingPercent: 40, resetsAt: at(1.5)}}}).quotas.map(item => [item.title, item.value]), [['주간', '68%']]);
+assert.equal(shown(account(0)).quotas[0].value, '0%');
+assert.equal(shown(account(null)).quotas[0].value, '—');
+assert.equal(shown(account(NaN)).quotas[0].caption, '정보 없음');
+assert.equal(shown(account(68)).quotas[0].tone, 'healthy');
+assert.equal(shown(account(20)).quotas[0].tone, 'warning');
+assert.equal(shown(account(5)).quotas[0].tone, 'critical');
+assert.match(shown(account(68)).quotas[0].caption, /^\d+월 \d+일 초기화$/);
+// A week nobody has used yet, and one whose reset time has passed.
+assert.equal(quota({remainingPercent: 100, resetsAt: null}, 'weekly', now).caption, '사용 전');
+assert.deepEqual([quota({usedPercent: 90, resetsAt: at(-0.1)}, 'weekly', now).value, quota({usedPercent: 90, resetsAt: at(-0.1)}, 'weekly', now).caption], ['100%', '초기화됨']);
+// Account-level reasons are said once and mute the quota.
+assert.equal(shown({...account(null), needsLogin: true}).status, '재로그인 필요');
 assert.equal(shown({...account(68), needsLogin: true}).statusTone, 'warning');
-assert.equal(shown(account(68), both, now + 700000).status, '갱신 지연 · 이전 수치');
-assert.ok(shown(account(68), both, now + 700000).quotas.every(item => item.tone === 'muted'));
-assert.equal(shown(account(68), both, now, true).status, '연결 실패 · 이전 수치');
+assert.equal(shown(account(68), now + 700000).status, '갱신 지연 · 이전 수치');
+assert.ok(shown(account(68), now + 700000).quotas.every(item => item.tone === 'muted'));
+assert.equal(shown(account(68), now, true).status, '연결 실패 · 이전 수치');
 assert.equal(shown({id: 3}).status, '아직 조회되지 않음');
 assert.equal(subtitle({settings: {autoSwitchEnabled: true}}), '이 PC · 자동 전환 켜짐');
 assert.equal(subtitle({}), '이 PC');
 // '0%' and '100%' only when exact.
 assert.deepEqual([0, 0.04, 0.2, 0.3, 0.96, 72.4, 99.6, 100, null].map(percent), ['0%', '0.1%', '0.2%', '0.3%', '1%', '72%', '99%', '100%', '—']);
-assert.equal(panelUsage({accounts: [account(0.3, 99.7)], activeProfileId: 2}, now).text, '5시간 99% · 주간 0.3%');
-// Settings choose which quotas are shown.
-assert.deepEqual(visibleQuotas(), both);
-assert.deepEqual(visibleQuotas({claudeFiveHour: false}), ['weekly']);
-assert.deepEqual(visibleQuotas({claudeFiveHour: false, claudeWeekly: false}), []);
+assert.equal(panelUsage({accounts: [account(0.3)], activeProfileId: 2}, now).text, '주간 0.3%');
+// Settings choose whether the quota is shown; the retired five-hour setting changes nothing.
+assert.deepEqual(visibleQuotas(), keys);
+assert.deepEqual(visibleQuotas({claudeFiveHour: true}), keys);
+assert.deepEqual(visibleQuotas({claudeWeekly: false}), []);
 assert.equal(switchable(account(68), {activeProfileId: 2}), false);
 assert.equal(switchable(account(68), {activeProfileId: 1, isBusy: true}), false);
 assert.equal(switchable({...account(68), needsLogin: true}, {activeProfileId: 1}), false);
 assert.equal(switchable(account(68), {activeProfileId: 1}), true);
-const panelSnapshot = {accounts: [{...account(84, 30), id: 1}, account(68)], activeProfileId: 2};
-assert.equal(panelUsage(panelSnapshot, now).text, '5시간 72% · 주간 68%');
-assert.equal(panelUsage({...panelSnapshot, activeProfileId: 1}, now).text, '5시간 30% · 주간 84%');
-assert.equal(panelUsage({...panelSnapshot, activeProfileId: 99}, now).text, '5시간 — · 주간 —');
-assert.equal(panelUsage({...panelSnapshot, accounts: [account(0, 0)]}, now).text, '5시간 0% · 주간 0%');
-assert.equal(panelUsage({...panelSnapshot, accounts: [account(100, 100)]}, now).text, '5시간 100% · 주간 100%');
-assert.equal(panelUsage(panelSnapshot, now, true).text, '5시간 — · 주간 —');
-assert.equal(panelUsage(panelSnapshot, now + 700000).text, '5시간 — · 주간 —');
-assert.equal(panelUsage({...panelSnapshot, accounts: [{...account(68), needsLogin: true}]}, now).text, '5시간 — · 주간 —');
-assert.equal(panelUsage({...panelSnapshot, settings: {claudeFiveHour: false}}, now).text, '주간 68%');
-assert.equal(panelUsage({...panelSnapshot, settings: {claudeWeekly: false}}, now).text, '5시간 72%');
-assert.match(panelUsage(panelSnapshot, now).description, /이 PC 5시간 잔여량 72%, \d\d:\d\d 초기화, 주간 잔여량 68%/);
+const panelSnapshot = {accounts: [{...account(84), id: 1}, account(68)], activeProfileId: 2};
+assert.equal(panelUsage(panelSnapshot, now).text, '주간 68%');
+assert.equal(panelUsage({...panelSnapshot, activeProfileId: 1}, now).text, '주간 84%');
+assert.equal(panelUsage({...panelSnapshot, activeProfileId: 99}, now).text, '주간 —');
+assert.equal(panelUsage({...panelSnapshot, accounts: [account(0)]}, now).text, '주간 0%');
+assert.equal(panelUsage({...panelSnapshot, accounts: [account(100)]}, now).text, '주간 100%');
+assert.equal(panelUsage(panelSnapshot, now, true).text, '주간 —');
+assert.equal(panelUsage(panelSnapshot, now + 700000).text, '주간 —');
+assert.equal(panelUsage({...panelSnapshot, accounts: [{...account(68), needsLogin: true}]}, now).text, '주간 —');
+assert.equal(panelUsage({...panelSnapshot, settings: {claudeWeekly: false}}, now).text, '');
+assert.match(panelUsage(panelSnapshot, now).description, /이 PC 주간 잔여량 68%, \d+월 \d+일 초기화/);
 const calls = [];
 const call = async (method, params) => {
     calls.push([method, params]);

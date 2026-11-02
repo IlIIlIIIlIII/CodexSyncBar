@@ -75,18 +75,18 @@ internal class SettingsFile<T>(WindowsPaths paths, string name, string descripti
 
 /// <summary>
 /// The smart switch: among its candidates (the accounts ticked on the account
-/// list, at first the $200 Max ones) with some of the weekly and more than a
-/// quarter of the five-hour quota left, the one whose week resets first, so
-/// the quota that would lapse soonest is used first.
+/// list, at first the $200 Max ones) with at least 1% of the weekly quota
+/// left, the one whose week resets first, so the quota that would lapse
+/// soonest is used first.
 /// </summary>
 internal static class SmartSwitch
 {
     internal const string Plan = "Max 20x";
-    // An account with 75% or more of its five hours used is passed over.
-    internal const double FiveHourMinimum = 25;
+    // An account with less of its week left than this is passed over.
+    internal const double WeeklyMinimum = 1;
     private static readonly string[] Days = ["일", "월", "화", "수", "목", "금", "토"];
 
-    internal sealed record Choice(AccountView Account, double FiveHour, double Weekly, DateTimeOffset? WeeklyReset);
+    internal sealed record Choice(AccountView Account, double Weekly, DateTimeOffset? WeeklyReset);
 
     /// <summary>Whether the smart switch may choose an account: as the user ticked it, else only on the $200 Max plan.</summary>
     internal static bool IsCandidate(string? plan, bool? chosen) => chosen ?? plan == Plan;
@@ -95,17 +95,14 @@ internal static class SmartSwitch
     internal static Choice? Choose(IEnumerable<AccountView> accounts, DateTimeOffset now) => accounts
         .Where(account => account.SmartCandidate && !account.IsPending && !account.NeedsLogin)
         .Select(account => (Account: account,
-            FiveHour: AutoSwitchPolicy.TrustedRemaining(account.Usage?.FiveHour, account.Usage, now),
             Weekly: AutoSwitchPolicy.TrustedRemaining(account.Usage?.Weekly, account.Usage, now),
             // A week past its reset is whole again, but when it next resets is not known until it is used.
             Reset: account.Usage?.Weekly?.ResetsAt is { } reset && reset > now ? reset : (DateTimeOffset?)null))
-        // Any of the week is enough, as for the automatic switch; the five hours need more than a quarter left.
-        .Where(item => item.FiveHour > FiveHourMinimum && item.Weekly is > 0)
-        // The soonest weekly reset first, an unknown one last; then the most weekly left, the most five-hour left, the priority order.
-        .Select((item, order) => (item.Account, FiveHour: item.FiveHour!.Value, Weekly: item.Weekly!.Value, item.Reset, Order: order))
-        .OrderBy(item => item.Reset ?? DateTimeOffset.MaxValue).ThenByDescending(item => item.Weekly)
-        .ThenByDescending(item => item.FiveHour).ThenBy(item => item.Order)
-        .Select(item => new Choice(item.Account, item.FiveHour, item.Weekly, item.Reset))
+        .Where(item => item.Weekly >= WeeklyMinimum)
+        // The soonest weekly reset first, an unknown one last; then the most weekly left, the priority order.
+        .Select((item, order) => (item.Account, Weekly: item.Weekly!.Value, item.Reset, Order: order))
+        .OrderBy(item => item.Reset ?? DateTimeOffset.MaxValue).ThenByDescending(item => item.Weekly).ThenBy(item => item.Order)
+        .Select(item => new Choice(item.Account, item.Weekly, item.Reset))
         .FirstOrDefault();
 
     /// <summary>"10.22 (목) 10:00" in local time, as the apps write a weekly reset.</summary>
@@ -116,10 +113,10 @@ internal static class SmartSwitch
     }
 
     /// <summary>Why the choice was made, as the confirmation shows it.</summary>
-    internal static string Reason(string weekly, string fiveHour, DateTimeOffset? reset) =>
-        $"주간 {weekly} · 5시간 {fiveHour} 남음" + (reset is { } next ? $" · 주간 초기화 {When(next)}" : "");
+    internal static string Reason(string weekly, DateTimeOffset? reset) =>
+        $"주간 {weekly} 남음" + (reset is { } next ? $" · 주간 초기화 {When(next)}" : "");
 
-    internal const string NoneMessage = "스마트 전환 후보 중 주간 한도가 남고 5시간 한도를 75% 미만 쓴 계정이 없습니다.";
+    internal const string NoneMessage = "스마트 전환 후보 중 주간 한도가 1% 이상 남은 계정이 없습니다.";
     internal const string NoCandidateMessage = "스마트 전환 후보로 고른 계정이 없습니다. 계정 목록에서 후보를 골라 주세요.";
 }
 
@@ -143,25 +140,12 @@ internal static class AutoSwitchPolicy
     private static bool Trusted(DashboardUsage? usage, DateTimeOffset now) =>
         usage is not null && usage.Error is null && usage.UpdatedAt > now - FreshFor;
 
-    /// <summary>The quota the account has used up, or null when it has some left or this is not known well enough.</summary>
-    internal static string? UsedUp(DashboardUsage? usage, DateTimeOffset now)
-    {
-        if (!Trusted(usage, now)) return null;
-        if (Remaining(usage!.FiveHour, now) is { } fiveHour && Empty(fiveHour)) return "5시간";
-        if (Remaining(usage.Weekly, now) is { } weekly && Empty(weekly)) return "주간";
-        return null;
-    }
-
-    internal static double? Lowest(DashboardUsage? usage, DateTimeOffset now)
-    {
-        if (usage is null) return null;
-        var known = new[] { Remaining(usage.FiveHour, now), Remaining(usage.Weekly, now) }.OfType<double>().ToArray();
-        return known.Length == 0 ? null : known.Min();
-    }
+    /// <summary>Whether the account has used up its week; false when some is left or this is not known well enough.</summary>
+    internal static bool UsedUp(DashboardUsage? usage, DateTimeOffset now) =>
+        Trusted(usage, now) && Remaining(usage!.Weekly, now) is { } weekly && Empty(weekly);
 
     internal static bool HasRoom(DashboardUsage? usage, DateTimeOffset now) =>
-        Trusted(usage, now) && Remaining(usage!.Weekly, now) is { } weekly && !Empty(weekly)
-        && (Remaining(usage.FiveHour, now) is not { } fiveHour || !Empty(fiveHour));
+        Trusted(usage, now) && Remaining(usage!.Weekly, now) is { } weekly && !Empty(weekly);
 
     /// <summary>The first account in priority order, other than the one in use, that can be used now.</summary>
     internal static int? NextAccount(IEnumerable<AccountView> accounts, int active, DateTimeOffset now) =>

@@ -31,9 +31,9 @@ public sealed class TokenRateTests : IDisposable
 
     private static TokenDeviceInput Local(IEnumerable<long[]> rows) => new("local", "이 PC", "local", true, null, Summary(rows));
 
-    // One reading every five minutes from 'from' to the end, the five-hour use given by the reading's index.
-    private static List<QuotaHistoryEntry> Readings(DateTimeOffset from, Func<int, double?> fiveHour, Func<int, DateTimeOffset?>? reset = null,
-        Func<int, int?>? holder = null, int profileId = 1, Func<int, double?>? weekly = null, Func<int, string?>? plan = null)
+    // One reading every five minutes from 'from' to the end, the weekly use given by the reading's index.
+    private static List<QuotaHistoryEntry> Readings(DateTimeOffset from, Func<int, double?> weekly, Func<int, DateTimeOffset?>? reset = null,
+        Func<int, int?>? holder = null, int profileId = 1, Func<int, string?>? plan = null)
     {
         var entries = new List<QuotaHistoryEntry>();
         var index = 0;
@@ -43,7 +43,7 @@ public sealed class TokenRateTests : IDisposable
             entries.Add(new QuotaHistoryEntry
             {
                 Kind = QuotaHistoryEntry.Poll, At = at,
-                Samples = [new QuotaSample(profileId, at, plan?.Invoke(i) ?? "Max 20x", fiveHour(i), reset?.Invoke(i) ?? End.AddHours(3), weekly?.Invoke(i) ?? 10, End.AddDays(3))],
+                Samples = [new QuotaSample(profileId, at, plan?.Invoke(i) ?? "Max 20x", weekly(i), reset?.Invoke(i) ?? End.AddHours(3))],
                 Devices = [new DeviceAccountObservation("local", holder is null ? profileId : holder(i), at)],
             });
         }
@@ -59,9 +59,9 @@ public sealed class TokenRateTests : IDisposable
     }
 
     private static TokenPeriodView Calculate(IReadOnlyList<TokenDeviceInput> devices, IReadOnlyList<QuotaHistoryEntry> history,
-        int hours = 2, string basis = TokenBurnBasis.Uncached, bool fiveHour = true, bool weekly = true) =>
+        int hours = 2, string basis = TokenBurnBasis.Uncached, bool weekly = true) =>
         TokenRateCalculator.Calculate(new TokenRateRequest(End, hours, basis, devices, history, history.FirstOrDefault()?.At,
-            [new TokenAccountInput(1, "업무 계정", "Max 20x"), new TokenAccountInput(2, "개인 계정", "Max 5x")], 1, fiveHour, weekly));
+            [new TokenAccountInput(1, "업무 계정", "Max 20x"), new TokenAccountInput(2, "개인 계정", "Max 5x")], 1, weekly));
 
     [Fact]
     public void ThroughputDividesByTheHoursSinceTheFirstRecordWhenThePeriodIsLonger()
@@ -101,10 +101,10 @@ public sealed class TokenRateTests : IDisposable
 
         var account = Assert.Single(view.Burn.Accounts);
         Assert.True(account.IsCurrent);
-        Assert.Equal("ok", account.FiveHour.State);
-        Assert.Equal(2, account.FiveHour.RatePerMillion!.Value, 6);
-        Assert.Equal(1, account.FiveHour.Runs);
-        Assert.Equal(1, account.FiveHour.Windows);
+        Assert.Equal("ok", account.Weekly.State);
+        Assert.Equal(2, account.Weekly.RatePerMillion!.Value, 6);
+        Assert.Equal(1, account.Weekly.Runs);
+        Assert.Equal(1, account.Weekly.Windows);
         Assert.Equal(1, view.Burn.AttributedTokens / view.Burn.BasisTokens, 6);
         Assert.Equal(["개인 계정"], view.Burn.IdleAccounts);
     }
@@ -120,12 +120,12 @@ public sealed class TokenRateTests : IDisposable
             .Where((_, i) => i is not (12 or 13 or 14)).ToList();
         var view = Calculate([Local(Steady(from))], readings);
 
-        var five = Assert.Single(view.Burn.Accounts).FiveHour;
+        var week = Assert.Single(view.Burn.Accounts).Weekly;
         // Of the 21 pairs left, the reset, the gap and both sides of the drop leave 17.
-        Assert.Equal(2, five.RatePerMillion!.Value, 6);
-        Assert.Equal(2, five.Windows);
-        Assert.True(five.Runs >= 3);
-        Assert.Equal(2 * 17, five.DeltaPercent, 6);
+        Assert.Equal(2, week.RatePerMillion!.Value, 6);
+        Assert.Equal(2, week.Windows);
+        Assert.True(week.Runs >= 3);
+        Assert.Equal(2 * 17, week.DeltaPercent, 6);
     }
 
     [Fact]
@@ -135,9 +135,9 @@ public sealed class TokenRateTests : IDisposable
         // For half an hour the app could not tell which account this device used.
         var view = Calculate([Local(Steady(from))], Readings(from, i => 10 + i * 2.0, holder: i => i is >= 6 and < 12 ? null : 1));
 
-        var five = Assert.Single(view.Burn.Accounts).FiveHour;
-        Assert.Equal(2, five.RatePerMillion!.Value, 6);
-        Assert.Equal(2, five.Runs);
+        var week = Assert.Single(view.Burn.Accounts).Weekly;
+        Assert.Equal(2, week.RatePerMillion!.Value, 6);
+        Assert.Equal(2, week.Runs);
         Assert.InRange(view.Burn.AttributedTokens / view.Burn.BasisTokens, 0.7, 0.8);
     }
 
@@ -149,9 +149,9 @@ public sealed class TokenRateTests : IDisposable
         var rows = Steady(from).Where(row => row[0] < MinuteOf(from.AddHours(1)));
         var view = Calculate([Local(rows)], Readings(from, i => i <= 12 ? 10 + i * 2.0 : i == 20 ? 39 : i > 20 ? 39 : 34));
 
-        var five = Assert.Single(view.Burn.Accounts).FiveHour;
-        Assert.Equal(5, five.UntrackedPercent, 6);
-        Assert.Equal(2, five.RatePerMillion!.Value, 6);
+        var week = Assert.Single(view.Burn.Accounts).Weekly;
+        Assert.Equal(5, week.UntrackedPercent, 6);
+        Assert.Equal(2, week.RatePerMillion!.Value, 6);
     }
 
     [Fact]
@@ -162,9 +162,9 @@ public sealed class TokenRateTests : IDisposable
         var rows = Steady(from).Where(row => row[0] < MinuteOf(from.AddMinutes(60)));
         var view = Calculate([Local(rows)], Readings(from, i => i <= 12 ? 10 + i * 2.0 : i == 13 ? 36 : 36));
 
-        var five = Assert.Single(view.Burn.Accounts).FiveHour;
-        Assert.Equal(0, five.UntrackedPercent);
-        Assert.Equal(26, five.DeltaPercent, 6);
+        var week = Assert.Single(view.Burn.Accounts).Weekly;
+        Assert.Equal(0, week.UntrackedPercent);
+        Assert.Equal(26, week.DeltaPercent, 6);
     }
 
     [Fact]
@@ -175,9 +175,9 @@ public sealed class TokenRateTests : IDisposable
         history.Add(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Anchor, At = from.AddMinutes(32), ProfileId = 1 });
         var view = Calculate([Local(Steady(from))], history.OrderBy(entry => entry.At).ToList());
 
-        var five = Assert.Single(view.Burn.Accounts).FiveHour;
-        Assert.Equal(2, five.Runs);
-        Assert.Equal(2, five.RatePerMillion!.Value, 6);
+        var week = Assert.Single(view.Burn.Accounts).Weekly;
+        Assert.Equal(2, week.Runs);
+        Assert.Equal(2, week.RatePerMillion!.Value, 6);
     }
 
     [Fact]
@@ -186,24 +186,23 @@ public sealed class TokenRateTests : IDisposable
         var from = End.AddHours(-2);
         var view = Calculate([Local(Steady(from))], Readings(from, i => i < 12 ? 10 + i * 8.0 : i * 2.0, plan: i => i < 12 ? "Max 5x" : "Max 20x"));
 
-        var five = Assert.Single(view.Burn.Accounts).FiveHour;
-        Assert.True(five.PlanChanged);
-        Assert.Equal(2, five.RatePerMillion!.Value, 6);
+        var week = Assert.Single(view.Burn.Accounts).Weekly;
+        Assert.True(week.PlanChanged);
+        Assert.Equal(2, week.RatePerMillion!.Value, 6);
     }
 
     [Fact]
     public void SmallOrCoarseChangesAreNotShownAsARate()
     {
         var from = End.AddHours(-1);
-        var view = Calculate([Local(Steady(from))], Readings(from, i => i < 6 ? 10 : 12, weekly: i => i < 3 ? 10 : i < 9 ? 11 : 15), hours: 1);
-
-        var account = Assert.Single(view.Burn.Accounts);
-        Assert.Equal("collecting", account.FiveHour.State);
-        Assert.Null(account.FiveHour.RatePerMillion);
-        Assert.Equal(2, account.FiveHour.DeltaPercent);
-        // Five points in one run of whole-percent readings: one point of rounding in five.
-        Assert.Equal("ok", account.Weekly.State);
-        var rough = Calculate([Local(Steady(from))], Readings(from, i => 10, weekly: i => i < 3 ? 10 : i == 3 ? 12 : i < 6 ? 13 : i == 6 ? 0 : 1), hours: 1)
+        var small = Assert.Single(Calculate([Local(Steady(from))], Readings(from, i => i < 6 ? 10 : 12), hours: 1).Burn.Accounts).Weekly;
+        Assert.Equal("collecting", small.State);
+        Assert.Null(small.RatePerMillion);
+        Assert.Equal(2, small.DeltaPercent);
+        // Five points in one run of whole-percent readings: one point of rounding in week.
+        var whole = Calculate([Local(Steady(from))], Readings(from, i => i < 3 ? 10 : i < 9 ? 11 : 15), hours: 1).Burn.Accounts.Single().Weekly;
+        Assert.Equal("ok", whole.State);
+        var rough = Calculate([Local(Steady(from))], Readings(from, i => i < 3 ? 10 : i == 3 ? 12 : i < 6 ? 13 : i == 6 ? 0 : 1), hours: 1)
             .Burn.Accounts.Single().Weekly;
         Assert.Equal("low", rough.State);
     }
@@ -212,9 +211,9 @@ public sealed class TokenRateTests : IDisposable
     public void AHiddenQuotaIsNotWorkedOut()
     {
         var from = End.AddHours(-2);
-        var account = Calculate([Local(Steady(from))], Readings(from, i => 10 + i * 2.0), fiveHour: false).Burn.Accounts.Single();
-        Assert.Equal("hidden", account.FiveHour.State);
-        Assert.Null(account.FiveHour.RatePerMillion);
+        var account = Calculate([Local(Steady(from))], Readings(from, i => 10 + i * 2.0), weekly: false).Burn.Accounts.Single();
+        Assert.Equal("hidden", account.Weekly.State);
+        Assert.Null(account.Weekly.RatePerMillion);
     }
 
     [Fact]
@@ -238,9 +237,9 @@ public sealed class TokenRateTests : IDisposable
     {
         var from = End.AddHours(-2);
         var history = Readings(from, i => 10 + i * 2.0);
-        var uncached = Calculate([Local(Steady(from))], history).Burn.Accounts.Single().FiveHour.RatePerMillion!.Value;
-        var total = Calculate([Local(Steady(from))], history, basis: TokenBurnBasis.Total).Burn.Accounts.Single().FiveHour.RatePerMillion!.Value;
-        var weighted = Calculate([Local(Steady(from))], history, basis: TokenBurnBasis.Weighted).Burn.Accounts.Single().FiveHour.RatePerMillion!.Value;
+        var uncached = Calculate([Local(Steady(from))], history).Burn.Accounts.Single().Weekly.RatePerMillion!.Value;
+        var total = Calculate([Local(Steady(from))], history, basis: TokenBurnBasis.Total).Burn.Accounts.Single().Weekly.RatePerMillion!.Value;
+        var weighted = Calculate([Local(Steady(from))], history, basis: TokenBurnBasis.Weighted).Burn.Accounts.Single().Weekly.RatePerMillion!.Value;
 
         Assert.Equal(2, uncached, 6);
         Assert.Equal(2 / 21d, total, 6);
@@ -258,7 +257,7 @@ public sealed class TokenRateTests : IDisposable
         var view = Calculate([Local(Steady(from)), new TokenDeviceInput("ssh:dev", "개발 서버", "ssh", false, "사용량 수집을 완료하지 못했습니다.", null)],
             history.OrderBy(entry => entry.At).ToList());
 
-        Assert.Equal("collecting", view.Burn.Accounts.Single().FiveHour.State);
+        Assert.Equal("collecting", view.Burn.Accounts.Single().Weekly.State);
         var device = view.Devices.Single(device => device.Id == "ssh:dev");
         Assert.False(device.HasMinutes);
         Assert.Equal("사용량 수집을 완료하지 못했습니다.", device.Error);
@@ -273,14 +272,14 @@ public sealed class TokenRateTests : IDisposable
         history.Add(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Poll, At = from.AddMinutes(-1), Devices = [new("ssh:build", null, from.AddMinutes(-1), Unregistered: true)] });
         var view = Calculate([Local(Steady(from)), server], history.OrderBy(entry => entry.At).ToList());
 
-        var five = view.Burn.Accounts.Single().FiveHour;
-        Assert.Equal("ok", five.State);
-        Assert.Equal(2, five.RatePerMillion!.Value, 6);
+        var week = view.Burn.Accounts.Single().Weekly;
+        Assert.Equal("ok", week.State);
+        Assert.Equal(2, week.RatePerMillion!.Value, 6);
         Assert.Equal(view.Burn.BasisTokens / 2, view.Burn.UnregisteredTokens, 6);
 
         // Not known at all, the same device keeps every stretch out.
         history[^1] = history[^1] with { Devices = [new("ssh:build", null, from.AddMinutes(-1))] };
-        Assert.Equal("collecting", Calculate([Local(Steady(from)), server], history.OrderBy(entry => entry.At).ToList()).Burn.Accounts.Single().FiveHour.State);
+        Assert.Equal("collecting", Calculate([Local(Steady(from)), server], history.OrderBy(entry => entry.At).ToList()).Burn.Accounts.Single().Weekly.State);
     }
 
     [Fact]
@@ -294,26 +293,26 @@ public sealed class TokenRateTests : IDisposable
         summary = new DeviceTokenUsageSummary { SchemaVersion = 7, Models = ["claude-opus-5-5", "made-up-model"], Tiers = ["default"], Minutes = summary.Minutes };
         var view = Calculate([new TokenDeviceInput("local", "이 PC", "local", true, null, summary)], Readings(from, i => 10 + i * 2.0), basis: TokenBurnBasis.Weighted);
 
-        var five = view.Burn.Accounts.Single().FiveHour;
-        Assert.Equal(12 * 2, five.DeltaPercent);
-        Assert.Equal(0, five.UntrackedPercent);
+        var week = view.Burn.Accounts.Single().Weekly;
+        Assert.Equal(12 * 2, week.DeltaPercent);
+        Assert.Equal(0, week.UntrackedPercent);
         Assert.Equal(12 * 21_000_000, view.Burn.UnpricedTokens);
-        Assert.Equal(2 / 2.625, five.RatePerMillion!.Value, 6);
+        Assert.Equal(2 / 2.625, week.RatePerMillion!.Value, 6);
     }
 
     [Fact]
     public void IdleStretchesAreNeitherRunsNorWindows()
     {
         var from = End.AddHours(-3);
-        // An hour of use in one five-hour window, then two quiet hours with an unused window and a gap in the readings.
+        // An hour of use in one window, then two quiet hours with an unused window and a gap in the readings.
         var rows = Steady(from).Where(row => row[0] < MinuteOf(from.AddHours(1)));
         var readings = Readings(from, i => i <= 12 ? 10 + i * 2.0 : i < 24 ? 34 : 0,
             reset: i => i < 24 ? End.AddHours(2) : null).Where((_, i) => i is not (30 or 31 or 32)).ToList();
-        var five = Calculate([Local(rows)], readings, hours: 3).Burn.Accounts.Single().FiveHour;
+        var week = Calculate([Local(rows)], readings, hours: 3).Burn.Accounts.Single().Weekly;
 
-        Assert.Equal(1, five.Runs);
-        Assert.Equal(1, five.Windows);
-        Assert.Equal("ok", five.State);
+        Assert.Equal(1, week.Runs);
+        Assert.Equal(1, week.Windows);
+        Assert.Equal("ok", week.State);
     }
 
     [Fact]
@@ -337,17 +336,31 @@ public sealed class TokenRateTests : IDisposable
         store.Append(new QuotaHistoryEntry
         {
             Kind = QuotaHistoryEntry.Poll, At = End.AddMinutes(-5),
-            Samples = [new QuotaSample(1, End.AddMinutes(-5), "Max 20x", 12.5, End.AddHours(2), 40, End.AddDays(3))],
+            Samples = [new QuotaSample(1, End.AddMinutes(-5), "Max 20x", 40, End.AddDays(3))],
             Devices = [new("local", 1, End.AddMinutes(-5))],
         });
         Assert.DoesNotContain("\"switch\"", File.ReadAllText(store.FilePath));
         File.AppendAllText(store.FilePath, "not json\n");
 
         var poll = Assert.Single(store.Read(DateTimeOffset.MinValue));
-        Assert.Equal(12.5, poll.Samples!.Single().FiveHourUsed);
+        Assert.Equal(40, poll.Samples!.Single().WeeklyUsed);
         Assert.Equal(End.AddMinutes(-5), store.FirstSampledAt());
         store.Append(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Anchor, At = End, ProfileId = 1 });
         Assert.Equal(2, store.Read(DateTimeOffset.MinValue).Count);
         Assert.Empty(store.Read(End.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void LinesWrittenWithTheRetiredFiveHourFieldsStillRead()
+    {
+        var store = new QuotaHistoryStore(new WindowsPaths(Path.Combine(_root, "home"), Path.Combine(_root, "local")));
+        store.Append(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Anchor, At = End.AddHours(-1), ProfileId = 1 });
+        File.AppendAllText(store.FilePath, $$"""
+            {"Kind":"poll","At":"{{End:O}}","Samples":[{"ProfileId":1,"SampledAt":"{{End:O}}","Plan":"Max 20x","FiveHourUsed":12.5,"FiveHourResetsAt":"{{End.AddHours(2):O}}","WeeklyUsed":40,"WeeklyResetsAt":"{{End.AddDays(3):O}}"}]}
+            """ + "\n");
+
+        var sample = store.Read(DateTimeOffset.MinValue).Single(entry => entry.Kind == QuotaHistoryEntry.Poll).Samples!.Single();
+        Assert.Equal(40, sample.WeeklyUsed);
+        Assert.Equal(End.AddDays(3), sample.WeeklyResetsAt);
     }
 }

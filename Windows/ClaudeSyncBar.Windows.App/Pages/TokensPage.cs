@@ -12,8 +12,8 @@ namespace ClaudeSyncBar.App.Pages;
 
 /// <summary>
 /// Tokens in Claude Code's session logs on each device over a chosen period: how many an hour, what the
-/// prompts and outputs are made of, how far a million of them moved each account's five-hour and weekly
-/// use, and the totals priced at API rates as an estimate. The logs are read when the page opens and on
+/// prompts and outputs are made of, how far a million of them moved each account's weekly use, and the
+/// totals priced at API rates as an estimate. The logs are read when the page opens and on
 /// request; another period or basis is cut from that reading.
 /// </summary>
 public sealed class TokensPage : SyncPage
@@ -314,20 +314,18 @@ public sealed class TokensPage : SyncPage
     private Border? Burn(JsonObject view)
     {
         var burn = view["burn"] as JsonObject;
-        // Settings › 표시 decides which quotas show; with both off there is nothing to work out.
-        var fiveShown = burn?["showFiveHour"] is not JsonValue five || QuotaFormat.Flag(five);
-        var weekShown = burn?["showWeekly"] is not JsonValue week || QuotaFormat.Flag(week);
-        if (!fiveShown && !weekShown) return null;
+        // Settings › 표시 decides whether the quota shows; off, there is nothing to work out.
+        if (burn?["showWeekly"] is JsonValue shown && !QuotaFormat.Flag(shown)) return null;
         var basis = Bases.FirstOrDefault(item => item.Id == Basis);
         if (basis.Id is null) basis = Bases[0];
         var per = basis.Id == TokenBurnBasis.Weighted ? "환산 1M 토큰당" : "1M 토큰당";
         var word = basis.Id == TokenBurnBasis.Weighted ? " 환산 토큰" : " 토큰";
         var head = CardHead("1M 토큰당 한도 소모", null, Ui.Stack(8, true, Centered(Ui.Caption("기준", wrap: false)), BasisPicker(basis.Label)));
         var body = Ui.Stack(12, false, head,
-            Ui.Caption("고른 기간에 계정의 5시간·주간 사용률이 오른 만큼을 그동안 그 계정으로 쓴 토큰으로 나눈 평균이에요. 요금제마다 1%의 크기가 달라 계정별로 보여 줘요."));
+            Ui.Caption("고른 기간에 계정의 주간 사용률이 오른 만큼을 그동안 그 계정으로 쓴 토큰으로 나눈 평균이에요. 요금제마다 1%의 크기가 달라 계정별로 보여 줘요."));
 
         var accounts = (burn?["accounts"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
-        var rated = accounts.Any(account => QuotaState(account["fiveHour"]) is "ok" or "low" || QuotaState(account["weekly"]) is "ok" or "low");
+        var rated = accounts.Any(account => QuotaState(account["weekly"]) is "ok" or "low");
         var historyStart = QuotaFormat.Time(burn?["historyStartedAt"]);
         if (!rated && (historyStart is null || historyStart > QuotaFormat.Time(view["startedAt"])))
         {
@@ -337,8 +335,7 @@ public sealed class TokensPage : SyncPage
 
         if (Wide && accounts.Count > 0)
         {
-            var heads = RateColumns(Ui.Caption("계정", wrap: false), fiveShown ? Ui.Caption("5시간 · " + per, wrap: false) : null,
-                weekShown ? Ui.Caption("주간 · " + per, wrap: false) : null, new Grid());
+            var heads = RateColumns(Ui.Caption("계정", wrap: false), Ui.Caption("주간 · " + per, wrap: false), new Grid());
             heads.Margin = new Thickness(17, 0, 17, -6);
             body.Children.Add(heads);
         }
@@ -347,7 +344,7 @@ public sealed class TokensPage : SyncPage
         AutomationProperties.SetName(rows, "계정별 한도 소모");
         var current = accounts.FirstOrDefault(account => QuotaFormat.Flag(account["isCurrent"]));
         if (!_openedCurrent && AppState.Int(current?["profileId"]) is { } open) { OpenAccounts.Add(open); _openedCurrent = true; }
-        foreach (var account in accounts) rows.Children.Add(Account(account, per, word, fiveShown, weekShown));
+        foreach (var account in accounts) rows.Children.Add(Account(account, per, word));
         body.Children.Add(rows);
 
         var basisTokens = QuotaFormat.Number(burn?["basisTokens"]) ?? 0;
@@ -423,13 +420,13 @@ public sealed class TokensPage : SyncPage
             Child = Ui.Glyph(Glyphs.History, 18, "SyncBarGlyphMuted"), VerticalAlignment = VerticalAlignment.Top,
         };
         var text = Ui.Stack(4, false, Ui.Text("한도 기록을 모으고 있어요", strong: true),
-            Ui.Text("앱이 켜져 있는 동안 5분마다 계정별 5시간·주간 사용률을 기록해요. 토큰을 쓰는 동안 기록이 쌓이면 보통 몇 시간 안에 첫 값이 나와요."),
+            Ui.Text("앱이 켜져 있는 동안 5분마다 계정별 주간 사용률을 기록해요. 토큰을 쓰는 동안 사용률이 3%p 오르면 첫 값이 나와요."),
             Ui.Caption(since is { } at ? $"기록 시작 · {at.ToLocalTime():M월 d일 HH:mm} · 처리량과 합계는 그 전 기록으로도 바로 보여요." : "아직 기록이 없어요 · 처리량과 합계는 지난 기록으로 바로 보여요."));
         return Ui.Stack(16, true, icon, text);
     }
 
-    // The account, its two rates and the chevron, on one line when wide and stacked when narrow.
-    private UIElement Account(JsonObject account, string per, string word, bool fiveShown, bool weekShown)
+    // The account, its rate and the chevron, on one line when wide and stacked when narrow.
+    private UIElement Account(JsonObject account, string per, string word)
     {
         var id = AppState.Int(account["profileId"]) ?? 0;
         var name = AppState.Str(account["name"]) ?? "계정";
@@ -440,32 +437,21 @@ public sealed class TokensPage : SyncPage
         var identity = Ui.Identity(new JsonObject { ["id"] = id, ["alias"] = name, ["email"] = name }, 32, detail,
             current ? Ui.Pill("사용 중", Ui.PillKind.Accent, Glyphs.Check) : null);
         var toggle = Ui.ExpandButton(open, name + " 근거", () => { if (!OpenAccounts.Remove(id)) OpenAccounts.Add(id); Redraw(); });
-        var five = fiveShown ? Rate(account["fiveHour"] as JsonObject, "5시간 · " + per, word) : null;
-        var week = weekShown ? Rate(account["weekly"] as JsonObject, "주간 · " + per, word) : null;
+        var week = Rate(account["weekly"] as JsonObject, "주간 · " + per, word);
 
-        FrameworkElement line;
-        if (Wide) line = RateColumns(identity, five, week, toggle);
-        else
-        {
-            var top = Ui.Columns(12, 0, identity, toggle);
-            var stack = Ui.Stack(6, false, top);
-            foreach (var rate in new[] { five, week }.OfType<FrameworkElement>()) stack.Children.Add(rate);
-
-            line = stack;
-        }
+        FrameworkElement line = Wide ? RateColumns(identity, week, toggle) : Ui.Stack(6, false, Ui.Columns(12, 0, identity, toggle), week);
 
         var header = Ui.Row(line, current);
         AutomationProperties.SetName(header, name);
-        return open ? Ui.Expander(header, Evidence(account, word, fiveShown, weekShown)) : header;
+        return open ? Ui.Expander(header, Evidence(account, word)) : header;
     }
 
-    private Grid RateColumns(UIElement identity, UIElement? five, UIElement? week, UIElement end)
+    private Grid RateColumns(UIElement identity, UIElement week, UIElement end)
     {
         var grid = new Grid { ColumnSpacing = 20 };
-        var parts = new (UIElement? Part, GridLength Width)[]
+        var parts = new (UIElement Part, GridLength Width)[]
         {
-            (identity, new GridLength(1.25, GridUnitType.Star)), (five, new GridLength(1, GridUnitType.Star)),
-            (week, new GridLength(1, GridUnitType.Star)), (end, new GridLength(32)),
+            (identity, new GridLength(1.25, GridUnitType.Star)), (week, new GridLength(1, GridUnitType.Star)), (end, new GridLength(32)),
         };
         foreach (var (part, width) in parts)
         {
@@ -517,21 +503,17 @@ public sealed class TokensPage : SyncPage
         return element;
     }
 
-    private static List<UIElement> Evidence(JsonObject account, string word, bool fiveShown, bool weekShown)
+    private static List<UIElement> Evidence(JsonObject account, string word)
     {
         var rows = new List<UIElement>();
-        string Line(JsonObject? quota) =>
-            $"창 {AppState.Int(quota?["windows"]) ?? 0}개 · 사용률 +{Points(QuotaFormat.Number(quota?["deltaPercent"]) ?? 0)}%p ÷ {Tokens(QuotaFormat.Number(quota?["tokens"]) ?? 0)}{word}";
-        var five = account["fiveHour"] as JsonObject;
         var week = account["weekly"] as JsonObject;
-        if (fiveShown) rows.Add(Ui.SubRow(null, Labelled("5시간", Line(five)), 64));
-        if (weekShown) rows.Add(Ui.SubRow(null, Labelled("주간", Line(week)), 64));
+        rows.Add(Ui.SubRow(null, Labelled("주간",
+            $"창 {AppState.Int(week?["windows"]) ?? 0}개 · 사용률 +{Points(QuotaFormat.Number(week?["deltaPercent"]) ?? 0)}%p ÷ {Tokens(QuotaFormat.Number(week?["tokens"]) ?? 0)}{word}"), 64));
         var devices = (account["devices"] as JsonArray)?.Select(AppState.Str).OfType<string>().ToList() ?? [];
         if (devices.Count > 0) rows.Add(Ui.SubRow(null, Labelled("장치", string.Join(", ", devices)), 64));
         var cut = new List<string>();
-        foreach (var (title, quota, shown) in new[] { ("5시간", five, fiveShown), ("주간", week, weekShown) })
-            if (shown && QuotaFormat.Number(quota?["untrackedPercent"]) is > 0 and var untracked) cut.Add($"토큰 기록 없이 오른 {title} {Points(untracked)}%p");
-        if (QuotaFormat.Flag(five?["planChanged"]) || QuotaFormat.Flag(week?["planChanged"])) cut.Add("요금제가 바뀌기 전 기록");
+        if (QuotaFormat.Number(week?["untrackedPercent"]) is > 0 and var untracked) cut.Add($"토큰 기록 없이 오른 주간 {Points(untracked)}%p");
+        if (QuotaFormat.Flag(week?["planChanged"])) cut.Add("요금제가 바뀌기 전 기록");
         if (cut.Count > 0) rows.Add(Ui.SubRow(null, Labelled("뺀 구간", string.Join(" · ", cut)), 64));
         return rows;
     }

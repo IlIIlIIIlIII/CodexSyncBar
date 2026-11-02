@@ -94,6 +94,7 @@ public sealed class SyncBarController : IDisposable
                 if (document.RootElement.EnumerateObject().Any(account =>
                     account.Value.ValueKind == JsonValueKind.Object && account.Value.EnumerateObject().Any(field =>
                         field.Name.Equals("Session", StringComparison.OrdinalIgnoreCase)
+                        || field.Name.Equals("FiveHour", StringComparison.OrdinalIgnoreCase)
                         || field.Name.StartsWith("Spark", StringComparison.OrdinalIgnoreCase))))
                     SaveCache();
             }
@@ -111,7 +112,7 @@ public sealed class SyncBarController : IDisposable
         {
             if (_snapshots.TryGetValue(profileId, out var current)) return current;
             if (!_usageCache.TryGetValue(profileId, out var cached) || cached.UpdatedAt == DateTimeOffset.MinValue) return null;
-            return new UsageSnapshot(profileId, "", "Claude", cached.Weekly, cached.UpdatedAt, cached.FiveHour);
+            return new UsageSnapshot(profileId, "", "Claude", cached.Weekly, cached.UpdatedAt);
         }
     }
 
@@ -274,8 +275,7 @@ public sealed class SyncBarController : IDisposable
                     var current = _auth.ReadCredentials(account.Id);
                     if (current.AccountId != credentials.AccountId || current.AccessToken != credentials.AccessToken) continue;
                     lock (_gate) { _usageCache[account.Id] = ToDashboardUsage(usage); _snapshots[account.Id] = usage; }
-                    samples.Add(new QuotaSample(account.Id, usage.UpdatedAt, credentials.Plan, usage.FiveHour?.UsedPercent,
-                        usage.FiveHour?.ResetsAt, usage.Weekly?.UsedPercent, usage.Weekly?.ResetsAt));
+                    samples.Add(new QuotaSample(account.Id, usage.UpdatedAt, credentials.Plan, usage.Weekly?.UsedPercent, usage.Weekly?.ResetsAt));
                     _ = EvaluateWeeklyAnchorAsync(usage);
                 }
                 catch (Exception error) when (!cancellationToken.IsCancellationRequested)
@@ -573,7 +573,7 @@ public sealed class SyncBarController : IDisposable
         return email[..1] + "***" + email[at..];
     }
 
-    private static DashboardUsage ToDashboardUsage(UsageSnapshot usage) => new(usage.Weekly, usage.UpdatedAt, usage.FiveHour);
+    private static DashboardUsage ToDashboardUsage(UsageSnapshot usage) => new(usage.Weekly, usage.UpdatedAt);
 
     // Claude Code in Claude Desktop uses the desktop's own login: while it is another account, whose tokens these are is unknown.
     private DeviceAccountObservation LocalAccount(AppConfiguration configuration)

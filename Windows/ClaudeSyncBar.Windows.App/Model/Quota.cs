@@ -19,11 +19,11 @@ public sealed record AccountUsage(IReadOnlyList<Quota> Quotas, string Status, bo
     public Quota? Get(string key) => Quotas.FirstOrDefault(quota => quota.Key == key);
 }
 
-/// <summary>Five-hour and weekly quota presentation; the same rules as the Ubuntu app's quota.py.</summary>
+/// <summary>Weekly quota presentation; the same rules as the Ubuntu app's quota.py.</summary>
 public static class QuotaFormat
 {
     public static readonly (string Key, string Title, string Setting)[] Quotas =
-        [("fiveHour", "5시간", "claudeFiveHour"), ("weekly", "주간", "claudeWeekly")];
+        [("weekly", "주간", "claudeWeekly")];
 
     // Older than this, a value is shown as the previous one.
     private static readonly TimeSpan Stale = TimeSpan.FromMinutes(10);
@@ -98,12 +98,6 @@ public static class QuotaFormat
         }
 
         var local = resets.Value.ToLocalTime();
-        if (key == "fiveHour")
-        {
-            var clock = $"{local:HH:mm} 초기화";
-            return new(key, title, remaining, tone, previous ? clock : $"{Until(resets.Value, now)} 초기화 · {local:HH:mm}", clock);
-        }
-
         // The short form still says the hour: a week's reset falls at any time of day.
         return new(key, title, remaining, tone, $"{Date(resets.Value)} 초기화", $"{local:MM.dd HH:mm} 초기화");
     }

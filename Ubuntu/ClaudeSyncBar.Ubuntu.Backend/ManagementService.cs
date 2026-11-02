@@ -97,7 +97,7 @@ public sealed class ManagementService : IManagementService
         if (active is null) return false;
         var usage = accounts.First(account => account.Id == active).Usage;
         // Near the end, look every minute instead of every five.
-        if (settings.Enabled && AutoSwitchPolicy.Lowest(usage, now) is <= AutoSwitchPolicy.Low && usage!.UpdatedAt < now.AddMinutes(-1)
+        if (settings.Enabled && AutoSwitchPolicy.Remaining(usage?.Weekly, now) is <= AutoSwitchPolicy.Low && usage!.UpdatedAt < now.AddMinutes(-1)
             && now - _lastCloseLook >= TimeSpan.FromMinutes(1))
         {
             _lastCloseLook = now;
@@ -108,7 +108,7 @@ public sealed class ManagementService : IManagementService
             usage = accounts.First(account => account.Id == active).Usage;
         }
 
-        if (AutoSwitchPolicy.UsedUp(usage, now) is not { } usedUp)
+        if (!AutoSwitchPolicy.UsedUp(usage, now))
         {
             // The account in use has room again, after a switch or a reset: continue what a limit stopped.
             if (settings.ResumeEnabled && AutoSwitchPolicy.HasRoom(usage, now)) ResumeStopped(settings, now);
@@ -124,7 +124,7 @@ public sealed class ManagementService : IManagementService
         var from = AccountLabel(c, active);
         if (target is null)
         {
-            Record(settings, new(now, active, null, $"{from}의 {usedUp} 한도가 소진됐지만 지금 쓸 수 있는 다른 계정이 없습니다.", false));
+            Record(settings, new(now, active, null, $"{from}의 주간 한도가 소진됐지만 지금 쓸 수 있는 다른 계정이 없습니다.", false));
             return false;
         }
 
@@ -153,7 +153,7 @@ public sealed class ManagementService : IManagementService
         lock (_state) operation = _history.GetValueOrDefault(operation.Id) ?? operation;
         var switched = operation.State == "completed";
         Record(settings, new(now, active, target, switched
-            ? $"{from}의 {usedUp} 한도가 소진되어 {to}(으)로 자동 전환했습니다."
+            ? $"{from}의 주간 한도가 소진되어 {to}(으)로 자동 전환했습니다."
             : $"{to}(으)로 자동 전환하지 못했습니다. {operation.Message}", switched));
         return switched;
     }
@@ -195,7 +195,7 @@ public sealed class ManagementService : IManagementService
         if (SmartSwitch.Choose(accounts, now) is not { } choice)
             return new { found = false, message = SmartSwitch.NoneMessage };
         var label = AccountLabel(c, choice.Account.Id);
-        var reason = SmartSwitch.Reason(Percent(choice.Weekly), Percent(choice.FiveHour), choice.WeeklyReset);
+        var reason = SmartSwitch.Reason(Percent(choice.Weekly), choice.WeeklyReset);
         if (choice.Account.Id == active)
             return new { found = true, alreadyActive = true, profileId = choice.Account.Id, accountLabel = label, reason,
                 message = $"이미 조건에 가장 맞는 {label}을(를) 쓰고 있습니다. ({reason})" };
@@ -882,8 +882,7 @@ public sealed class ManagementService : IManagementService
             historyStart = _quotaHistory.FirstSampledAt();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ClaudeSyncBarException) { }
-        return TokenRateCalculator.Calculate(new(snapshot.CollectedAt, hours, basis, devices, history, historyStart, accounts, active,
-            preferences.ClaudeFiveHour, preferences.ClaudeWeekly));
+        return TokenRateCalculator.Calculate(new(snapshot.CollectedAt, hours, basis, devices, history, historyStart, accounts, active, preferences.ClaudeWeekly));
     }
 
     private object Settings()
@@ -891,7 +890,7 @@ public sealed class ManagementService : IManagementService
         var usage = new UsageDisplayPreferencesStore(_paths).LoadUsagePreferences();
         var anchor = _controller.WeeklyAnchor.Load();
         var automatic = _autoSwitch.Load();
-        return new { usage.ClaudeFiveHour, usage.ClaudeWeekly, usage.TaskbarUsage, usage.TokenPeriodHours, usage.TokenRateBasis, autoSwitchEnabled = automatic.Enabled, autoSwitchLast = automatic.Last,
+        return new { usage.ClaudeWeekly, usage.TaskbarUsage, usage.TokenPeriodHours, usage.TokenRateBasis, autoSwitchEnabled = automatic.Enabled, autoSwitchLast = automatic.Last,
             autoResumeEnabled = automatic.ResumeEnabled, autoResumeLast = automatic.ResumeLast, launchAtLogin = BackendPlatform.LaunchAtLogin(_paths), weekly = anchor, stateDirectory = _paths.StateRoot, claudeHome = _paths.ClaudeHome };
     }
 
@@ -900,7 +899,6 @@ public sealed class ManagementService : IManagementService
         var store = new UsageDisplayPreferencesStore(_paths);
         var usage = store.LoadUsagePreferences();
         usage.ClaudeWeekly = Wire.Flag(p, "claudeWeekly", usage.ClaudeWeekly);
-        usage.ClaudeFiveHour = Wire.Flag(p, "claudeFiveHour", usage.ClaudeFiveHour);
         usage.TaskbarUsage = Wire.Flag(p, "taskbarUsage", usage.TaskbarUsage);
         usage.TokenPeriodHours = Math.Clamp(Wire.Number(p, "tokenPeriodHours", usage.TokenPeriodHours), 1, TokenRateCalculator.MaximumHours);
         usage.TokenRateBasis = TokenBurnBasis.Normalize(Wire.Text(p, "tokenRateBasis", usage.TokenRateBasis));

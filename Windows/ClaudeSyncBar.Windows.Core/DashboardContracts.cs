@@ -19,7 +19,7 @@ public sealed record DashboardAccount(
     DashboardUsage? Usage = null);
 
 public sealed record DashboardUsage(
-    UsageWindow? Weekly, DateTimeOffset UpdatedAt, UsageWindow? FiveHour = null)
+    UsageWindow? Weekly, DateTimeOffset UpdatedAt)
 {
     public string? Error { get; init; }
 }

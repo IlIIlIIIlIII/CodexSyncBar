@@ -7,7 +7,7 @@ using static ClaudeSyncBar.App.Tray.TaskbarNative;
 namespace ClaudeSyncBar.App.Tray;
 
 /// <summary>
-/// The usage readout on the taskbar: "5시간 62% │ 전체 주간 45%" at its far left.
+/// The usage readout on the taskbar: "전체 주간 45%" at its far left.
 /// Windows 11 has no API for taskbar content, so it is a small layered window
 /// made a child of the taskbar: it moves with it and hides with auto-hide and
 /// full-screen apps. A child of another process's window shares that window's

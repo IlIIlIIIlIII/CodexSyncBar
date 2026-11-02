@@ -62,21 +62,22 @@ def main():
                 app.overview.list.emit('row-activated', overview_row)
                 assert app.pages.get_visible_child_name() == 'switch'
                 record('selecting an account leaves every active account unchanged')
-                assert app.weekly_quota.get_visible() and app.five_hour_quota.get_visible()
+                assert app.weekly_quota.get_visible()
                 assert app.weekly_quota.value.get_text() == '58% 남음'
-                assert app.five_hour_quota.value.get_text() == '100% 남음'
                 quota_widgets = []
                 child = app.quotas.get_first_child()
                 while child is not None:
                     quota_widgets.append(child)
                     child = child.get_next_sibling()
-                assert quota_widgets == [app.five_hour_quota, app.weekly_quota]
-                assert {'fiveHour', 'weekly'} <= set(app.selected()['usage'])
+                assert quota_widgets == [app.weekly_quota]
+                assert 'weekly' in app.selected()['usage']
                 assert 'session' not in app.selected()['usage']
-                assert app.snapshot['settings']['claudeFiveHour'] is True
+                assert 'fiveHour' not in app.selected()['usage']
+                assert app.snapshot['settings']['claudeWeekly'] is True
                 assert 'fiveHour' not in app.snapshot['settings']
-                assert list(app.overview.rows[2].cells) == ['fiveHour', 'weekly']
-                record('the five-hour and weekly quotas reach the IPC response and rendered account details')
+                assert 'claudeFiveHour' not in app.snapshot['settings']
+                assert list(app.overview.rows[2].cells) == ['weekly']
+                record('the weekly quota reaches the IPC response and rendered account details')
                 # Construct the production dialogs and their actual widgets, not a second demo UI.
                 for name in ['accounts','devices','cli','tokens','settings']:
                     dialog = ManagerDialog(app, name)

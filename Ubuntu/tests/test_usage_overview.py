@@ -32,7 +32,6 @@ class UsageOverviewTests(unittest.TestCase):
         self.snapshot = {'activeProfileId': 1, 'accounts': [
             {'id': 1, 'alias': '개인', 'email': 'main@example.com', 'plan': 'Max 20x', 'usage': {
                 'weekly': {'usedPercent': 32, 'resetsAt': '2026-10-08T00:00:00Z'},
-                'fiveHour': {'usedPercent': 85, 'resetsAt': '2026-10-06T08:00:00Z'},
                 'updatedAt': self.now.isoformat()}},
             {'id': 2, 'alias': '보조', 'email': 'other@example.com', 'needsLogin': True},
         ]}
@@ -42,13 +41,12 @@ class UsageOverviewTests(unittest.TestCase):
     def cell(self, account, key):
         return self.view.rows[account].cells[key]
 
-    def test_both_quotas_show_side_by_side_with_their_own_values(self):
-        self.assertEqual(['fiveHour', 'weekly'], list(self.view.rows[1].cells))
-        self.assertEqual('15%', self.cell(1, 'fiveHour').value.get_text())
-        self.assertTrue(self.cell(1, 'fiveHour').value.has_css_class('usage-warning'))
+    def test_the_weekly_quota_shows_with_its_own_value(self):
+        self.assertEqual(['weekly'], list(self.view.rows[1].cells))
         self.assertEqual('68%', self.cell(1, 'weekly').value.get_text())
+        self.assertTrue(self.cell(1, 'weekly').value.has_css_class('usage-healthy'))
         self.assertAlmostEqual(.68, self.cell(1, 'weekly').meter.get_fraction())
-        self.assertEqual(['5시간 한도', '주간 한도'], [t.get_text() for t in self.view.column_titles.values()])
+        self.assertEqual(['주간 한도'], [t.get_text() for t in self.view.column_titles.values()])
         self.assertTrue(self.view.columns.get_visible())
 
     def test_plan_is_shown_with_the_email(self):
@@ -56,20 +54,19 @@ class UsageOverviewTests(unittest.TestCase):
         self.assertEqual('other@example.com', self.view.rows[2].email.get_text())
 
     def test_missing_has_no_fake_zero_or_reset(self):
-        for key in ('fiveHour', 'weekly'):
-            self.assertEqual('—', self.cell(2, key).value.get_text())
-            self.assertEqual('정보 없음', self.cell(2, key).caption.get_text())
-            self.assertTrue(self.cell(2, key).meter.has_css_class('missing'))
+        self.assertEqual('—', self.cell(2, 'weekly').value.get_text())
+        self.assertEqual('정보 없음', self.cell(2, 'weekly').caption.get_text())
+        self.assertTrue(self.cell(2, 'weekly').meter.has_css_class('missing'))
         self.assertEqual('재로그인 필요', self.view.rows[2].status.get_text())
 
     def test_poll_updates_values_without_replacing_rows(self):
         row = self.view.rows[1]
-        self.snapshot['accounts'][0]['usage']['fiveHour']['usedPercent'] = 100
+        self.snapshot['accounts'][0]['usage']['weekly']['usedPercent'] = 100
         self.view.update(self.snapshot, now=self.now)
         self.assertIs(row, self.view.rows[1])
-        self.assertEqual('0%', self.cell(1, 'fiveHour').value.get_text())
-        self.assertTrue(self.cell(1, 'fiveHour').meter.has_css_class('critical'))
-        self.assertFalse(self.cell(1, 'fiveHour').meter.has_css_class('missing'))
+        self.assertEqual('0%', self.cell(1, 'weekly').value.get_text())
+        self.assertTrue(self.cell(1, 'weekly').meter.has_css_class('critical'))
+        self.assertFalse(self.cell(1, 'weekly').meter.has_css_class('missing'))
 
     def test_footer_says_when_automatic_switching_is_on(self):
         self.assertNotIn('자동 전환', self.view.updated.get_text())
@@ -77,15 +74,16 @@ class UsageOverviewTests(unittest.TestCase):
         self.view.update(self.snapshot, now=self.now)
         self.assertIn('자동 전환 켜짐', self.view.updated.get_text())
 
-    def test_settings_hide_a_quota_everywhere_on_the_page(self):
-        self.snapshot['settings'] = {'claudeFiveHour': False}
-        self.view.update(self.snapshot, now=self.now)
-        self.assertEqual(['weekly'], list(self.view.rows[1].cells))
-        self.assertEqual(['weekly'], list(self.view.column_titles))
+    def test_settings_hide_the_quota_everywhere_on_the_page(self):
         self.assertIn('주간 한도', self.view.subtitle.get_text())
+        self.snapshot['settings'] = {'claudeWeekly': False}
+        self.view.update(self.snapshot, now=self.now)
+        self.assertEqual([], list(self.view.rows[1].cells))
+        self.assertEqual([], list(self.view.column_titles))
+        self.assertIn('켜 주세요', self.view.subtitle.get_text())
         self.snapshot['settings'] = {}
         self.view.update(self.snapshot, now=self.now)
-        self.assertEqual(['fiveHour', 'weekly'], list(self.view.rows[1].cells))
+        self.assertEqual(['weekly'], list(self.view.rows[1].cells))
 
     def test_offline_retains_explicit_previous_data_and_recovers(self):
         self.view.update(self.snapshot, error='서비스 연결 실패', now=self.now)

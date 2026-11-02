@@ -21,14 +21,12 @@ public sealed class SettingsPage : SyncPage
 
         Group("표시");
         var display = Rows();
-        display.Children.Add(Ui.SettingRow(Glyphs.Stopwatch, "5시간 사용량 표시", "계정별 5시간 한도 잔여량을 앱, 트레이, 작업 표시줄에 표시해요.",
-            Switch(settings, "claudeFiveHour", "5시간 사용량 표시", fallback: true)));
         display.Children.Add(Ui.SettingRow(Glyphs.Calendar, "주간 사용량 표시", "계정별 주간 한도 잔여량을 앱, 트레이, 작업 표시줄에 표시해요.",
             Switch(settings, "claudeWeekly", "주간 사용량 표시", fallback: true)));
         display.Children.Add(Ui.Expander(Ui.SettingRow(Glyphs.Chart, "작업 표시줄에 사용량 표시",
-                "지금 계정의 5시간 한도와 모든 계정의 주간 한도 합계를 작업 표시줄 맨 왼쪽에 한 줄로 보여 줘요.",
+                "모든 계정의 주간 한도 합계를 작업 표시줄 맨 왼쪽에 보여 줘요.",
                 Switch(settings, "taskbarUsage", "작업 표시줄에 사용량 표시", fallback: true)),
-            [Ui.SubRow(null, Ui.Caption("전체 주간은 재로그인이 필요한 계정을 빼고, 계정마다 같은 비중으로 남은 양을 더한 값이에요. 플랜마다 실제 한도 크기는 달라요. 위에서 끈 한도는 작업 표시줄에도 나오지 않아요."), 56)]));
+            [Ui.SubRow(null, Ui.Caption("전체 주간은 재로그인이 필요한 계정을 빼고, 계정마다 같은 비중으로 남은 양을 더한 값이에요. 플랜마다 실제 한도 크기는 달라요. 위에서 주간 사용량을 끄면 작업 표시줄에도 나오지 않아요."), 56)]));
 
         Group("실행");
         var run = Rows();
@@ -46,7 +44,7 @@ public sealed class SettingsPage : SyncPage
         Group("자동 전환");
         var automatic = Rows();
         automatic.Children.Add(Ui.Expander(Ui.SettingRow(Glyphs.Lightning, "사용량이 바닥나면 자동 전환",
-                "지금 계정의 5시간이나 주간 한도가 0%가 되면, 우선순위에서 지금 쓸 수 있는 첫 계정으로 모든 활성 장치를 전환해요. 5분마다, 10% 이하로 남으면 1분마다 확인해요.",
+                "지금 계정의 주간 한도가 0%가 되면, 우선순위에서 지금 쓸 수 있는 첫 계정으로 모든 활성 장치를 전환해요. 5분마다, 10% 이하로 남으면 1분마다 확인해요.",
                 Switch(settings, "autoSwitchEnabled", "사용량이 바닥나면 자동 전환")),
             [.. Last(settings?["autoSwitchLast"], "마지막 자동 전환"),
              Ui.SubRow(null, Ui.Caption("Claude 데스크톱 앱은 다시 시작되지만, 세션 목록과 설정은 그대로 이어져요. 우선순위가 더 높은 계정을 다시 쓸 수 있게 돼도 자동으로 돌아가지는 않아요."), 56)]));

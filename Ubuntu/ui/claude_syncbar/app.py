@@ -348,9 +348,8 @@ class SyncBarApplication(Adw.Application):
         self.right.append(self.usage_updated)
         self.quotas = Gtk.Box(spacing=32, homogeneous=True)
         self.quotas.set_margin_top(12)
-        self.five_hour_quota = Quota('5시간')
         self.weekly_quota = Quota('주간')
-        self.quota_widgets = {'fiveHour': self.five_hour_quota, 'weekly': self.weekly_quota}
+        self.quota_widgets = {'weekly': self.weekly_quota}
         for widget in self.quota_widgets.values():
             self.quotas.append(widget)
         self.right.append(self.quotas)

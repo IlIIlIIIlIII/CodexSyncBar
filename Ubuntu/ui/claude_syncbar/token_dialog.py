@@ -317,7 +317,7 @@ class TokenPage:
             self.warning.append(self.warning_group(*warning))
         self.upper.append(self.throughput_group(tv.throughput(view)))
         model = tv.burn(view)
-        # With both quotas turned off in the settings the whole group goes.
+        # With the quota turned off in the settings the whole group goes.
         self.burn.set_visible(bool(model.shown))
         self.fill_burn(model)
         self.lower.append(self.totals_group(view))
@@ -400,7 +400,7 @@ class TokenPage:
         return group
 
     def fill_burn(self, model):
-        # Rate cells of every account share one width, so the 5시간 and 주간 values line up in columns.
+        # Rate cells of every account share one width, so the values line up in a column.
         self.cells = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         if model.waiting:
             rows = [self.waiting_row(model.waiting)]

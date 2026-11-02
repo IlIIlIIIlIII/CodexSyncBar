@@ -21,7 +21,6 @@ public sealed class UbuntuUsageContractTests
             var last = await controller.RefreshUsageAsync();
             Assert.Equal(first.Accounts[0].Usage!.UpdatedAt, last.Accounts[0].Usage!.UpdatedAt);
             Assert.Equal(25, last.Accounts[0].Usage!.Weekly!.UsedPercent);
-            Assert.Equal(3, last.Accounts[0].Usage!.FiveHour!.UsedPercent);
             Assert.NotNull(last.Accounts[0].Usage!.Error);
             Assert.DoesNotContain("synthetic-response-secret", JsonSerializer.Serialize(last));
         }
@@ -29,8 +28,6 @@ public sealed class UbuntuUsageContractTests
             new UsageService(new HttpClient(new Handler(Failure))));
         await restarted.RefreshUsageAsync();
         Assert.Equal(25, restarted.TryGetUsageSnapshot(1)!.Weekly!.UsedPercent);
-        // The cache written before a restart keeps the five-hour quota as well.
-        Assert.Equal(3, restarted.TryGetUsageSnapshot(1)!.FiveHour!.UsedPercent);
         Assert.NotNull(restarted.GetUsageError(1));
     }
 
@@ -70,13 +67,14 @@ public sealed class UbuntuUsageContractTests
         Assert.Equal(new[] { UsageDisplayItem.ClaudeWeekly },
             store.LoadMenuPreferences().NormalizedItems());
         WindowsPathSafety.WritePrivateBytes(fixture.Paths.UsageDisplayPreferencesFile,
-            """{"fiveHour":false,"claudeWeekly":true,"sparkWeekly":false,"future":{"SparkWeekly":"preserve"}}"""u8.ToArray());
+            """{"fiveHour":false,"claudeFiveHour":false,"claudeWeekly":true,"sparkWeekly":false,"future":{"SparkWeekly":"preserve"}}"""u8.ToArray());
         var preferences = store.LoadUsagePreferences();
         Assert.True(preferences.ClaudeWeekly);
         store.SaveUsagePreferences(preferences);
         using var saved = JsonDocument.Parse(File.ReadAllText(fixture.Paths.UsageDisplayPreferencesFile));
         Assert.False(saved.RootElement.TryGetProperty("sparkWeekly", out _));
         Assert.False(saved.RootElement.TryGetProperty("fiveHour", out _));
+        Assert.False(saved.RootElement.TryGetProperty("claudeFiveHour", out _));
         Assert.Equal("preserve", saved.RootElement.GetProperty("future").GetProperty("SparkWeekly").GetString());
     }
 
@@ -101,6 +99,7 @@ public sealed class UbuntuUsageContractTests
     public void WeeklyQuotaComesFromTheSevenDayEntry(string utilization, double remaining)
     {
         var credentials = new ProfileCredentials(1, "access", "refresh", "account", "test@example.invalid", null, "unused", false, "Max 5x");
+        // A five-hour entry the service may still send is not read, and never mixed into the weekly one.
         var json = "{\"five_hour\":{\"utilization\":90,\"resets_at\":null},\"seven_day\":{\"utilization\":" + utilization
             + ",\"resets_at\":\"2030-01-07T03:59:59.943679+00:00\"}}";
         var snapshot = UsageService.ParseUsagePayload(json, credentials);
@@ -108,21 +107,6 @@ public sealed class UbuntuUsageContractTests
         Assert.Equal(604800, snapshot.Weekly.DurationSeconds);
         Assert.Equal(new DateTimeOffset(2030, 1, 7, 3, 59, 59, TimeSpan.Zero).AddTicks(9436790), snapshot.Weekly.ResetsAt);
         Assert.Equal("Max 5x", snapshot.Plan);
-        // The five-hour entry is its own quota, never mixed into the weekly one.
-        Assert.Equal(10, snapshot.FiveHour!.RemainingPercent, 3);
-        Assert.Equal(18000, snapshot.FiveHour.DurationSeconds);
-        Assert.Null(snapshot.FiveHour.ResetsAt);
-    }
-
-    [Fact]
-    public void FiveHourQuotaComesFromTheFiveHourEntry()
-    {
-        var credentials = new ProfileCredentials(1, "access", "refresh", "account", "test@example.invalid", null, "unused", false);
-        var snapshot = UsageService.ParseUsagePayload(
-            "{\"five_hour\":{\"utilization\":37.5,\"resets_at\":\"2030-01-07T05:00:00+00:00\"},\"seven_day\":null}", credentials);
-        Assert.Equal(62.5, snapshot.FiveHour!.RemainingPercent, 3);
-        Assert.Equal(new DateTimeOffset(2030, 1, 7, 5, 0, 0, TimeSpan.Zero), snapshot.FiveHour.ResetsAt);
-        Assert.Null(snapshot.Weekly);
     }
 
     [Theory]
@@ -137,8 +121,6 @@ public sealed class UbuntuUsageContractTests
         Assert.Null(snapshot.Weekly);
         Assert.Null(snapshot.MenuRemainingPercent);
         Assert.Equal("Claude", snapshot.Plan);
-        // Model-specific weekly entries are not a five-hour quota either.
-        Assert.Equal(json.Contains("five_hour"), snapshot.FiveHour is not null);
     }
 
     [Fact]
@@ -160,7 +142,7 @@ public sealed class UbuntuUsageContractTests
 
     private static HttpResponseMessage Success() => new(HttpStatusCode.OK)
     {
-        Content = new StringContent("""{"five_hour":{"utilization":3,"resets_at":null},"seven_day":{"utilization":25,"resets_at":"2030-01-07T00:00:00+00:00"}}"""),
+        Content = new StringContent("""{"seven_day":{"utilization":25,"resets_at":"2030-01-07T00:00:00+00:00"}}"""),
     };
     private static HttpResponseMessage Failure() => new(HttpStatusCode.ServiceUnavailable)
     {

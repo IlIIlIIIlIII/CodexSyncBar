@@ -33,7 +33,7 @@ async function shot(extension, name) {
     };
     visit(extension._rows);
     GLib.file_set_contents(`${output}/${name}-bars.json`, JSON.stringify(bars));
-    if (name === 'selected-design') assert(bars.slice(0, 4).every((bar, i) => bar.value === [0.72, 0.68, 0.09, 0.84][i] && bar.track[0] > 50 && bar.track[1] > 0), 'native five-hour and weekly meters have values and visible dimensions');
+    if (name === 'selected-design') assert(bars.slice(0, 2).every((bar, i) => bar.value === [0.68, 0.84][i] && bar.track[0] > 50 && bar.track[1] > 0), 'native weekly meters have values and visible dimensions');
     print(`SYNCBAR_CAPTURE ${name} ${width}x${height}`);
 }
 // A fractional display scale like the 1.67x many laptop panels use, on the private monitor only.
@@ -120,38 +120,36 @@ async function scenes() {
     extension._client.destroy();
     const today = Date.now();
     const at = hours => new Date(today + hours * 3600000).toISOString();
-    const quotas = (fiveHour, fiveHourReset, weekly, days) => ({fiveHour: {remainingPercent: fiveHour, resetsAt: fiveHourReset === null ? null : at(fiveHourReset)},
-        weekly: {remainingPercent: weekly, resetsAt: at(days * 24)}, updatedAt: new Date(today).toISOString()});
+    const quotas = (weekly, days) => ({weekly: {remainingPercent: weekly, resetsAt: at(days * 24)}, updatedAt: new Date(today).toISOString()});
     const fixture = {accounts: [
-        {id: 1, alias: '개인 계정', email: 'main@example.com', plan: 'Max 20x', usage: quotas(72, 1.7, 68, 2)},
-        {id: 2, alias: '업무 계정', email: 'work@example.com', usage: quotas(9, 0.6, 84, 3)},
-        {id: 3, alias: '실험 계정', email: 'lab@example.com', usage: quotas(100, null, 5, 6)},
+        {id: 1, alias: '개인 계정', email: 'main@example.com', plan: 'Max 20x', usage: quotas(68, 2)},
+        {id: 2, alias: '업무 계정', email: 'work@example.com', usage: quotas(84, 3)},
+        {id: 3, alias: '실험 계정', email: 'lab@example.com', usage: quotas(5, 6)},
         {id: 4, alias: '보조 계정', email: 'backup@example.com', needsLogin: true},
     ], activeProfileId: 1};
     extension._client = {call: async method => { if (method === 'snapshot') return fixture; throw new Error('테스트: 연결 실패'); }, destroy() {}};
     await extension._refreshSnapshot();
-    assert(extension._panelLabel.text === '5시간 72% · 주간 68%', 'panel shows both quotas of the local active account');
+    assert(extension._panelLabel.text === '주간 68%', 'panel shows the weekly quota of the local active account');
     await shot(extension, 'selected-design');
     extension._button.menu.close();
     fixture.activeProfileId = 2;
-    await until(() => extension._panelLabel.text === '5시간 9% · 주간 84%', 400);
+    await until(() => extension._panelLabel.text === '주간 84%', 400);
     assert(!extension._button.menu.isOpen, 'closed panel follows active account changes without opening menu');
     fixture.accounts[1].usage.weekly.remainingPercent = 100;
-    await until(() => extension._panelLabel.text === '5시간 9% · 주간 100%', 400);
-    assert(!extension._panelLabel.clutter_text.get_layout().is_ellipsized(), '100 percent panel label fits');
-    fixture.settings = {claudeFiveHour: false};
     await until(() => extension._panelLabel.text === '주간 100%', 400);
-    assert(true, 'settings that hide the five-hour quota hide it in the panel');
+    assert(!extension._panelLabel.clutter_text.get_layout().is_ellipsized(), '100 percent panel label fits');
+    fixture.settings = {claudeWeekly: false};
+    await until(() => extension._panelLabel.text === '', 400);
+    assert(true, 'settings that hide the weekly quota hide it in the panel');
     delete fixture.settings;
     await shot(extension, 'panel-closed');
     fixture.activeProfileId = 1;
     await extension._refreshSnapshot();
     extension._button.menu.open();
     fixture.accounts[1].usage.weekly.remainingPercent = 100;
-    fixture.accounts[2].usage.weekly.remainingPercent = 0; fixture.accounts[2].usage.fiveHour.remainingPercent = 0;
+    fixture.accounts[2].usage.weekly.remainingPercent = 0;
     await extension._refreshSnapshot(); await shot(extension, 'quota-extremes');
     fixture.accounts[1].usage.weekly.remainingPercent = 84; fixture.accounts[2].usage.weekly.remainingPercent = 5;
-    fixture.accounts[2].usage.fiveHour.remainingPercent = 100;
     await extension._refreshSnapshot();
     assert(extension._accountButtons.length === 2, 'active and re-login accounts have no switch button');
     extension._accountButtons[0][1].emit('clicked', 1); await until(() => !extension._pending);

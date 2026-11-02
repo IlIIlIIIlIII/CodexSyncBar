@@ -6,7 +6,6 @@ namespace ClaudeSyncBar.Windows.Core;
 public enum UsageDisplayItem
 {
     ClaudeWeekly = 1,
-    ClaudeFiveHour = 2,
 }
 
 public static class UsageDisplayItemExtensions
@@ -14,21 +13,18 @@ public static class UsageDisplayItemExtensions
     public static string StorageName(this UsageDisplayItem item) => item switch
     {
         UsageDisplayItem.ClaudeWeekly => "claudeWeekly",
-        UsageDisplayItem.ClaudeFiveHour => "claudeFiveHour",
         _ => throw new ArgumentOutOfRangeException(nameof(item)),
     };
 
     public static string Title(this UsageDisplayItem item) => item switch
     {
         UsageDisplayItem.ClaudeWeekly => "주간",
-        UsageDisplayItem.ClaudeFiveHour => "5시간",
         _ => item.ToString(),
     };
 
     public static int? RemainingPercent(this UsageDisplayItem item, UsageSnapshot snapshot) => item switch
     {
         UsageDisplayItem.ClaudeWeekly => snapshot.Weekly is null ? null : (int)Math.Round(snapshot.Weekly.RemainingPercent),
-        UsageDisplayItem.ClaudeFiveHour => snapshot.FiveHour is null ? null : (int)Math.Round(snapshot.FiveHour.RemainingPercent),
         _ => null,
     };
 }
@@ -36,8 +32,6 @@ public static class UsageDisplayItemExtensions
 public sealed class UsageDisplayPreferences
 {
     public bool ClaudeWeekly { get; set; } = true;
-
-    public bool ClaudeFiveHour { get; set; } = true;
 
     /// <summary>Whether the Windows app shows usage on the taskbar; other platforms ignore it.</summary>
     public bool TaskbarUsage { get; set; } = true;
@@ -56,7 +50,6 @@ public sealed class UsageDisplayPreferences
     public bool IsVisible(UsageDisplayItem item) => item switch
     {
         UsageDisplayItem.ClaudeWeekly => ClaudeWeekly,
-        UsageDisplayItem.ClaudeFiveHour => ClaudeFiveHour,
         _ => false,
     };
 
@@ -65,7 +58,6 @@ public sealed class UsageDisplayPreferences
         switch (item)
         {
             case UsageDisplayItem.ClaudeWeekly: ClaudeWeekly = visible; break;
-            case UsageDisplayItem.ClaudeFiveHour: ClaudeFiveHour = visible; break;
         }
     }
 }
@@ -90,7 +82,6 @@ public sealed class MenuBarUsagePreferences
                 parsed = raw switch
                 {
                     "claudeWeekly" => UsageDisplayItem.ClaudeWeekly,
-                    "claudeFiveHour" => UsageDisplayItem.ClaudeFiveHour,
                     _ => (UsageDisplayItem)(-1),
                 };
             }
@@ -128,6 +119,7 @@ internal static class RetiredQuotaPreferences
 {
     internal static bool IsRetired(string value) =>
         string.Equals(value, "fiveHour", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(value, "claudeFiveHour", StringComparison.OrdinalIgnoreCase)
         || string.Equals(value, "sparkFiveHour", StringComparison.OrdinalIgnoreCase)
         || string.Equals(value, "sparkWeekly", StringComparison.OrdinalIgnoreCase);
 

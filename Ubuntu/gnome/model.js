@@ -1,10 +1,9 @@
-// Credential-free presentation model for the five-hour and weekly quotas.
+// Credential-free presentation model for the weekly quota.
 // Usage key in the snapshot, title, settings key that shows it.
-export const QUOTAS = [['fiveHour', '5시간', 'claudeFiveHour'], ['weekly', '주간', 'claudeWeekly']];
+export const QUOTAS = [['weekly', '주간', 'claudeWeekly']];
 const TITLES = Object.fromEntries(QUOTAS.map(([key, title]) => [key, title]));
 // Older than this, a value is shown as the previous one.
 const STALE = 600000;
-const pad = value => String(value).padStart(2, '0');
 
 export function visibleQuotas(settings) {
     return QUOTAS.filter(([, , setting]) => settings?.[setting] !== false).map(([key]) => key);
@@ -38,7 +37,7 @@ export function quota(window, key, now = Date.now(), previous = false) {
     if (!Number.isFinite(resets)) caption = remaining >= 100 ? '사용 전' : '초기화 시각 미정';
     else {
         const date = new Date(resets);
-        caption = key === 'fiveHour' ? `${pad(date.getHours())}:${pad(date.getMinutes())} 초기화` : `${date.getMonth() + 1}월 ${date.getDate()}일 초기화`;
+        caption = `${date.getMonth() + 1}월 ${date.getDate()}일 초기화`;
     }
     return {...shown(remaining), tone, caption};
 }

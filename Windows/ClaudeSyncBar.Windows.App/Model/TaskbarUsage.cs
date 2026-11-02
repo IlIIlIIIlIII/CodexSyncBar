@@ -11,13 +11,13 @@ public sealed record TaskbarPart(string Label, string Value, Tone Tone);
 public sealed record TaskbarRow(string Label, string Value, Tone Tone, string Detail);
 
 /// <summary>
-/// What the taskbar shows: the five-hour quota of the account in use and the
-/// weekly quota of every account together, and the tooltip that explains both.
+/// What the taskbar shows: the weekly quota of every account together, and the
+/// tooltip that explains it.
 /// </summary>
 public sealed record TaskbarUsage(IReadOnlyList<TaskbarPart> Parts, string Title, IReadOnlyList<TaskbarRow> Rows,
     IReadOnlyList<string> Notes, string Spoken)
 {
-    public const string FiveHourLabel = "5시간", WeeklyLabel = WeeklyPool.Label;
+    public const string WeeklyLabel = WeeklyPool.Label;
 
     /// <summary>Null when the user turned the taskbar off or chose to see no quota at all.</summary>
     public static TaskbarUsage? Of(JsonNode? settings, IReadOnlyList<JsonObject> accounts, int? activeId, DateTimeOffset now, bool unavailable)
@@ -29,29 +29,6 @@ public sealed record TaskbarUsage(IReadOnlyList<TaskbarPart> Parts, string Title
         var parts = new List<TaskbarPart>();
         var rows = new List<TaskbarRow>();
         var notes = new List<string>();
-
-        if (keys.Contains("fiveHour"))
-        {
-            if (active is null)
-            {
-                parts.Add(new(FiveHourLabel, "—", Tone.Muted));
-                rows.Add(new(FiveHourLabel, "정보 없음", Tone.Muted, "적용된 계정이 없어요"));
-            }
-            else if (AppState.NeedsLogin(active))
-            {
-                parts.Add(new(FiveHourLabel, "재로그인 필요", Tone.Warning));
-                rows.Add(new(FiveHourLabel, "재로그인 필요", Tone.Warning, ""));
-            }
-            else
-            {
-                var usage = QuotaFormat.Account(active, ["fiveHour"], now, unavailable);
-                var quota = usage.Quotas[0];
-                var known = quota.Remaining is not null;
-                parts.Add(new(FiveHourLabel, known ? quota.Value : "—", quota.Tone));
-                rows.Add(new(FiveHourLabel, known ? quota.Value + " 남음" : "정보 없음", quota.Tone, known ? quota.Caption : ""));
-                if (usage.Status.Length > 0) notes.Add($"{AppState.AccountName(active)} · {usage.Status}");
-            }
-        }
 
         if (keys.Contains("weekly"))
         {

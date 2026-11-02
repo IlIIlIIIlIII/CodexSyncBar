@@ -22,7 +22,7 @@ public sealed record TokenAccountInput(int ProfileId, string Name, string? Plan)
 public sealed record TokenRateRequest(
     DateTimeOffset CollectedAt, int Hours, string Basis, IReadOnlyList<TokenDeviceInput> Devices,
     IReadOnlyList<QuotaHistoryEntry> History, DateTimeOffset? HistoryStartedAt, IReadOnlyList<TokenAccountInput> Accounts,
-    int? ActiveProfileId, bool ShowFiveHour = true, bool ShowWeekly = true);
+    int? ActiveProfileId, bool ShowWeekly = true);
 
 /// <summary>Tokens and quota rates over the period that ends when the tokens were collected.</summary>
 public sealed record TokenPeriodView(
@@ -52,15 +52,15 @@ public sealed record TokenDeviceView(
 public sealed record TokenBurnView(
     string Basis, DateTimeOffset? HistoryStartedAt, double BasisTokens, double AttributedTokens,
     IReadOnlyList<TokenAccountBurnView> Accounts, IReadOnlyList<string> IdleAccounts, double UnregisteredTokens,
-    double UnpricedTokens, bool ShowFiveHour, bool ShowWeekly);
+    double UnpricedTokens, bool ShowWeekly);
 
 public sealed record TokenAccountBurnView(
     int ProfileId, string Name, string? Plan, bool IsCurrent, double AttributedTokens, IReadOnlyList<string> Devices,
-    QuotaBurnView FiveHour, QuotaBurnView Weekly);
+    QuotaBurnView Weekly);
 
 /// <summary>
-/// One quota's use per million tokens. State: "ok"; "low" when the whole-percent readings make it rough;
-/// "collecting" until the use moved 3 points over enough tokens; "hidden" when that quota is not shown.
+/// The weekly quota's use per million tokens. State: "ok"; "low" when the whole-percent readings make it rough;
+/// "collecting" until the use moved 3 points over enough tokens; "hidden" when the quota is not shown.
 /// </summary>
 public sealed record QuotaBurnView(
     string State, double? RatePerMillion, double DeltaPercent, double Tokens, int Windows, int Runs, double UntrackedPercent,
@@ -68,7 +68,7 @@ public sealed record QuotaBurnView(
 
 /// <summary>
 /// Cuts the minutes every device's logs give into the chosen period, and divides how far each account's
-/// five-hour and weekly use moved by the tokens that account used meanwhile. Only neighbouring readings of the
+/// weekly use moved by the tokens that account used meanwhile. Only neighbouring readings of the
 /// same window, close together, with the devices' accounts known, are compared; a reset, a gap, a lower reading,
 /// a weekly message or tokens whose account is unknown leave that stretch out.
 /// </summary>
@@ -211,26 +211,23 @@ public static class TokenRateCalculator
             var readings = samples.GetValueOrDefault(account.ProfileId) ?? [];
             var without = unpricedByAccount.TryGetValue(account.ProfileId, out var list) ? new RangeSums(list) : RangeSums.Empty;
             var context = new PairContext(account.ProfileId, own, unknownSums, without, unread, anchors.GetValueOrDefault(account.ProfileId) ?? [], start, end);
-            var five = Quota(readings, context, request.ShowFiveHour, sample => sample.FiveHourUsed, sample => sample.FiveHourResetsAt);
-            var week = Quota(readings, context, request.ShowWeekly, sample => sample.WeeklyUsed, sample => sample.WeeklyResetsAt);
+            var week = Quota(readings, context, request.ShowWeekly);
             var used = attributedByAccount.GetValueOrDefault(account.ProfileId);
-            if (used <= 0 && five.UntrackedPercent <= 0 && week.UntrackedPercent <= 0) continue;
+            if (used <= 0 && week.UntrackedPercent <= 0) continue;
             rows.Add(new(account.ProfileId, account.Name, account.Plan, account.ProfileId == request.ActiveProfileId, used,
-                (accountDevices.GetValueOrDefault(account.ProfileId) ?? []).Order(StringComparer.Ordinal).ToList(), five, week));
+                (accountDevices.GetValueOrDefault(account.ProfileId) ?? []).Order(StringComparer.Ordinal).ToList(), week));
         }
 
         rows = rows.OrderByDescending(row => row.IsCurrent).ThenByDescending(row => row.AttributedTokens).ToList();
         var idle = request.Accounts.Where(account => rows.All(row => row.ProfileId != account.ProfileId)).Select(account => account.Name).ToList();
-        return new TokenBurnView(basis, request.HistoryStartedAt, basisTokens, attributed, rows, idle, unregistered, unpriced,
-            request.ShowFiveHour, request.ShowWeekly);
+        return new TokenBurnView(basis, request.HistoryStartedAt, basisTokens, attributed, rows, idle, unregistered, unpriced, request.ShowWeekly);
     }
 
     private sealed record PairContext(
         int ProfileId, RangeSums Own, RangeSums Unknown, RangeSums Unpriced, IReadOnlyList<List<Hold>> Unread,
         IReadOnlyList<DateTimeOffset> Anchors, DateTimeOffset Start, DateTimeOffset End);
 
-    private static QuotaBurnView Quota(IReadOnlyList<QuotaSample> readings, PairContext context, bool shown,
-        Func<QuotaSample, double?> used, Func<QuotaSample, DateTimeOffset?> resets)
+    private static QuotaBurnView Quota(IReadOnlyList<QuotaSample> readings, PairContext context, bool shown)
     {
         if (!shown) return new("hidden", null, 0, 0, 0, 0, 0, false);
         var inside = readings.Where(sample => sample.SampledAt >= context.Start && sample.SampledAt <= context.End).ToList();
@@ -247,12 +244,12 @@ public static class TokenRateCalculator
         for (var i = 1; i < inside.Count; i++)
         {
             var (before, after) = (inside[i - 1], inside[i]);
-            if (used(before) is not { } from || used(after) is not { } to) continue;
+            if (before.WeeklyUsed is not { } from || after.WeeklyUsed is not { } to) continue;
             if (after.SampledAt - before.SampledAt > MaximumGap) continue;
             if (before.Plan is not null && after.Plan is not null && before.Plan != after.Plan) continue;
             if (plan is not null && after.Plan is not null && after.Plan != plan) continue;
-            var (resetBefore, resetAfter) = (resets(before), resets(after));
-            // Before its first use a five-hour window has no reset time yet and reads 0.
+            var (resetBefore, resetAfter) = (before.WeeklyResetsAt, after.WeeklyResetsAt);
+            // Before its first use a window has no reset time yet and reads 0.
             var sameWindow = resetBefore is { } r0 ? resetAfter is { } r1 && (r1 - r0).Duration() <= ResetDrift && r0 > after.SampledAt : from == 0;
             if (!sameWindow) continue;
             // A reading lower than the one before in the same window is wrong: neither side of it is compared.
