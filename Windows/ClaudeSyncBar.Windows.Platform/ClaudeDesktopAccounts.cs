@@ -65,6 +65,7 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
     private const string SettingsFile = "claude_desktop_config.json";
     private const string ConfigFile = "config.json";
     private const string TokenFile = "tokens.json";
+    private const string RemoteServerStateFile = "ssh-remote-server-state.json";
     // The app's record of the account it last saw signed in.
     private const string OwnerEntry = "lastKnownAccountUuid";
     // Encrypted by the app with a key from the user's keyring; copied as they are, never read.
@@ -121,6 +122,30 @@ internal sealed class ClaudeDesktopAccounts(WindowsPaths paths, Func<string, str
                 && owner.ValueKind == JsonValueKind.String
                 && !string.IsNullOrWhiteSpace(owner.GetString())
                 ? owner.GetString()
+                : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The name under which the app runs its daemon on remote devices, one folder of its own there.
+    /// Null when the app has none, as when it has never connected to one.
+    /// </summary>
+    public static string? RemoteRun(string directory)
+    {
+        try
+        {
+            var state = new FileInfo(Path.Combine(directory, RemoteServerStateFile));
+            if (!state.Exists || state.Length > MaximumSettingsBytes) return null;
+            using var document = JsonDocument.Parse(File.ReadAllBytes(state.FullName));
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("clientRunId", out var run)
+                && run.ValueKind == JsonValueKind.String
+                && run.GetString() is { } name && Name.IsMatch(name)
+                ? name
                 : null;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)

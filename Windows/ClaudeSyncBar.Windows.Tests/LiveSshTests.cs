@@ -76,18 +76,9 @@ public sealed class LiveSshTests(ITestOutputHelper output)
             Log("1. 등록", $"id={id} enabled={saved["enabled"]}");
             Assert.False(saved["enabled"]!.GetValue<bool>());
 
-            // 2. An unknown host key is shown for comparison before anything is sent to the server.
+            // 2. A host seen for the first time is recorded without asking.
             var test = await Node(service, "device.test", new { deviceId = id });
-            Log("2. 연결 테스트(신뢰 전)", $"reachable={test["isReachable"]} message={test["message"]}");
-            Assert.NotNull(test["hostKey"]);
-            var inspected = await Node(service, "device.trust", new { deviceId = id });
-            var hostKey = Assert.IsType<JsonObject>(inspected["hostKey"]);
-            Log("2. 호스트 키", $"trusted={inspected["trusted"]} {hostKey["lookupName"]} {hostKey["fingerprint"]}");
-            Assert.False(inspected["trusted"]!.GetValue<bool>());
-            var trusted = await Node(service, "device.trust", new JsonObject { ["deviceId"] = id, ["approvedKey"] = hostKey.DeepClone() });
-            Assert.True(trusted["trusted"]!.GetValue<bool>());
-            test = await Node(service, "device.test", new { deviceId = id });
-            Log("2. 연결 테스트(신뢰 후)", $"reachable={test["isReachable"]} message={test["message"]}");
+            Log("2. 연결 테스트", $"reachable={test["isReachable"]} message={test["message"]}");
             Assert.True(test["isReachable"]!.GetValue<bool>(), test["message"]?.ToString());
 
             // 3. Installing uploads the helper with scp, gives the device the logins and activates it.

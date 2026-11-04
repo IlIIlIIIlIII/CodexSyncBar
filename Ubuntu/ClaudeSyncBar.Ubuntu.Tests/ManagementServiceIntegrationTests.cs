@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -626,6 +627,41 @@ public sealed class ManagementServiceIntegrationTests
     }
 
     [Fact]
+    public async Task SwitchingThisPcEndsDesktopSessionsLeftOnAnotherAccountOnTheDevices()
+    {
+        await using var fixture = new Fixture(withRemote: true);
+        fixture.RecordDesktopRun("run-a");
+        var stale = fixture.StartDesktopSession("run-a", "fixture-account-1", "idle");
+        var working = fixture.StartDesktopSession("run-a", "fixture-account-1", "busy");
+        var current = fixture.StartDesktopSession("run-a", "fixture-account-2", "idle");
+        var otherComputer = fixture.StartDesktopSession("run-b", "fixture-account-1", "idle");
+
+        // This device alone: the desktop app keeps its login, so its sessions stay as they are.
+        var preview = await fixture.Call<SwitchPreview>("preview", new { profileId = 2, deviceId = "ssh:fixture" });
+        Assert.Equal("completed", (await fixture.Apply(preview)).State);
+        Assert.False(stale.HasExited);
+
+        // Every device, the PC with them, including when the account is applied again.
+        var result = await fixture.Apply(await fixture.Call<SwitchPreview>("preview", new { profileId = 2 }));
+        Assert.Equal("completed", result.State);
+        Assert.Contains("원격 세션 1개는 다음 메시지부터", result.Message);
+        Assert.Contains("작업 중인 원격 세션 1개는", result.Message);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await stale.WaitForExitAsync(deadline.Token);
+        Assert.False(working.HasExited);
+        Assert.False(current.HasExited);
+        Assert.False(otherComputer.HasExited);
+
+        // Still at work: left alone. Its turn over: ended by the watcher.
+        await fixture.RetireWaiting(DateTimeOffset.UtcNow);
+        Assert.False(working.HasExited);
+        fixture.SetDesktopSessionStatus(working, "idle");
+        await fixture.RetireWaiting(DateTimeOffset.UtcNow.AddMinutes(2));
+        await working.WaitForExitAsync(deadline.Token);
+        Assert.False(current.HasExited);
+    }
+
+    [Fact]
     public async Task SingleSshAndLocalPreviewsChangeOnlyTheirExplicitTarget()
     {
         await using var fixture = new Fixture(withRemote: true);
@@ -733,6 +769,7 @@ public sealed class ManagementServiceIntegrationTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "syncbar-production-integration-" + Guid.NewGuid().ToString("N"));
         private readonly Dictionary<string, string?> _previous = [];
         private readonly ManagementService _service;
+        private readonly List<Process> _sessions = [];
         public WindowsPaths Paths { get; }
         public AuthStore Auth { get; }
         public string RemoteAuth => Path.Combine(_root, "remote", ".claude", ".credentials.json");
@@ -837,13 +874,14 @@ public sealed class ManagementServiceIntegrationTests
                 # The device uses Claude Code's default file layout below its own HOME.
                 environment.pop('CLAUDE_CONFIG_DIR', None)
                 arguments = shlex.split(command)
-                if arguments == ['bash', '-l', '-s', '--', '__node', 'status-readonly']:
+                if arguments[:5] == ['bash', '-l', '-s', '--', '__node']:
                     helper = sys.stdin.buffer.read()
                     assert b'status-readonly' in helper and b'node_status_readonly' in helper
-                    pathlib.Path(os.environ['SYNCBAR_FIXTURE_STREAMED']).write_text('bundled helper received')
+                    if arguments[5:] == ['status-readonly']:
+                        pathlib.Path(os.environ['SYNCBAR_FIXTURE_STREAMED']).write_text('bundled helper received')
                     # Preserve this temporary HOME instead of sourcing the host login profile.
-                    result = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-s', '--',
-                                             '__node', 'status-readonly'], input=helper, env=environment)
+                    result = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-s', '--', *arguments[4:]],
+                                            input=helper, env=environment)
                     raise SystemExit(result.returncode)
                 os.execve('/bin/bash', ['bash', '-c', command], environment)
                 """ + "\n");
@@ -906,8 +944,38 @@ public sealed class ManagementServiceIntegrationTests
             }
             return operation;
         }
+        // What Claude Desktop records of its daemon on the devices, in its own profile.
+        public void RecordDesktopRun(string run)
+        {
+            Directory.CreateDirectory(Paths.DesktopUserDataDirectory);
+            File.WriteAllText(Path.Combine(Paths.DesktopUserDataDirectory, "ssh-remote-server-state.json"), JsonSerializer.Serialize(new { clientRunId = run }));
+        }
+        // A session Claude Desktop keeps on the device: a real process holding the login it started with.
+        public Process StartDesktopSession(string run, string account, string status)
+        {
+            var start = new ProcessStartInfo("/bin/sleep", "300") { UseShellExecute = false };
+            start.Environment["CLAUDE_SSH_DAEMON_CHILD"] = "1";
+            start.Environment["CLAUDE_SSH_RUN_DIR"] = "/home/fixture/.claude/remote/run/" + run;
+            start.Environment["CLAUDE_CODE_ACCOUNT_UUID"] = account;
+            var session = Process.Start(start)!;
+            _sessions.Add(session);
+            SetDesktopSessionStatus(session, status);
+            return session;
+        }
+        public void SetDesktopSessionStatus(Process session, string status)
+        {
+            var records = Path.Combine(_root, "remote", ".claude", "sessions");
+            Directory.CreateDirectory(records);
+            File.WriteAllText(Path.Combine(records, session.Id + ".json"), JsonSerializer.Serialize(new { pid = session.Id, status }));
+        }
+        public Task RetireWaiting(DateTimeOffset at) => _service.RetireWaitingSessionsAsync(at, CancellationToken.None);
         public async ValueTask DisposeAsync()
         {
+            foreach (var session in _sessions)
+            {
+                if (!session.HasExited) session.Kill();
+                session.Dispose();
+            }
             await _service.StopAsync();
             _service.Dispose();
             foreach (var pair in _previous) Environment.SetEnvironmentVariable(pair.Key, pair.Value);

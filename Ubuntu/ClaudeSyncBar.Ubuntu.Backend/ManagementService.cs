@@ -44,8 +44,13 @@ public sealed class ManagementService : IManagementService
     private readonly Dictionary<int, (DateTime Written, string? Plan)> _plans = [];
     private bool _shutdownRequested;
     public bool ShutdownRequested { get { lock (_state) return _shutdownRequested; } }
+    // A session left running with a shell of its own may never go idle; a later switch looks again.
+    private static readonly TimeSpan RetiringFor = TimeSpan.FromHours(12);
+    private RetiringSessions? _retiring;
+    private DateTimeOffset _lastRetireLook = DateTimeOffset.MinValue;
 
     private sealed record PreviewEntry(SwitchPreview View, string Observations, string TargetAccountId);
+    private sealed record RetiringSessions(string Account, string Run, IReadOnlyList<string> Devices, DateTimeOffset Until);
 
     public ManagementService(WindowsPaths paths, UsageService? usageService = null)
         : this(paths, usageService, null, watch: true) { }
@@ -80,6 +85,8 @@ public sealed class ManagementService : IManagementService
             do
             {
                 try { await WatchOnceAsync(DateTimeOffset.UtcNow, token); }
+                catch (Exception) when (!token.IsCancellationRequested) { /* The next tick tries again. */ }
+                try { await RetireWaitingSessionsAsync(DateTimeOffset.UtcNow, token); }
                 catch (Exception) when (!token.IsCancellationRequested) { /* The next tick tries again. */ }
             } while (await timer.WaitForNextTickAsync(token));
         }
@@ -393,18 +400,12 @@ public sealed class ManagementService : IManagementService
             case "device.delete": return await MutateAsync(() => DeleteDevice(p), token);
             case "device.test":
             {
-                var device = RequiredDevice(p);
-                var key = await new SshHostTrust().InspectAsync(device, token);
-                if (key is not null) return new { isReachable = false, message = "서버 지문 확인이 필요합니다.", hostKey = key };
-                var tested = await _ssh.TestConnectionAsync(device, token);
-                return new { tested.IsReachable, message = tested.IsReachable ? "SSH 연결이 정상입니다." : "SSH 연결 또는 인증을 확인해 주세요.", hostKey = (SshHostKey?)null };
+                var tested = await _ssh.TestConnectionAsync(RequiredDevice(p), token);
+                return new { tested.IsReachable, tested.Message };
             }
-            case "device.trust": return await TrustDeviceAsync(p, token);
             case "device.bootstrap":
             {
                 var device = RequiredDevice(p);
-                var key = await new SshHostTrust().InspectAsync(device, token);
-                if (key is not null) throw new RpcException("trust_required", "서버 지문을 먼저 확인해 주세요.", new { hostKey = key });
                 return StartJob("bootstrap", null, ct => BootstrapAsync(device.Id, ct));
             }
             case "device.apply":
@@ -592,15 +593,72 @@ public sealed class ManagementService : IManagementService
         var targets = c.Devices.Where(d => included.Contains("ssh:" + d.Id) && d.Enabled).Select(_ssh.CreateAccountTarget).ToList();
         if (included.Contains("local")) targets.Add(new WindowsAccountTarget(_auth, _local, _paths));
         var coordinator = new AccountSwitchCoordinator(_paths);
-        coordinator.Progress += o => SetOperation(FromSwitch(o, kind));
+        // The final state waits for the sessions below, so that the outcome is told once and whole.
+        coordinator.Progress += o => { if (!o.IsComplete) SetOperation(FromSwitch(o, kind)); };
         string operationId;
         lock (_state) operationId = _operation!.Id;
         var result = await coordinator.SwitchAsync(preview.View.ProfileId, targets, operationId, token);
-        SetOperation(FromSwitch(result, kind));
+        var outcome = FromSwitch(result, kind);
+        // The desktop app's sessions go by its login, which only a switch of this PC changes.
+        if (result.State == "completed" && included.Contains("local"))
+            outcome = outcome with { Message = outcome.Message + await RetireDesktopSessionsAsync(c, preview.TargetAccountId, included, token) };
+        SetOperation(outcome);
         // The token page's rates need the moment each device changed account.
         _controller.RecordSwitch(result);
         await RefreshDevicesAsync(token, allowBusy: true);
         return null;
+    }
+
+    /// <summary>
+    /// Ends what the desktop app left running on the devices under another account: its sessions there outlast
+    /// the app and keep the login they started with, so the switch alone would not reach them. What it says
+    /// is added to the switch's own message. Sessions still at work are looked at again by the watcher.
+    /// </summary>
+    private async Task<string> RetireDesktopSessionsAsync(AppConfiguration c, string account, IReadOnlySet<string> included, CancellationToken token)
+    {
+        lock (_state) _retiring = null;
+        if (_local.DesktopRemoteRun is not { } run) return "";
+        var devices = c.Devices.Where(d => d.Enabled && included.Contains("ssh:" + d.Id)).ToArray();
+        var results = await Task.WhenAll(devices.Select(d => RetireOnDeviceAsync(d, account, run, token)));
+        var left = devices.Where((_, index) => results[index] is not { Waiting: 0 }).Select(d => d.Id).ToArray();
+        if (left.Length > 0) lock (_state) _retiring = new(account, run, left, DateTimeOffset.UtcNow + RetiringFor);
+        var retired = results.Sum(r => r?.Retired ?? 0);
+        var waiting = results.Sum(r => r?.Waiting ?? 0);
+        return (retired > 0 ? $" 이전 계정을 쓰던 원격 세션 {retired}개는 다음 메시지부터 이 계정으로 이어집니다." : "")
+            + (waiting > 0 ? $" 작업 중인 원격 세션 {waiting}개는 작업이 끝나면 바꿉니다." : "");
+    }
+
+    // Null when the device could not be reached; the watcher tries it again.
+    private async Task<SshDeviceService.RetiredSessions?> RetireOnDeviceAsync(SshDeviceConfiguration device, string account, string run, CancellationToken token)
+    {
+        try { return await _ssh.RetireDesktopSessionsAsync(device, account, run, token); }
+        catch (Exception error) when (error is ClaudeSyncBarException or InvalidOperationException or IOException or TimeoutException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Looks again at the devices where the last switch found sessions still at work.</summary>
+    internal async Task RetireWaitingSessionsAsync(DateTimeOffset now, CancellationToken token)
+    {
+        RetiringSessions? retiring;
+        lock (_state)
+        {
+            retiring = _retiring;
+            if (retiring is null || _busy || _shutdownRequested || now - _lastRetireLook < TimeSpan.FromMinutes(1)) return;
+            _lastRetireLook = now;
+            if (now >= retiring.Until)
+            {
+                _retiring = null;
+                return;
+            }
+        }
+
+        var devices = _config.LoadOrCreate().Devices.Where(d => d.Enabled && retiring.Devices.Contains(d.Id)).ToArray();
+        var results = await Task.WhenAll(devices.Select(d => RetireOnDeviceAsync(d, retiring.Account, retiring.Run, token)));
+        var left = devices.Where((_, index) => results[index] is not { Waiting: 0 }).Select(d => d.Id).ToArray();
+        lock (_state)
+            if (ReferenceEquals(_retiring, retiring)) _retiring = left.Length == 0 ? null : retiring with { Devices = left };
     }
 
     private OperationView StartLogin(int? profileId, bool replace, bool fresh) => StartJob("login", profileId, async ct =>
@@ -751,31 +809,13 @@ public sealed class ManagementService : IManagementService
         return new { removed = true };
     }
 
-    private async Task<object?> TrustDeviceAsync(JsonElement p, CancellationToken token)
-    {
-        var trust = new SshHostTrust();
-        if (Wire.Item(p, "approvedKey").ValueKind == JsonValueKind.Object)
-        {
-            lock (_state) { ThrowIfStopping(); if (_busy) throw new RpcException("busy", "진행 중인 작업을 먼저 완료해 주세요."); }
-            using var lease = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: token);
-            lock (_state) { ThrowIfStopping(); if (_busy) throw new RpcException("busy", "진행 중인 작업을 먼저 완료해 주세요."); }
-            var device = RequiredDevice(p);
-            var approved = Wire.Item(p, "approvedKey").Deserialize<SshHostKey>(Wire.Json) ?? throw new RpcException("invalid_request", "승인한 서버 지문이 필요합니다.");
-            await trust.TrustAsync(device, approved, token);
-        }
-        var key = await trust.InspectAsync(RequiredDevice(p), token);
-        return new { trusted = key is null, hostKey = key };
-    }
-
     private async Task<object?> BootstrapAsync(string id, CancellationToken token)
     {
         using var lease = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: token);
         var c = _config.LoadOrCreate();
         var device = c.Devices.Single(d => d.Id == id);
-        var trust = await new SshHostTrust().InspectAsync(device, token);
-        if (trust is not null) throw new RpcException("trust_required", "서버 지문을 먼저 확인해 주세요.", new { hostKey = trust });
         var test = await _ssh.TestConnectionAsync(device, token);
-        if (!test.IsReachable) throw new RpcException("connection_failed", "SSH 연결 또는 인증에 실패했습니다.");
+        if (!test.IsReachable) throw new RpcException("connection_failed", test.Message);
         var prerequisites = await _ssh.InspectPrerequisitesAsync(device, token);
         if (prerequisites.Missing.Count > 0)
             throw new RpcException("remote_prerequisites", "원격 장치에 필요한 도구가 없습니다: " + string.Join(", ", prerequisites.Missing)

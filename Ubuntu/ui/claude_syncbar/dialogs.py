@@ -264,7 +264,7 @@ class ManagerDialog(Adw.Dialog):
         from .ssh_config import list_hosts, device_from_host
         clear(self.body)
         self.body.append(button('장치 목록으로', callback=lambda *_: self.render()))
-        group = self.group('SSH config에서 추가', '~/.ssh/config의 호스트를 선택하세요. 연결 설정을 확인한 뒤 저장할 수 있습니다.')
+        group = self.group('SSH config에서 추가', '~/.ssh/config의 호스트를 선택하세요. 바로 등록하고 설치합니다.')
         self.feedback.set_text('SSH 호스트를 읽고 있습니다…')
 
         def resolved(future):
@@ -276,8 +276,7 @@ class ManagerDialog(Adw.Dialog):
             except Exception as error:
                 self.feedback.set_text(str(error))
                 return False
-            self.feedback.set_text('설정을 확인한 뒤 저장하세요. 저장 후 설치 및 활성화를 진행할 수 있습니다.')
-            self.edit_device(draft)
+            self.register_device({'device':draft})
             return False
 
         def select(alias):
@@ -312,6 +311,15 @@ class ManagerDialog(Adw.Dialog):
             return False
 
         self.app.client.submit('device.list', callback=loaded)
+
+    def register_device(self, params):
+        # A new device is installed as soon as it is registered.
+        def saved(result, error):
+            if error:
+                return
+            self.render()
+            self.run('device.bootstrap', {'deviceId':result['id']})
+        self.run('device.save', params, saved)
 
     def edit_device(self, device):
         clear(self.body)
@@ -373,40 +381,31 @@ class ManagerDialog(Adw.Dialog):
                 params['password'] = password.get_text()
             if passphrase.get_text():
                 params['passphrase'] = passphrase.get_text()
-            self.run('device.save', params, lambda result,error: self.render() if not error else None)
+            # A connection that changed takes the device out of switching until it is installed again.
+            kept = enabled.get_active()
+            def saved(result, error):
+                if error:
+                    return
+                self.render()
+                if kept and not result.get('enabled'):
+                    self.run('device.bootstrap', {'deviceId':result['id']})
+            if device.get('id'):
+                self.run('device.save', params, saved)
+            else:
+                self.register_device(params)
             password.set_text('')
             passphrase.set_text('')
-        self.body.append(button('저장', callback=save, css='suggested-action'))
+        self.body.append(button('저장' if device.get('id') else '등록 및 설치', callback=save, css='suggested-action'))
         if not device.get('id'):
             return
         device_id = device['id']
         tools = box(False, 8)
         tools.append(button('연결 테스트', callback=lambda *_: self.run('device.test', {'deviceId':device_id})))
-        tools.append(button('호스트 키 확인', callback=lambda *_: self.check_trust(device_id)))
-        tools.append(button('설치 및 활성화', callback=lambda *_: self.check_trust(device_id, bootstrap=True)))
+        tools.append(button('설치 및 활성화', callback=lambda *_: self.run('device.bootstrap', {'deviceId':device_id})))
         self.body.append(tools)
         if self.app.selected_id is not None:
             self.body.append(button('이 장치에 선택한 계정 적용', callback=lambda *_: self.apply_device(device_id)))
         self.body.append(button('장치 삭제', callback=lambda *_: self.confirm('SSH 장치를 삭제할까요?', '목록에서 제거하며 원격 장치의 계정은 변경하지 않습니다.', '삭제', lambda: self.run('device.delete', {'deviceId':device_id}, lambda r,e: self.render() if not e else None), True)))
-
-    def check_trust(self, device_id, bootstrap=False):
-        def inspected(result, error):
-            if error:
-                return
-            if result.get('trusted'):
-                if bootstrap:
-                    self.run('device.bootstrap', {'deviceId':device_id})
-                else:
-                    self.feedback.set_text('등록된 호스트 키와 일치합니다.')
-                return
-            key = result.get('hostKey')
-            if not key:
-                self.feedback.set_text('호스트 키를 확인하지 못했습니다.')
-                return
-            def approve():
-                self.run('device.trust', {'deviceId':device_id,'approvedKey':key}, lambda r,e: self.run('device.bootstrap', {'deviceId':device_id}) if bootstrap and not e else None)
-            self.confirm('이 서버의 호스트 키를 신뢰할까요?', f"{key.get('host')}:{key.get('port')}\n\n{key.get('fingerprint')}\n\n서버 관리자가 제공한 지문과 비교해 주세요.", '신뢰하고 등록', approve)
-        self.run('device.trust', {'deviceId':device_id}, inspected)
 
     def apply_device(self, device_id):
         def ready(preview, error):

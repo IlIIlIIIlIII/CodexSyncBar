@@ -178,7 +178,7 @@ public sealed class DevicesPage : SyncPage
         return button;
     }
 
-    // Lists the aliases of ~/.ssh/config; the chosen one becomes a new device to check and save.
+    // Lists the aliases of ~/.ssh/config; the chosen one is registered and installed at once.
     private async Task ImportSshConfigAsync()
     {
         List<string> hosts;
@@ -202,26 +202,29 @@ public sealed class DevicesPage : SyncPage
             });
         }
 
-        var content = Ui.Stack(12, false, Ui.Caption("~/.ssh/config의 호스트를 골라 주세요. 연결 설정을 확인한 뒤 저장할 수 있어요."));
+        var content = Ui.Stack(12, false, Ui.Caption("~/.ssh/config의 호스트를 골라 주세요. 바로 등록하고 설치해요."));
         content.Children.Add(hosts.Count == 0
             ? Ui.Text("추가할 SSH 호스트가 없어요. ~/.ssh/config에 Host 별칭을 추가해 주세요. 와일드카드 항목은 보이지 않아요.", secondary: true)
             : list);
         var dialog = new ContentDialog
         {
-            XamlRoot = XamlRoot, Title = "SSH config에서 추가", Content = content, PrimaryButtonText = "다음", CloseButtonText = "취소",
+            XamlRoot = XamlRoot, Title = "SSH config에서 추가", Content = content, PrimaryButtonText = "등록 및 설치", CloseButtonText = "취소",
             DefaultButton = ContentDialogButton.Primary, IsPrimaryButtonEnabled = false, RequestedTheme = ActualTheme,
         };
         list.SelectionChanged += (_, _) => dialog.IsPrimaryButtonEnabled = list.SelectedItem is ListViewItem;
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || list.SelectedItem is not ListViewItem { Tag: string alias }) return;
-        try
-        {
-            var draft = await Task.Run(() => SshConfig.Resolve(alias));
-            Shell.Navigate("device", draft);
-            State.Say("설정을 확인한 뒤 저장해 주세요. 저장하면 설치 및 활성화를 할 수 있어요.");
-        }
+        JsonObject draft;
+        try { draft = await Task.Run(() => SshConfig.Resolve(alias)); }
         catch (FormatException error)
         {
             State.Say(error.Message, NoticeKind.Warning);
+            return;
         }
+
+        if (await State.CommandAsync("device.save", new JsonObject { ["device"] = draft }) is not { } saved) return;
+        await State.LoadDeviceListAsync();
+        if (AppState.Str(saved["id"]) is not { } created) return;
+        Shell.Navigate("device", created);
+        await State.CommandAsync("device.bootstrap", new { deviceId = created }, "장치를 설치하고 활성화하고 있어요.");
     }
 }

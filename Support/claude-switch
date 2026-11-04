@@ -1544,8 +1544,11 @@ node_initialize() {
     die "profile $target is missing, insecure, or not access-only on $(hostname)"
 
   active=$(detect_active_profile 2>/dev/null || true)
+  # The device follows the registered accounts. A login of its own is kept
+  # beside the profiles rather than asked about.
   if [ -z "$active" ] && [ -e "$AUTH_FILE" ]; then
-    die "existing active auth is not a recognized profile on $(hostname); refusing to overwrite it"
+    atomic_copy "$AUTH_FILE" "$STATE_ROOT/login-before-syncbar.$(fingerprint "$AUTH_FILE" 2>/dev/null || printf unknown).json" || \
+      die "could not keep the existing login on $(hostname)"
   fi
   if [ -n "$active" ] && [ "$active" != "$target" ]; then
     save_active_profile >/dev/null
@@ -1786,8 +1789,44 @@ node_install_access() {
 
 # Claude Code has no background server that holds a login: every session
 # reads the credential file itself, so a switch has no client to stop.
+# Sessions Claude Desktop starts here are the exception; see node_retire_sessions.
 node_stop_clients() {
   printf 'stopped_processes=0 forced_processes=0\n'
+}
+
+# Claude Desktop runs its sessions on a device under a daemon of its own, each
+# with the login the app had then in its environment. The daemon outlives the
+# app, which attaches to the same process again after a restart, so such a
+# session stays on its account whatever the credential file says. One that holds
+# another account than the given one is ended when idle, the way the app ends
+# them itself; the app resumes it on its next message with the login it has now.
+# One at work, or with a shell of its own still running, is left and counted.
+node_retire_sessions() {
+  local account="$1"
+  local run="$2"
+  local record pid environment holder organization retired=0 waiting=0
+  case "$account" in ''|*[!A-Za-z0-9:-]*) die "invalid account id" ;; esac
+  case "$run" in ''|*[!A-Za-z0-9_-]*) die "invalid desktop run" ;; esac
+  for record in "$CLAUDE_DIR"/sessions/[0-9]*.json; do
+    pid=${record##*/}
+    pid=${pid%.json}
+    case "$pid" in *[!0-9]*) continue ;; esac
+    environment=$(tr '\0' '\n' 2>/dev/null </proc/"$pid"/environ) || continue
+    [ "$(printf '%s\n' "$environment" | sed -n 's/^CLAUDE_SSH_DAEMON_CHILD=//p')" = 1 ] || continue
+    [ "$(printf '%s\n' "$environment" | sed -n 's|^CLAUDE_SSH_RUN_DIR=.*/||p')" = "$run" ] || continue
+    holder=$(printf '%s\n' "$environment" | sed -n 's/^CLAUDE_CODE_ACCOUNT_UUID=//p')
+    organization=$(printf '%s\n' "$environment" | sed -n 's/^CLAUDE_CODE_ORGANIZATION_UUID=//p')
+    [ -n "$holder" ] || continue
+    [ -z "$organization" ] || holder="$organization:$holder"
+    [ "$holder" != "$account" ] || continue
+    if [ "$(jq -r '.status // empty' "$record" 2>/dev/null)" = idle ] && ! pgrep -P "$pid" -f shell-snapshots >/dev/null 2>&1; then
+      kill -TERM "$pid" 2>/dev/null || continue
+      retired=$((retired + 1))
+    else
+      waiting=$((waiting + 1))
+    fi
+  done
+  printf 'retired=%s waiting=%s\n' "$retired" "$waiting"
 }
 
 # Resolve symlinks without depending on GNU readlink -f (SSH Macs lack it).
@@ -4212,6 +4251,7 @@ node_main() {
     status) [ "$#" -eq 0 ] || die "node status takes no arguments"; node_status ;;
     status-readonly) [ "$#" -eq 0 ] || die "node status-readonly takes no arguments"; node_status_readonly ;;
     stop-clients) [ "$#" -eq 0 ] || die "node stop-clients takes no arguments"; node_stop_clients ;;
+    retire-sessions) [ "$#" -eq 2 ] || die "node retire-sessions requires an account and a desktop run"; node_retire_sessions "$1" "$2" ;;
     claude-info) [ "$#" -eq 0 ] || die "node claude-info takes no arguments"; node_claude_info ;;
     update-claude) [ "$#" -eq 0 ] || die "node update-claude takes no arguments"; node_update_claude ;;
     profile-map) [ "$#" -eq 0 ] || die "node profile-map takes no arguments"; node_profile_map ;;

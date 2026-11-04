@@ -153,8 +153,7 @@ public sealed class DemoService : IManagementService
                 _tokenBasis = TokenBurnBasis.Normalize(Wire.Text(p, "tokenRateBasis", _tokenBasis));
                 return Settings;
             case "device.list": return _configuration;
-            case "device.test": return new { isReachable = !_offline, message = "데모 장치 연결을 확인했습니다.", hostKey = (object?)null };
-            case "device.trust": return new { trusted = true, hostKey = (object?)null };
+            case "device.test": return new { isReachable = !_offline, message = "데모 장치 연결을 확인했습니다." };
             case "account.rename":
             {
                 var index = _accounts.FindIndex(a => a.Id == Wire.Number(p, "profileId"));

@@ -25,7 +25,7 @@ public static class Glyphs
 /// <summary>More Segoe Fluent Icons code points, written as escapes.</summary>
 public static class MoreGlyphs
 {
-    public const string OpenFile = "", Fingerprint = "";
+    public const string OpenFile = "";
 }
 
 /// <summary>Small builders for the pieces every screen repeats, so their look stays one.</summary>

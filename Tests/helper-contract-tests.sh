@@ -432,6 +432,68 @@ active_is "$STATE/profiles/3.auth.json"
 stop_output=$(env "${common_env[@]}" "$HELPER" __node stop-clients)
 [ "$stop_output" = 'stopped_processes=0 forced_processes=0' ]
 
+# Sessions Claude Desktop keeps on a device hold the login they started with.
+# Only this app's idle ones on another account are ended; real processes stand in.
+if [ -r /proc/self/environ ]; then
+  mkdir -p "$CLAUDE/sessions"
+  desktop_session() { # run, account, organization, status, command
+    local pid
+    CLAUDE_SSH_DAEMON_CHILD=1 CLAUDE_SSH_RUN_DIR="/home/fixture/.claude/remote/run/$1" \
+      CLAUDE_CODE_ACCOUNT_UUID="$2" CLAUDE_CODE_ORGANIZATION_UUID="$3" bash -c "$5" </dev/null >/dev/null 2>&1 &
+    pid=$!
+    TEST_PROCESS_PIDS+=("$pid")
+    # The environment shows once the shell above has replaced the fork.
+    until tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -q '^CLAUDE_SSH_DAEMON_CHILD='; do sleep 0.05; done
+    printf '{"pid":%s,"status":"%s"}\n' "$pid" "$4" >"$CLAUDE/sessions/$pid.json"
+    SESSION_PID=$pid
+  }
+  session_alive() {
+    local state
+    state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+    case "$state" in ''|Z*) return 1 ;; *) return 0 ;; esac
+  }
+  session_ends() {
+    local attempt
+    for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      session_alive "$1" || return 0
+      sleep 0.1
+    done
+    return 1
+  }
+  retire() { env "${common_env[@]}" "$HELPER" __node retire-sessions org-a:account-a run-a; }
+  desktop_session run-a account-b org-a idle 'exec sleep 300'; stale=$SESSION_PID
+  desktop_session run-a account-a org-b idle 'exec sleep 300'; other_seat=$SESSION_PID
+  desktop_session run-a account-a org-a idle 'exec sleep 300'; current=$SESSION_PID
+  desktop_session run-b account-b org-a idle 'exec sleep 300'; other_computer=$SESSION_PID
+  desktop_session run-a account-b org-a busy 'exec sleep 300'; busy=$SESSION_PID
+  desktop_session run-a account-b org-a idle 'sh -c "sleep 60; : shell-snapshots" & wait'; with_shell=$SESSION_PID
+  until pgrep -P "$with_shell" -f shell-snapshots >/dev/null; do sleep 0.05; done
+  # A record outliving its process, and a process no daemon started, are not sessions to end.
+  printf '{"pid":999999,"status":"idle"}\n' >"$CLAUDE/sessions/999999.json"
+  sleep 300 </dev/null >/dev/null 2>&1 &
+  plain=$!
+  TEST_PROCESS_PIDS+=("$plain")
+  printf '{"pid":%s,"status":"idle"}\n' "$plain" >"$CLAUDE/sessions/$plain.json"
+  [ "$(retire)" = 'retired=2 waiting=2' ]
+  session_ends "$stale"
+  session_ends "$other_seat"
+  session_alive "$current"
+  session_alive "$other_computer"
+  session_alive "$busy"
+  session_alive "$with_shell"
+  session_alive "$plain"
+  # At the end of its turn the busy one follows.
+  printf '{"pid":%s,"status":"idle"}\n' "$busy" >"$CLAUDE/sessions/$busy.json"
+  [ "$(retire)" = 'retired=1 waiting=1' ]
+  session_ends "$busy"
+  if env "${common_env[@]}" "$HELPER" __node retire-sessions 'x;id' run-a >/dev/null 2>&1; then
+    printf 'an unsafe account id was accepted\n' >&2
+    exit 1
+  fi
+  pkill -P "$with_shell" || true
+  rm -rf "$CLAUDE/sessions"
+fi
+
 profile_before=$(shasum -a 256 "$STATE/profiles/3.auth.json" | awk '{print $1}')
 active_before=$(active_sha)
 if env "${common_env[@]}" PATH="$FAKE_PROCESS_BIN:$PATH" \
@@ -466,6 +528,25 @@ cp "$access_backup/profile.auth.json" "$STATE/profiles/3.auth.json"
 set_active "$access_backup/active.auth.json"
 chmod 600 "$STATE/profiles/3.auth.json"
 rm -rf "$access_backup"
+
+# A device with a login of its own follows the registered accounts; that login is kept aside.
+OWN_LOGIN_HOME="$TMP/own-login-home"
+mkdir -p "$OWN_LOGIN_HOME/.claude" "$OWN_LOGIN_HOME/state/profiles"
+chmod 700 "$OWN_LOGIN_HOME" "$OWN_LOGIN_HOME/.claude" "$OWN_LOGIN_HOME/state" "$OWN_LOGIN_HOME/state/profiles"
+own_env=(HOME="$OWN_LOGIN_HOME" CLAUDE_SWITCH_STATE_ROOT="$OWN_LOGIN_HOME/state" CLAUDE_SWITCH_CONFIG_FILE="$OWN_LOGIN_HOME/state/config.json")
+cp "$ACCESS_ONLY" "$OWN_LOGIN_HOME/state/profiles/3.auth.json"
+chmod 600 "$OWN_LOGIN_HOME/state/profiles/3.auth.json"
+login_json own-account own-access own-refresh >"$TMP/own-login.json"
+jq '{claudeAiOauth}' "$TMP/own-login.json" >"$OWN_LOGIN_HOME/.claude/.credentials.json"
+jq '{oauthAccount}' "$TMP/own-login.json" >"$OWN_LOGIN_HOME/.claude.json"
+chmod 600 "$OWN_LOGIN_HOME/.claude/.credentials.json" "$OWN_LOGIN_HOME/.claude.json"
+env -u CLAUDE_CONFIG_DIR "${own_env[@]}" "$HELPER" __node initialize 3 | grep -F 'active=3 ' >/dev/null
+[ "$(jq -r '.oauthAccount.accountUuid' "$OWN_LOGIN_HOME/.claude.json")" = account-3 ]
+kept_login=$(find "$OWN_LOGIN_HOME/state" -maxdepth 1 -name 'login-before-syncbar.*.json' -print -quit)
+[ -n "$kept_login" ]
+[ "$(jq -r '.oauthAccount.accountUuid' "$kept_login")" = own-account ]
+[ "$(jq -r '.claudeAiOauth.refreshToken' "$kept_login")" = own-refresh ]
+[ "$(file_mode "$kept_login")" = 600 ]
 
 BOOTSTRAP_REMOTE_HOME="$TMP/bootstrap-remote-home"
 mkdir -p "$BOOTSTRAP_REMOTE_HOME"

@@ -57,6 +57,9 @@ public sealed class LocalSwitchService
         }
     }
 
+    /// <summary>The name under which Claude Desktop runs its daemon on remote devices, or null when it has none.</summary>
+    public string? DesktopRemoteRun => ClaudeDesktopAccounts.RemoteRun(_desktopAccounts.ActiveDirectory);
+
     /// <summary>Why the account cannot be applied to Claude Desktop from this process, or null.</summary>
     public string? DescribeDesktopBlocker(int profileId) =>
         DesktopAccountToMove(profileId) is not null && _hostedByDesktop() ? HostedByDesktopMessage : null;

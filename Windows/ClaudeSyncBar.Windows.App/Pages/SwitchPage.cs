@@ -385,7 +385,7 @@ public sealed class SwitchPage : SyncPage
         var included = Targets().Count(Included);
         var scope = included == 0 ? "계정과 장치를 확인해 주세요." : $"활성 장치 {included}대에 적용해요.";
         if (!State.Busy && AppState.Str(State.Preview?["desktopNotice"]) is { } notice) scope += " " + notice;
-        else if (included > 0) scope += " 실행 중인 Claude Code 세션은 다시 시작해야 새 계정을 써요.";
+        else if (included > 0) scope += " 원격 장치에서 이전 계정으로 쉬고 있는 데스크톱 세션은 닫고, 다음 메시지부터 새 계정으로 이어가요.";
         var scopeText = Ui.Caption(scope);
         scopeText.MaxLines = 3;
         text.Children.Add(scopeText);

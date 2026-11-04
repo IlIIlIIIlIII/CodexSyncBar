@@ -390,7 +390,7 @@ public sealed class SshDeviceService
             result.ExitCode == 0 && message.Contains("claude-syncbar", StringComparison.Ordinal),
             result.ExitCode == 0 ? "SSH 연결이 정상입니다." :
                 message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase) ? "SSH 인증에 실패했습니다. 사용자 이름과 선택한 인증 방식의 비밀번호·키를 확인해 주세요." :
-                message.Contains("Host key verification failed", StringComparison.OrdinalIgnoreCase) ? "SSH 서버 호스트 키 확인이 필요합니다. 연결 테스트에서 서버 지문을 확인해 주세요." :
+                message.Contains("Host key verification failed", StringComparison.OrdinalIgnoreCase) ? "서버 호스트 키가 known_hosts 기록과 다릅니다. 서버를 다시 설치했다면 이전 기록을 지운 뒤 다시 시도해 주세요." :
                 "SSH 네트워크·원격 명령 확인 실패: " + message);
     }
 
@@ -512,6 +512,27 @@ public sealed class SshDeviceService
         SshUploadFile.EnsureSource(_paths, _paths.BundledClaudeSwitch);
         return await RunSshWithInputAsync(device, ["bash", "-l", "-s", "--", "__node", "status-readonly"],
             await File.ReadAllTextAsync(_paths.BundledClaudeSwitch, token), ResolveSecret(device), token, TimeSpan.FromSeconds(20));
+    }
+
+    public sealed record RetiredSessions(int Retired, int Waiting);
+
+    /// <summary>
+    /// Ends the idle sessions Claude Desktop runs on the device under another account than this one.
+    /// Streamed like the status, so that a device installed by an earlier version need not be installed again.
+    /// </summary>
+    /// <param name="account">The login the sessions should be on, as <see cref="ClaudeAuthFile.AccountId"/> names it.</param>
+    /// <param name="run">The name of this app's daemon on the device; another computer's sessions are left alone.</param>
+    public async Task<RetiredSessions> RetireDesktopSessionsAsync(SshDeviceConfiguration device, string account, string run, CancellationToken token)
+    {
+        if (!Regex.IsMatch(account, "^[A-Za-z0-9:-]+$") || !Regex.IsMatch(run, "^[A-Za-z0-9_-]+$"))
+            throw new ClaudeSyncBarException("원격 세션을 정리할 계정을 확인하지 못했습니다.");
+        SshUploadFile.EnsureSource(_paths, _paths.BundledClaudeSwitch);
+        var result = await RunSshWithInputAsync(device, ["bash", "-l", "-s", "--", "__node", "retire-sessions", account, run],
+            await File.ReadAllTextAsync(_paths.BundledClaudeSwitch, token), ResolveSecret(device), token, TimeSpan.FromSeconds(30));
+        EnsureRemoteSuccess(device, result, "원격 세션 정리");
+        var fields = ParseFields(result.StandardOutput);
+        return new(int.TryParse(fields.GetValueOrDefault("retired"), out var retired) ? retired : 0,
+            int.TryParse(fields.GetValueOrDefault("waiting"), out var waiting) ? waiting : 0);
     }
 
     public sealed record RemotePrerequisites(IReadOnlyList<string> Missing, bool NodeAvailable, bool ClaudeAvailable);
@@ -2209,7 +2230,8 @@ public sealed class SshDeviceService
         {
             "-o", hasAskPassSecret ? "BatchMode=no" : "BatchMode=yes",
             "-o", "ConnectTimeout=8",
-            "-o", "StrictHostKeyChecking=yes",
+            // A host seen for the first time is recorded without asking; a key that later differs still refuses to connect.
+            "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ForwardAgent=no",
             "-o", "ForwardX11=no",
             "-o", "RequestTTY=no",

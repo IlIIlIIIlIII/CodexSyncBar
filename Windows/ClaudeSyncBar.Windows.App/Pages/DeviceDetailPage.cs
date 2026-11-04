@@ -94,21 +94,20 @@ public sealed class DeviceDetailPage : SyncPage
             : reachable ? Ui.Pill("연결됨", Ui.PillKind.Success, Glyphs.Check)
             : unreachable ? Ui.Pill("연결 실패", Ui.PillKind.Caution, Glyphs.Warning)
             : Ui.Pill("확인 필요", Ui.PillKind.Neutral);
-        var parts = new List<string> { activated ? "활성화 완료" : "호스트 키를 확인하고 설치해야 전환에 포함돼요" };
+        var parts = new List<string> { activated ? "활성화 완료" : "설치를 마치면 전환에 포함돼요" };
         if (AppState.Str(status?["detail"]) is { Length: > 0 } detail) parts.Add(detail);
         if (reachable && AppState.Str(status?["currentAccountLabel"]) is { Length: > 0 } label) parts.Add("지금 " + label);
         var title = Ui.Stack(8, true, Ui.Text(name, strong: true, wrap: false), pill);
         var text = Ui.Stack(2, false, title, Ui.Caption(string.Join(" · ", parts)));
         var busy = State.Busy;
         var test = Ui.Button("연결 테스트", click: async (_, _) => await TestAsync());
-        var trust = Ui.Button("호스트 키 확인", MoreGlyphs.Fingerprint, click: async (_, _) => await TrustAsync(install: false));
-        var install = Ui.Button(activated ? "다시 설치" : "설치 및 활성화", Glyphs.Download, accent: !activated, click: async (_, _) => await TrustAsync(install: true),
-            tip: "호스트 키를 확인하고 원격 장치에 전환 도구를 설치해요");
-        test.IsEnabled = trust.IsEnabled = install.IsEnabled = !busy && State.Error is null;
-        // Beside the name when there is room for all three, under it otherwise.
+        var install = Ui.Button(activated ? "다시 설치" : "설치 및 활성화", Glyphs.Download, accent: !activated, click: async (_, _) => await InstallAsync(_id!),
+            tip: "원격 장치에 전환 도구를 설치해요");
+        test.IsEnabled = install.IsEnabled = !busy && State.Error is null;
+        // Beside the name when there is room for both, under it otherwise.
         var body = Wide
-            ? (UIElement)Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text, Ui.Stack(8, true, test, trust, install))
-            : Ui.Stack(12, false, Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text), Ui.Wrap(8, test, trust, install));
+            ? (UIElement)Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text, Ui.Stack(8, true, test, install))
+            : Ui.Stack(12, false, Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text), Ui.Wrap(8, test, install));
         return Ui.Card(body);
     }
 
@@ -215,7 +214,7 @@ public sealed class DeviceDetailPage : SyncPage
     private Grid Actions()
     {
         var busy = State.Busy;
-        var save = Keep("save", () => Ui.Button("저장", accent: true, click: async (_, _) => await SaveAsync()));
+        var save = Keep("save", () => Ui.Button(_id is null ? "등록 및 설치" : "저장", accent: true, click: async (_, _) => await SaveAsync()));
         save.IsEnabled = !busy && State.Error is null;
         Button? only = null;
         if (_id is not null && QuotaFormat.Flag(Saved?["enabled"]) && State.Selected is { } selected && !AppState.NeedsLogin(selected))
@@ -264,57 +263,32 @@ public sealed class DeviceDetailPage : SyncPage
         var parameters = new JsonObject { ["device"] = device, ["clearPassphrase"] = _clearPassphrase };
         if (_password.Length > 0) parameters["password"] = _password;
         if (_passphrase.Length > 0) parameters["passphrase"] = _passphrase;
-        if (await State.CommandAsync("device.save", parameters, "장치 설정을 저장했어요.") is not { } saved) return;
+        // A new device is installed as soon as it is registered, and so is one whose
+        // connection changed, which the service takes out of switching until then.
+        var keptInSwitching = QuotaFormat.Flag(_draft["enabled"]);
+        if (await State.CommandAsync("device.save", parameters, _id is null ? null : "장치 설정을 저장했어요.") is not { } saved) return;
         _password = _passphrase = "";
         _clearPassphrase = false;
         await State.LoadDeviceListAsync();
         if (_id is null && AppState.Str(saved["id"]) is { } created)
         {
             Shell.Navigate("device", created);
+            await InstallAsync(created);
             return;
         }
 
         _draft = null;
         Redraw();
+        if (_id is not null && keptInSwitching && !QuotaFormat.Flag(saved["enabled"])) await InstallAsync(_id);
     }
 
     private async Task TestAsync()
     {
         if (await State.CommandAsync("device.test", new { deviceId = _id }) is not { } result) return;
-        if (result["hostKey"] is JsonObject)
-        {
-            await TrustAsync(install: false);
-            return;
-        }
-
         State.Say(AppState.Str(result["message"]) ?? "연결을 확인했어요.", QuotaFormat.Flag(result["isReachable"]) ? NoticeKind.Success : NoticeKind.Warning);
     }
 
-    // The server's key is shown for the user to compare before anything is sent to it; then the device may be installed.
-    private async Task TrustAsync(bool install)
-    {
-        if (await State.CommandAsync("device.trust", new { deviceId = _id }) is not { } result) return;
-        if (!QuotaFormat.Flag(result["trusted"]))
-        {
-            if (result["hostKey"] is not JsonObject key)
-            {
-                State.Say("호스트 키를 확인하지 못했어요.", NoticeKind.Warning);
-                return;
-            }
-
-            var body = $"{AppState.Str(key["host"])}:{key["port"]?.ToJsonString()}\n\n{AppState.Str(key["fingerprint"])}\n\n서버 관리자가 알려 준 지문과 같은지 비교해 주세요.";
-            if (!await Flows.ConfirmAsync(XamlRoot, "이 서버의 호스트 키를 신뢰할까요?", body, "신뢰하고 등록")) return;
-            if (await State.CommandAsync("device.trust", new JsonObject { ["deviceId"] = _id, ["approvedKey"] = key.DeepClone() },
-                install ? null : "호스트 키를 등록했어요.") is null) return;
-        }
-        else if (!install)
-        {
-            State.Say("등록된 호스트 키와 일치해요.", NoticeKind.Success);
-            return;
-        }
-
-        if (install) await State.CommandAsync("device.bootstrap", new { deviceId = _id }, "장치를 설치하고 활성화하고 있어요.");
-    }
+    private Task InstallAsync(string id) => State.CommandAsync("device.bootstrap", new { deviceId = id }, "장치를 설치하고 활성화하고 있어요.");
 
     private async Task ApplyHereAsync(JsonObject account)
     {
