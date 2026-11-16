@@ -11,6 +11,7 @@
 ## SSH 장치
 
 - 장치를 등록하면 묻지 않고 바로 설치·활성화한다(사용자 요청 2026-11-04). 호스트 키 확인 단계와 지문 대화상자를 다시 추가하지 않는다. 처음 보는 호스트 키는 `StrictHostKeyChecking=accept-new`로 자동 기록하고, 기록과 달라진 키만 연결을 거부한다. 장치에 등록되지 않은 로그인이 있으면 `login-before-syncbar.*.json`으로 남기고 등록된 계정으로 덮어쓴다.
+- 로그인을 넣을 때 `~/.claude.json`에 `hasCompletedOnboarding: true`도 함께 넣는다(helper의 `store_active_view`, 이 PC는 `AuthStore.WriteActive`). 이 표시가 없으면 Claude Code는 로그인이 들어 있어도 첫 실행 설정을 띄워 다시 로그인하라고 한다. 데스크톱 앱 세션만 쓰던 장치에는 이 표시가 없다(2026-11-16, WSL에서 확인).
 - Claude 데스크톱 앱이 SSH 장치에 띄운 세션은 앱이 재시작해도 원격 데몬 아래 살아 있고, 시작할 때 받은 토큰을 환경변수(`CLAUDE_CODE_OAUTH_TOKEN`)로 계속 쥔다. 자격 증명 파일만 바꿔서는 이 세션이 다른 계정으로 넘어가지 않는다. 그래서 이 PC가 포함된 적용을 마치면 `__node retire-sessions`로 다른 계정을 쥔 유휴 세션을 SIGTERM으로 끝내고, 작업 중인 세션은 끝날 때까지 기다린다. 앱은 다음 메시지에서 현재 로그인으로 `--resume`한다.
 
 ## WSL 장치 (Windows 앱)

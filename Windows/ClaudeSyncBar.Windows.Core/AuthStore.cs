@@ -650,7 +650,13 @@ public sealed class AuthStore
             ?? new JsonObject();
         credentials["claudeAiOauth"] = JsonSerializer.SerializeToNode(auth.Oauth, ClaudeFileOptions);
         WriteClaudeFile(_paths.ActiveAuthFile, credentials);
-        UpdateClaudeConfig(config => config["oauthAccount"] = JsonSerializer.SerializeToNode(auth.Account, ClaudeFileOptions));
+        UpdateClaudeConfig(config =>
+        {
+            config["oauthAccount"] = JsonSerializer.SerializeToNode(auth.Account, ClaudeFileOptions);
+            // Without the first-run mark Claude Code opens with its set-up, which asks to sign in again
+            // whatever login is in place. The helper does the same on a device.
+            config["hasCompletedOnboarding"] = true;
+        });
         SaveActiveMarker(auth.Oauth, auth.Account);
     }
 

@@ -542,6 +542,8 @@ jq '{oauthAccount}' "$TMP/own-login.json" >"$OWN_LOGIN_HOME/.claude.json"
 chmod 600 "$OWN_LOGIN_HOME/.claude/.credentials.json" "$OWN_LOGIN_HOME/.claude.json"
 env -u CLAUDE_CONFIG_DIR "${own_env[@]}" "$HELPER" __node initialize 3 | grep -F 'active=3 ' >/dev/null
 [ "$(jq -r '.oauthAccount.accountUuid' "$OWN_LOGIN_HOME/.claude.json")" = account-3 ]
+# The device's Claude Code then opens without its first-run sign-in, which no login would get past.
+[ "$(jq -r '.hasCompletedOnboarding' "$OWN_LOGIN_HOME/.claude.json")" = true ]
 kept_login=$(find "$OWN_LOGIN_HOME/state" -maxdepth 1 -name 'login-before-syncbar.*.json' -print -quit)
 [ -n "$kept_login" ]
 [ "$(jq -r '.oauthAccount.accountUuid' "$kept_login")" = own-account ]

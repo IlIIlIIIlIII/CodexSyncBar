@@ -593,7 +593,10 @@ store_active_view() {
   mkdir -p "$CLAUDE_DIR" || return 1
   merge_claude_file "$CREDENTIALS_FILE" '.claudeAiOauth = $login[0].claudeAiOauth' || return 1
   acquire_claude_config_lock || return 1
-  if ! merge_claude_file "$CLAUDE_CONFIG_FILE" '.oauthAccount = $login[0].oauthAccount'; then
+  # Without the first-run mark Claude Code opens with its set-up, which asks to sign in
+  # again whatever login is in place. A device used only through Claude Desktop, whose
+  # sessions need no set-up, never got the mark.
+  if ! merge_claude_file "$CLAUDE_CONFIG_FILE" '.oauthAccount = $login[0].oauthAccount | .hasCompletedOnboarding = true'; then
     release_claude_config_lock
     return 1
   fi

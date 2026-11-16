@@ -143,6 +143,8 @@ public sealed class AuthVaultTests : IDisposable
         {
             Assert.Equal(7, document.RootElement.GetProperty("numStartups").GetInt32());
             Assert.Equal("test-account", document.RootElement.GetProperty("oauthAccount").GetProperty("accountUuid").GetString());
+            // A login put in place must not be met by Claude Code's first-run sign-in.
+            Assert.True(document.RootElement.GetProperty("hasCompletedOnboarding").GetBoolean());
         }
         Assert.False(Directory.Exists(_paths.ClaudeConfigFile + ".lock"));
 
