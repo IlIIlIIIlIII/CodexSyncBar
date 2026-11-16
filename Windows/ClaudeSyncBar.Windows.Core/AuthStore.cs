@@ -224,21 +224,68 @@ public sealed class AuthStore
         return auth;
     }
 
-    // A running CLI may rotate the active account's tokens. Prefer that copy
-    // only when it identifies the same account and expires later.
-    public void ReconcileActiveCredentials(int profileId)
+    // A running CLI may rotate the active account's tokens, and someone may sign
+    // in to the same account again in it. Prefer that copy only when it
+    // identifies the same account and is the later login.
+    /// <returns>Whether the stored login was replaced.</returns>
+    public bool ReconcileActiveCredentials(int profileId)
     {
         var stored = ReadAuthFile(ProfileAuthFile(profileId));
         var owner = ResolveActiveOwner();
         // Tokens are opaque, so a guess about whose they are must never be
         // stored: that would put one account's login into another's profile.
-        if (owner is not { Proven: true } || owner.Login.AccountId != stored.AccountId) return;
+        if (owner is not { Proven: true } || owner.Login.AccountId != stored.AccountId) return false;
         var active = owner.Login;
         ValidateFullAuth(active);
-        if (active.Oauth.ExpiresAt is { } activeAt
-            && (stored.Oauth.ExpiresAt is not { } storedAt || activeAt > storedAt))
-            WriteJsonAtomically(ProfileAuthFile(profileId), active);
+        if (!IsLaterLogin(active.Oauth, stored.Oauth)) return false;
+        WriteJsonAtomically(ProfileAuthFile(profileId), active);
+        return true;
     }
+
+    /// <summary>
+    /// Takes in a login someone signed in to on a device when it is the stored
+    /// account's and the later login. This PC's Claude Code, when it held the
+    /// stored login, is given the new one with it.
+    /// </summary>
+    /// <returns>Whether the stored login was replaced.</returns>
+    public bool AdoptSignedInLogin(int profileId, ClaudeAuthFile login)
+    {
+        ValidateFullAuth(login);
+        // A sign-in in this PC's Claude Code is weighed as well.
+        try { ReconcileActiveCredentials(profileId); }
+        catch (AuthenticationRequiredException) { /* This PC holds no full login to weigh. */ }
+        var path = ProfileAuthFile(profileId);
+        var stored = ReadAuthFile(path);
+        if (stored.AccountId != login.AccountId || !IsLaterLogin(login.Oauth, stored.Oauth)) return false;
+        // A login whose end has passed can only be refused.
+        if (LoginEndsAt(login.Oauth) is { } end && end <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return false;
+        var owner = ResolveActiveOwner();
+        var followActive = owner is { Proven: true } && owner.Login.AccountId == stored.AccountId
+            && owner.Login.AccessToken == stored.AccessToken && owner.Login.RefreshToken == stored.RefreshToken;
+        WriteJsonAtomically(path, login);
+        if (followActive) WriteJsonAtomically(_paths.ActiveAuthFile, login);
+        return true;
+    }
+
+    /// <summary>When the stored login stops being renewable and has to be signed in again, if Claude Code recorded it.</summary>
+    public DateTimeOffset? ReadLoginEnd(int profileId) =>
+        LoginEndsAt(ReadAuthFile(ProfileAuthFile(profileId)).Oauth) is { } end ? DateTimeOffset.FromUnixTimeMilliseconds(end) : null;
+
+    // A sign-in starts a login that the service ends on a date set then
+    // (refreshTokenExpiresAt); a refresh renews only the access token within
+    // it. So of two logins the one that ends later is the newer sign-in, and
+    // of two copies of one login the one whose access token expires later.
+    internal static bool IsLaterLogin(ClaudeOauthTokens candidate, ClaudeOauthTokens stored)
+    {
+        if (LoginEndsAt(candidate) is { } candidateEnd && LoginEndsAt(stored) is { } storedEnd && candidateEnd != storedEnd)
+            return candidateEnd > storedEnd;
+        return candidate.ExpiresAt is { } candidateAt && (stored.ExpiresAt is not { } storedAt || candidateAt > storedAt);
+    }
+
+    // Unix milliseconds, like expiresAt; older Claude Code versions do not write it.
+    private static long? LoginEndsAt(ClaudeOauthTokens tokens) =>
+        tokens.Extra?.TryGetValue("refreshTokenExpiresAt", out var value) == true
+        && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var end) ? end : null;
 
     public bool ProfileArtifactExists(int profileId)
     {

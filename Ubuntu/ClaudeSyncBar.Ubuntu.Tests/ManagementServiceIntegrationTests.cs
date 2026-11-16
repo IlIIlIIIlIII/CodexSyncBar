@@ -982,6 +982,43 @@ public sealed class ManagementServiceIntegrationTests
         Assert.False(current.HasExited);
     }
 
+    // What /login in the device's own Claude Code leaves there: a login with a refresh token of its own.
+    private static ClaudeAuthFile SignedInOnDevice(string account, string access)
+    {
+        var login = Contracts.Create(account, access, access + "-refresh", expiresAt: DateTimeOffset.UtcNow.AddDays(40).ToUnixTimeMilliseconds());
+        login.Oauth.Extra = new() { ["refreshTokenExpiresAt"] = JsonSerializer.SerializeToElement(DateTimeOffset.UtcNow.AddDays(30).ToUnixTimeMilliseconds()) };
+        return login;
+    }
+
+    [Fact]
+    public async Task ALoginSignedInAgainOnADeviceIsTakenInAndHandedOutWithoutItsRefreshToken()
+    {
+        var notices = new List<string>();
+        await using var fixture = new Fixture(withRemote: true, notify: message => { lock (notices) notices.Add(message); });
+        fixture.SignInOnDevice(SignedInOnDevice("fixture-account-1", "device-access"));
+        Assert.Equal("completed", (await fixture.Wait(await fixture.Call<OperationView>("auth.sync", new { profileId = 1 }))).State);
+
+        // This PC keeps the refresh token, and its own Claude Code, on the same account, follows...
+        Assert.Equal("device-access-refresh", fixture.Auth.ReadCredentials(1).RefreshToken);
+        Assert.Equal("device-access-refresh", fixture.Auth.ReadActiveAuth()!.RefreshToken);
+        // ...while the device goes on with the same access token, now without it.
+        Assert.Equal(("device-access", ""), fixture.RemoteTokens());
+        lock (notices) Assert.Contains(notices, notice => notice.Contains("시험 서버에서 다시 로그인한 계정1 계정"));
+    }
+
+    [Fact]
+    public async Task ADeviceSignedInAgainIsTakenInBeforeASwitchMovesItToAnotherAccount()
+    {
+        await using var fixture = new Fixture(withRemote: true);
+        fixture.SignInOnDevice(SignedInOnDevice("fixture-account-1", "device-access"));
+        Assert.Equal("completed", (await fixture.Apply(await fixture.Call<SwitchPreview>("preview", new { profileId = 2 }))).State);
+        Assert.Equal("fixture-account-2", fixture.RemoteAccount());
+        Assert.Equal("device-access-refresh", fixture.Auth.ReadCredentials(1).RefreshToken);
+        // Back on the first account, the device has the login it signed in to, the way every device gets it.
+        Assert.Equal("completed", (await fixture.Apply(await fixture.Call<SwitchPreview>("preview", new { profileId = 1 }))).State);
+        Assert.Equal(("device-access", ""), fixture.RemoteTokens());
+    }
+
     [Fact]
     public async Task SingleSshAndLocalPreviewsChangeOnlyTheirExplicitTarget()
     {
@@ -1238,6 +1275,22 @@ public sealed class ManagementServiceIntegrationTests
         {
             using var document = JsonDocument.Parse(File.ReadAllText(RemoteConfig));
             return document.RootElement.GetProperty("oauthAccount").GetProperty("accountUuid").GetString()!;
+        }
+        public (string? Access, string? Refresh) RemoteTokens()
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(RemoteAuth));
+            var oauth = document.RootElement.GetProperty("claudeAiOauth");
+            return (oauth.GetProperty("accessToken").GetString(), oauth.GetProperty("refreshToken").GetString());
+        }
+        public void SignInOnDevice(ClaudeAuthFile login)
+        {
+            void Replace(string path, object contents)
+            {
+                WindowsPathSafety.WritePrivateBytes(path + ".next", JsonSerializer.SerializeToUtf8Bytes(contents));
+                File.Move(path + ".next", path, overwrite: true);
+            }
+            Replace(RemoteAuth, new { mcpOAuth = new { }, claudeAiOauth = login.Oauth });
+            Replace(RemoteConfig, new { numStartups = 5, oauthAccount = login.Account });
         }
         public Task<bool> WatchOnce(DateTimeOffset? at = null) => _service.WatchOnceAsync(at ?? DateTimeOffset.UtcNow, CancellationToken.None);
         public int Resume(DateTimeOffset at) => _service.ResumeStopped(new AutoSwitchStore(Paths).Load(), at);

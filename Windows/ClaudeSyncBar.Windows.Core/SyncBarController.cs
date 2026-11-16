@@ -11,6 +11,9 @@ public sealed record ControllerRecoveryStatus(
     IReadOnlyList<Guid> PendingSecretCleanup,
     IReadOnlyList<int> PendingBrowserCleanup);
 
+/// <summary>A newer login of a registered account that someone signed in to on a device, now stored here.</summary>
+public sealed record TakenLogin(int ProfileId, string DeviceName);
+
 public sealed class SyncBarController : IDisposable
 {
     private readonly WindowsPaths _paths;
@@ -38,6 +41,9 @@ public sealed class SyncBarController : IDisposable
     private DateTimeOffset _lastUsageRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastDeviceRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastMaintenance = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastLoginLook = DateTimeOffset.MinValue;
+    // The accounts whose login the service last refused: only a new sign-in helps them.
+    private readonly HashSet<int> _refused = [];
     // The WSL devices whose distribution was stopped at the last maintenance, which therefore passed them by.
     private IReadOnlyList<string> _stoppedWsl = [];
     private string? _recordedSwitch;
@@ -107,6 +113,8 @@ public sealed class SyncBarController : IDisposable
     public ControllerRecoveryStatus? RecoveryStatus { get; private set; }
     public WeeklyAnchorCoordinator WeeklyAnchor { get; }
     public event EventHandler? Changed;
+    /// <summary>Raised after logins signed in to on devices were taken in and handed to every device.</summary>
+    public event Action<IReadOnlyList<TakenLogin>>? LoginsTaken;
 
     public UsageSnapshot? TryGetUsageSnapshot(int profileId)
     {
@@ -276,7 +284,7 @@ public sealed class SyncBarController : IDisposable
                     // A login/refresh may have completed while the network request was in flight.
                     var current = _auth.ReadCredentials(account.Id);
                     if (current.AccountId != credentials.AccountId || current.AccessToken != credentials.AccessToken) continue;
-                    lock (_gate) { _usageCache[account.Id] = ToDashboardUsage(usage); _snapshots[account.Id] = usage; }
+                    lock (_gate) { _usageCache[account.Id] = ToDashboardUsage(usage); _snapshots[account.Id] = usage; _refused.Remove(account.Id); }
                     samples.Add(new QuotaSample(account.Id, usage.UpdatedAt, credentials.Plan, usage.Weekly?.UsedPercent, usage.Weekly?.ResetsAt));
                     _ = EvaluateWeeklyAnchorAsync(usage);
                 }
@@ -284,6 +292,7 @@ public sealed class SyncBarController : IDisposable
                 {
                     lock (_gate)
                     {
+                        if (error is AuthenticationRequiredException) _refused.Add(account.Id);
                         _error = "일부 계정 사용량을 갱신하지 못했습니다. 마지막 정상 값을 표시합니다.";
                         var cached = _usageCache.GetValueOrDefault(account.Id)
                             ?? new DashboardUsage(null, DateTimeOffset.MinValue);
@@ -496,6 +505,12 @@ public sealed class SyncBarController : IDisposable
                 if (_stoppedWsl.Count > 0 && (await WslTransport.RunningAsync(cancellationToken)).Overlaps(_stoppedWsl))
                     _lastMaintenance = DateTimeOffset.MinValue;
                 if (DateTimeOffset.UtcNow - _lastMaintenance >= TimeSpan.FromHours(1)) await MaintainAuthAsync(cancellationToken);
+                // Someone is about to sign in again somewhere: look for it sooner than the hourly maintenance would.
+                else if (LastLoginLook() < DateTimeOffset.UtcNow.AddMinutes(-2))
+                {
+                    lock (_gate) _lastLoginLook = DateTimeOffset.UtcNow;
+                    if (WaitingForSignIn(_configurationStore.LoadOrCreate())) await InBackgroundAsync(TakeSignedInLoginsInBackgroundAsync, cancellationToken);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (OperationCanceledException) { /* Foreground account work takes priority; retry on the next tick. */ }
@@ -503,7 +518,10 @@ public sealed class SyncBarController : IDisposable
         } while (await timer.WaitForNextTickAsync(cancellationToken));
     }
 
-    private async Task MaintainAuthAsync(CancellationToken cancellationToken)
+    private Task MaintainAuthAsync(CancellationToken cancellationToken) => InBackgroundAsync(MaintainAuthCoreAsync, cancellationToken);
+
+    // Background account work gives way to what the user started.
+    private async Task InBackgroundAsync(Func<CancellationToken, Task> work, CancellationToken cancellationToken)
     {
         using var maintenanceCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         lock (_gate)
@@ -511,8 +529,106 @@ public sealed class SyncBarController : IDisposable
             if (_maintenancePauses > 0 || _switchRunning || _operation?.State == "recoveryRequired" || _wsl.HasPendingBootstrap) return;
             _maintenanceCancellation = maintenanceCancellation;
         }
-        try { await MaintainAuthCoreAsync(maintenanceCancellation.Token); }
+        try { await work(maintenanceCancellation.Token); }
         finally { lock (_gate) _maintenanceCancellation = null; }
+    }
+
+    private DateTimeOffset LastLoginLook()
+    {
+        lock (_gate) return _lastLoginLook;
+    }
+
+    // A login the service refused, or one ending within the three days Claude Code warns of before,
+    // is what makes someone sign in again in a device's Claude Code.
+    private bool WaitingForSignIn(AppConfiguration configuration)
+    {
+        lock (_gate)
+        {
+            _refused.IntersectWith(configuration.Accounts.Select(account => account.Id));
+            if (_refused.Count > 0) return true;
+        }
+        var soon = DateTimeOffset.UtcNow.AddDays(3);
+        foreach (var account in configuration.Accounts.Where(account => !account.IsPending && !account.NeedsLogin))
+        {
+            try { if (_auth.ReadLoginEnd(account.Id) is { } end && end <= soon) return true; }
+            catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException or JsonException) { }
+        }
+        return false;
+    }
+
+    private async Task TakeSignedInLoginsInBackgroundAsync(CancellationToken cancellationToken)
+    {
+        using var mutation = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: cancellationToken);
+        EnsureRefreshRecoveryComplete();
+        await TakeSignedInLoginsAsync(_configurationStore.LoadOrCreate(), null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Takes in what someone signed in to elsewhere for a registered account, in this PC's Claude Code or on a
+    /// device, when it is newer than the stored login, and hands it to every device: one sign-in serves them all.
+    /// A device's own login is replaced by the stored one either way, since only this PC keeps a refresh token.
+    /// The caller holds the controller mutation lock.
+    /// </summary>
+    /// <param name="deviceIds">The devices to look at; every enabled one when null.</param>
+    /// <param name="handOver">
+    /// False for a device being installed: its own login is only read, and the installation that follows replaces it
+    /// (or puts it back if that fails).
+    /// </param>
+    internal async Task<IReadOnlyList<TakenLogin>> TakeSignedInLoginsAsync(AppConfiguration configuration,
+        IReadOnlyCollection<string>? deviceIds, CancellationToken cancellationToken, bool handOver = true)
+    {
+        var profiles = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var account in configuration.Accounts.Where(account => !account.IsPending && !account.NeedsLogin))
+        {
+            try { profiles[_auth.ReadCredentials(account.Id).AccountId] = account.Id; }
+            catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException or JsonException) { }
+        }
+
+        var renewed = new HashSet<int>();
+        foreach (var profileId in profiles.Values)
+        {
+            try { if (_auth.ReconcileActiveCredentials(profileId)) renewed.Add(profileId); }
+            catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException or JsonException) { }
+        }
+
+        // Unreachable, stopped or out of time: the device is looked at again next time.
+        bool Passing(Exception error) => error is ClaudeSyncBarException or IOException or InvalidOperationException
+            or TimeoutException or UnauthorizedAccessException or JsonException or System.ComponentModel.Win32Exception
+            || error is OperationCanceledException && !cancellationToken.IsCancellationRequested;
+        var devices = configuration.Devices.Where(device => deviceIds?.Contains(device.Id) ?? device.Enabled).ToArray();
+        var found = await Task.WhenAll(devices.Select(async device =>
+        {
+            try { return await _ssh.ExportSignedInLoginAsync(device, cancellationToken); }
+            catch (Exception error) when (Passing(error)) { return null; }
+        }));
+        var taken = new List<TakenLogin>();
+        for (var index = 0; index < devices.Length; index++)
+        {
+            // Another account's login is the device's own business.
+            if (found[index] is not { } signedIn || !profiles.TryGetValue(signedIn.Login.AccountId!, out var profileId)) continue;
+            try
+            {
+                if (_auth.AdoptSignedInLogin(profileId, signedIn.Login))
+                {
+                    renewed.Add(profileId);
+                    taken.Add(new(profileId, devices[index].DisplayLabel));
+                }
+                if (handOver) await _ssh.SyncAuthAsync(devices[index], profileId, cancellationToken, signedIn.AccessFingerprint);
+            }
+            catch (Exception error) when (Passing(error)) { /* Until then the device keeps using its own login. */ }
+        }
+
+        foreach (var profileId in renewed) await _ssh.SyncProfileAsync(configuration, profileId, cancellationToken);
+        lock (_gate)
+        {
+            _lastLoginLook = DateTimeOffset.UtcNow;
+            if (renewed.Count == 0) return taken;
+            _refused.ExceptWith(renewed);
+            _lastUsageRefresh = DateTimeOffset.MinValue;
+        }
+        if (taken.Count > 0) LoginsTaken?.Invoke(taken);
+        Changed?.Invoke(this, EventArgs.Empty);
+        return taken;
     }
 
     private async Task MaintainAuthCoreAsync(CancellationToken cancellationToken)
@@ -520,6 +636,8 @@ public sealed class SyncBarController : IDisposable
         using var mutation = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: cancellationToken);
         EnsureRefreshRecoveryComplete();
         var configuration = _configurationStore.LoadOrCreate();
+        // First, so that an account whose login had ended is kept alive below with the one signed in to again.
+        await TakeSignedInLoginsAsync(configuration, null, cancellationToken);
         var maintenance = new ClaudeAuthMaintenanceService(_paths, _auth, _local);
         var running = await _wsl.DiscoverAsync(cancellationToken);
         foreach (var account in configuration.Accounts.Where(account => !account.IsPending && !account.NeedsLogin))
@@ -535,9 +653,13 @@ public sealed class SyncBarController : IDisposable
                     && running.Any(state => state.Name == device.Distribution && state.IsRunning)))
                     await _wsl.SyncAuthAsync(device, account.Id, deadline.Token);
             }
-            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            catch (Exception error) when (!cancellationToken.IsCancellationRequested)
             {
-                lock (_gate) _error = "일부 계정 인증 유지에 실패했습니다. 계정 상태를 확인해 주세요.";
+                lock (_gate)
+                {
+                    if (error is AuthenticationRequiredException) _refused.Add(account.Id);
+                    _error = "일부 계정 인증 유지에 실패했습니다. 계정 상태를 확인해 주세요.";
+                }
             }
         }
         var wsl = configuration.Devices.Where(device => device.Enabled && WslTransport.Handles(device)).Select(device => device.Host).ToArray();

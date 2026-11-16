@@ -72,6 +72,12 @@ public sealed class ManagementService : IManagementService
         _resume = resume ?? ResumeHooks.For(paths);
         // A home given explicitly is a test's; its events never reach the desktop.
         _notify = notify ?? (paths.IsIsolated ? _ => { } : AutoSwitchPolicy.Notify);
+        _controller.LoginsTaken += taken =>
+        {
+            var c = _config.LoadOrCreate();
+            foreach (var login in taken)
+                _notify($"{login.DeviceName}에서 다시 로그인한 {AccountLabel(c, login.ProfileId)} 계정을 받아 모든 장치에 넣었습니다.");
+        };
         _initialization = InitializeAsync();
         _watcher = watch ? Task.Run(() => WatchAsync(_lifetime.Token)) : Task.CompletedTask;
     }
@@ -645,6 +651,8 @@ public sealed class ManagementService : IManagementService
         var included = preview.View.Targets.Where(t => t.Included).Select(t => t.Id).ToHashSet();
         if (ObservationKey(current.Where(d => included.Contains(d.Id) && !d.SkipOnSwitchFailure)) != preview.Observations)
             throw new RpcException("stale_preview", "장치의 현재 계정 또는 연결 상태가 변경되었습니다. 다시 확인해 주세요.");
+        // A login signed in on a device is taken in before the switch moves that device to another account and its own login is gone.
+        await _controller.TakeSignedInLoginsAsync(c, c.Devices.Where(d => included.Contains("ssh:" + d.Id)).Select(d => d.Id).ToArray(), token);
         var targets = c.Devices.Where(d => included.Contains("ssh:" + d.Id) && d.Enabled).Select(_ssh.CreateAccountTarget).ToList();
         if (included.Contains("local")) targets.Add(new WindowsAccountTarget(_auth, _local, _paths));
         var coordinator = new AccountSwitchCoordinator(_paths);
@@ -797,6 +805,8 @@ public sealed class ManagementService : IManagementService
     {
         using var lease = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: token);
         var c = _config.LoadOrCreate();
+        // A login signed in to again on a device is what the refresh and the sync below then use.
+        await _controller.TakeSignedInLoginsAsync(c, null, token);
         var accounts = c.Accounts.Where(a => !a.IsPending && !a.NeedsLogin && (profileId is null || a.Id == profileId));
         var pending = 0;
         var deferred = 0;
@@ -903,6 +913,8 @@ public sealed class ManagementService : IManagementService
         if (prerequisites.Missing.Count > 0)
             throw new RpcException("remote_prerequisites", "원격 장치에 필요한 도구가 없습니다: " + string.Join(", ", prerequisites.Missing)
                 + ". 해당 장치에서 설치한 뒤 다시 시도해 주세요.");
+        // Signed in on the device before it was added: the installation below then hands out that login.
+        await _controller.TakeSignedInLoginsAsync(c, [device.Id], token, handOver: false);
         var bootstrap = await _ssh.BootstrapAsync(c, device, _local.GetActiveProfileId(c.Accounts), token);
         var store = new DeviceActivationTransactionStore(_paths);
         var intent = store.Save(device);

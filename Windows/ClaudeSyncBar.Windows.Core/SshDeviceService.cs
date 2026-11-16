@@ -652,12 +652,48 @@ public sealed class SshDeviceService
         }
     }
 
+    /// <summary>A login someone signed in to on the device itself, and the fingerprint of its access token.</summary>
+    public sealed record SignedInLogin(ClaudeAuthFile Login, string AccessFingerprint);
+
+    /// <summary>
+    /// The login Claude Code on the device got by signing in there, if it holds one: SyncBar gives devices
+    /// logins without a refresh token, so one with it was signed in on the device. Nothing is changed there.
+    /// Streamed like the status, so that a device installed by an earlier version need not be installed again.
+    /// </summary>
+    public async Task<SignedInLogin?> ExportSignedInLoginAsync(SshDeviceConfiguration device, CancellationToken token)
+    {
+        SshUploadFile.EnsureSource(_paths, _paths.BundledClaudeSwitch);
+        var result = await RunSshWithInputAsync(device, ["bash", "-l", "-s", "--", "__node", "export-login"],
+            await File.ReadAllTextAsync(_paths.BundledClaudeSwitch, token), ResolveSecret(device), token, TimeSpan.FromSeconds(30));
+        // Only what went to standard error is told: standard output may hold the login.
+        if (result.ExitCode != 0)
+            throw new ClaudeSyncBarException($"{device.DisplayLabel}에서 로그인한 정보를 확인하지 못했습니다: {result.StandardError.Trim()}");
+        var fields = ParseFields(result.StandardOutput);
+        if (fields.GetValueOrDefault("state") != "own-login") return null;
+        ClaudeAuthFile? login;
+        try { login = JsonSerializer.Deserialize<ClaudeAuthFile>(Convert.FromBase64String(fields.GetValueOrDefault("login") ?? "")); }
+        catch (Exception error) when (error is FormatException or JsonException) { login = null; }
+        var access = fields.GetValueOrDefault("access_fp");
+        if (login?.AccountId is not { } account || string.IsNullOrEmpty(login.AccessToken) || string.IsNullOrEmpty(login.RefreshToken)
+            || Fingerprint(account) != fields.GetValueOrDefault("account_fp") || Fingerprint(login.AccessToken) != access)
+            throw new ClaudeSyncBarException($"{device.DisplayLabel}에서 로그인한 정보를 읽지 못했습니다.");
+        return new(login, access);
+    }
+
+    /// <param name="takenLogin">
+    /// The access fingerprint of the device's own login (<see cref="ExportSignedInLoginAsync"/>) once it has
+    /// been weighed against the stored one; only that login is replaced. Without it a login signed in on the
+    /// device stays in use there and only the stored copy changes.
+    /// </param>
     public async Task SyncAuthAsync(
         SshDeviceConfiguration device,
         int profileId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? takenLogin = null)
     {
         await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+        if (takenLogin is not null && !Regex.IsMatch(takenLogin, "^[a-f0-9]{12}$"))
+            throw new ClaudeSyncBarException("넘겨받은 장치 로그인을 확인하지 못했습니다.");
         var secret = ResolveSecret(device);
         var accessOnly = _authStore.CreateAccessOnlyCopy(profileId);
 #if SYNCBAR_LINUX
@@ -679,6 +715,7 @@ public sealed class SshDeviceService
                 profileId.ToString(),
                 Fingerprint(accessOnly.AccountId!),
                 Fingerprint(accessOnly.AccessToken!),
+                .. takenLogin is null ? Array.Empty<string>() : [takenLogin],
             ],
             JsonSerializer.Serialize(accessOnly, JsonOptions),
             secret,

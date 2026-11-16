@@ -122,6 +122,8 @@ Refresh model:
   The MacBook stores the only full credentials. SSH replicas receive an
   access-only login whose refreshToken field is an empty string. Every
   refresh check also retries replicas that were previously unreachable.
+  A login signed in on a replica itself is taken in by the controller,
+  which then hands that replica, like every other, the access-only copy.
 
 Login import:
   Reads a full Claude login document from standard input and installs it under the
@@ -1636,6 +1638,11 @@ node_inspect_access() {
   actual=$(token_fingerprint "$profile_file")
   [ "$actual" = "$expected_access_fp" ] || die "profile $profile has a different access generation on $(hostname)"
   active=$(detect_active_profile 2>/dev/null || true)
+  if [ "$active" = "$profile" ] && validate_full_auth_file "$AUTH_FILE"; then
+    # Signed in on this device and not yet taken in by SyncBar: left in use; see node_install_access.
+    printf 'profile=%s active=0 access_fp=%s state=own-login\n' "$profile" "$expected_access_fp"
+    return 0
+  fi
   if [ "$active" = "$profile" ]; then
     active_flag=1
     validate_secure_auth_file "$AUTH_FILE" access-only || die "active auth is not access-only on $(hostname)"
@@ -1702,10 +1709,12 @@ node_install_access() {
   local profile="$1"
   local expected_account_fp="$2"
   local expected_access_fp="$3"
-  local incoming profile_file backup_dir active active_flag=0 changed=1 actual profile_existed=0
+  local taken_access_fp="${4:-}"
+  local incoming profile_file backup_dir active active_flag=0 changed=1 actual profile_existed=0 state=synced
   validate_profile_name "$profile"
   case "$expected_account_fp" in ''|*[!0-9a-f]*) die "invalid account fingerprint" ;; esac
   case "$expected_access_fp" in ''|*[!0-9a-f]*) die "invalid access fingerprint" ;; esac
+  case "$taken_access_fp" in *[!0-9a-f]*) die "invalid access fingerprint" ;; esac
 
   acquire_lock
   incoming=$(mktemp "$PROFILE_DIR/.incoming.$profile.XXXXXX")
@@ -1738,6 +1747,18 @@ node_install_access() {
   fi
   active=$(detect_active_profile 2>/dev/null || true)
   [ "$active" != "$profile" ] || active_flag=1
+  # A login signed in here may be of an account this device has no profile of yet.
+  if [ -z "$active" ] && validate_auth_file "$AUTH_FILE" && [ "$(fingerprint "$AUTH_FILE")" = "$expected_account_fp" ]; then
+    active_flag=1
+  fi
+  # A login signed in on this device holds a refresh token of its own. It is replaced
+  # only once SyncBar has taken it in and names it by its access token; until then the
+  # device keeps using it and only the stored copy changes.
+  if [ "$active_flag" -eq 1 ] && validate_full_auth_file "$AUTH_FILE" && \
+     [ "$(token_fingerprint "$AUTH_FILE")" != "$taken_access_fp" ]; then
+    active_flag=0
+    state=own-login
+  fi
   if [ "$profile_existed" -eq 1 ] && [ "$(token_fingerprint "$profile_file")" = "$expected_access_fp" ]; then
     if [ "$active_flag" -eq 0 ] || { validate_secure_auth_file "$AUTH_FILE" access-only && [ "$(token_fingerprint "$AUTH_FILE")" = "$expected_access_fp" ]; }; then
       changed=0
@@ -1786,8 +1807,27 @@ node_install_access() {
   rm -rf "$backup_dir"
   release_lock
   reset_exit_traps
-  printf 'profile=%s active=%s changed=%s access_fp=%s state=synced\n' \
-    "$profile" "$active_flag" "$changed" "$expected_access_fp"
+  printf 'profile=%s active=%s changed=%s access_fp=%s state=%s\n' \
+    "$profile" "$active_flag" "$changed" "$expected_access_fp" "$state"
+}
+
+# Claude Code holds a refresh token here only when someone signed in on this
+# device: SyncBar installs logins without one. Such a login is handed to SyncBar,
+# which keeps the refresh token and gives every device, this one too, the access
+# token alone (install-access with the taken login's access fingerprint). Nothing
+# is changed here, and the login is printed last, after everything that can fail.
+node_export_login() {
+  local account_fp access_fp login
+  if ! validate_secure_auth_file "$AUTH_FILE" full; then
+    printf 'state=none\n'
+    return 0
+  fi
+  account_fp=$(fingerprint "$AUTH_FILE") || die "could not read the signed-in account on $(hostname)"
+  access_fp=$(token_fingerprint "$AUTH_FILE") || die "could not read the signed-in login on $(hostname)"
+  login=$(jq -S -c '{claudeAiOauth, oauthAccount}' "$AUTH_FILE" | base64 | tr -d '\n') || \
+    die "could not read the signed-in login on $(hostname)"
+  [ -n "$login" ] || die "could not read the signed-in login on $(hostname)"
+  printf 'state=own-login account_fp=%s access_fp=%s login=%s\n' "$account_fp" "$access_fp" "$login"
 }
 
 # Claude Code has no background server that holds a login: every session
@@ -4265,7 +4305,11 @@ node_main() {
     logout-restore) [ "$#" -eq 2 ] || die "node logout-restore requires operation and profile"; node_logout_restore "$1" "$2" ;;
     logout-verify) [ "$#" -eq 3 ] || die "node logout-verify requires operation, profile, and fallback"; node_logout_verify "$1" "$2" "$3" ;;
     logout-commit) [ "$#" -eq 3 ] || die "node logout-commit requires operation, profile, and fallback"; node_logout_commit "$1" "$2" "$3" ;;
-    install-access) [ "$#" -eq 3 ] || die "node install-access requires profile, account fingerprint, and access fingerprint"; node_install_access "$1" "$2" "$3" ;;
+    install-access)
+      [ "$#" -ge 3 ] && [ "$#" -le 4 ] || die "node install-access requires profile, account fingerprint, access fingerprint, and an optional taken login fingerprint"
+      node_install_access "$@"
+      ;;
+    export-login) [ "$#" -eq 0 ] || die "node export-login takes no arguments"; node_export_login ;;
     inspect-access) [ "$#" -eq 2 ] || die "node inspect-access requires profile and access fingerprint"; node_inspect_access "$1" "$2" ;;
     usage-summary) [ "$#" -eq 0 ] || die "node usage-summary takes no arguments"; node_usage_summary ;;
     version) [ "$#" -eq 0 ] || die "node version takes no arguments"; printf '%s\n' "$SCRIPT_VERSION" ;;

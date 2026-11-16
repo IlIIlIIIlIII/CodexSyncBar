@@ -213,6 +213,77 @@ public sealed class AuthVaultTests : IDisposable
         Assert.Equal("refresh-newer", _store.ReadCredentials(1).RefreshToken);
     }
 
+    // A login as Claude Code writes it once signed in: it ends a set time after the sign-in.
+    private static ClaudeAuthFile SignedIn(string account, string access, long expiresAt, long endsAt)
+    {
+        var login = TestAuth.Create(account, access, "refresh-" + access, expiresAt: expiresAt);
+        login.Oauth.Extra = new() { ["refreshTokenExpiresAt"] = JsonSerializer.SerializeToElement(endsAt) };
+        return login;
+    }
+
+    private void ImportSignedIn(int profileId, ClaudeAuthFile login)
+    {
+        var source = Path.Combine(_paths.LoginSessionsDirectory, "signed-in-" + Guid.NewGuid().ToString("N") + ".json");
+        WindowsPathSafety.WritePrivateBytes(source, TestAuth.Bytes(login));
+        _store.ImportAuth(source, profileId, replaceExisting: true);
+    }
+
+    [Fact]
+    public void ALoginSignedInAgainOnADeviceReplacesTheStoredOneAndWhatThisPcHeld()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        const long day = 86_400_000;
+        // Refreshed lately, so its access token outlasts the new sign-in's; the login itself ends today.
+        ImportSignedIn(1, SignedIn("test-account", "stored", now + 7 * day, now + day / 2));
+        _store.SwitchActive(1);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(now + day / 2), _store.ReadLoginEnd(1));
+
+        // An older sign-in, another account's, or one already ended changes nothing.
+        Assert.False(_store.AdoptSignedInLogin(1, SignedIn("test-account", "older", now + day, now + day / 4)));
+        Assert.False(_store.AdoptSignedInLogin(1, SignedIn("other-account", "other", now + day, now + 30 * day)));
+        Assert.False(_store.AdoptSignedInLogin(1, SignedIn("test-account", "ended", now + day, now - 1)));
+        Assert.Equal("refresh-stored", _store.ReadCredentials(1).RefreshToken);
+
+        Assert.True(_store.AdoptSignedInLogin(1, SignedIn("test-account", "device", now + 8 * 3_600_000, now + 30 * day)));
+        Assert.Equal("refresh-device", _store.ReadCredentials(1).RefreshToken);
+        Assert.Equal("refresh-device", _store.ReadActiveAuth()!.RefreshToken);
+        Assert.Equal("test-account", _store.ReadActiveAccountId());
+        // The same login handed in again is not newer.
+        Assert.False(_store.AdoptSignedInLogin(1, SignedIn("test-account", "device", now + 8 * 3_600_000, now + 30 * day)));
+
+        // A login without a refresh token was never signed in on the device.
+        var accessOnly = SignedIn("test-account", "access-only", now + day, now + 60 * day);
+        accessOnly.Oauth.RefreshToken = "";
+        Assert.Throws<AuthenticationRequiredException>(() => _store.AdoptSignedInLogin(1, accessOnly));
+    }
+
+    [Fact]
+    public void ThisPcKeepsUsingAnotherAccountWhenADeviceSignsInAgain()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        ImportSignedIn(1, SignedIn("test-account", "first", now + 3_600_000, now + 3_600_000));
+        ImportSecond();
+        _store.SwitchActive(2);
+        Assert.True(_store.AdoptSignedInLogin(1, SignedIn("test-account", "device", now + 7_200_000, now + 86_400_000)));
+        Assert.Equal("refresh-device", _store.ReadCredentials(1).RefreshToken);
+        Assert.Equal("second-refresh", _store.ReadActiveAuth()!.RefreshToken);
+    }
+
+    [Fact]
+    public void SigningInAgainInThisPcsClaudeCodeIsTakenInByWhenItEnds()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        ImportSignedIn(1, SignedIn("test-account", "stored", now + 7 * 86_400_000L, now + 3_600_000));
+        _store.SwitchActive(1);
+        // What /login leaves in Claude Code's own files: an access token that expires before the stored one.
+        File.WriteAllText(_paths.ActiveAuthFile, "{\"claudeAiOauth\":{\"accessToken\":\"again\",\"refreshToken\":\"refresh-again\",\"expiresAt\":"
+            + (now + 3_600_000) + ",\"refreshTokenExpiresAt\":" + (now + 30 * 86_400_000L) + "}}");
+        RewriteSharedFiles(account: "test-account");
+        Assert.True(_store.ReconcileActiveCredentials(1));
+        Assert.Equal("refresh-again", _store.ReadCredentials(1).RefreshToken);
+        Assert.False(_store.ReconcileActiveCredentials(1));
+    }
+
     private void ImportSecond()
     {
         var source = Path.Combine(_paths.LoginSessionsDirectory, "second.json");

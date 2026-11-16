@@ -496,9 +496,12 @@ fi
 
 profile_before=$(shasum -a 256 "$STATE/profiles/3.auth.json" | awk '{print $1}')
 active_before=$(active_sha)
+# The active login here holds a refresh token, as one signed in on the device would: it is
+# replaced only when named as taken in (see the signed-in device below).
+taken_fp=$(printf 'access-3' | shasum -a 256 | awk '{print substr($1,1,12)}')
 if env "${common_env[@]}" PATH="$FAKE_PROCESS_BIN:$PATH" \
   CLAUDE_SWITCH_TEST_FAIL_ACCESS_INSTALL=1 CLAUDE_SWITCH_TEST_CREDENTIALS_FILE="$CLAUDE/.credentials.json" \
-  "$HELPER" __node install-access 3 "$account_fp" "$access_fp" \
+  "$HELPER" __node install-access 3 "$account_fp" "$access_fp" "$taken_fp" \
   <"$ACCESS_ONLY" >"$TMP/install-rollback.out" 2>&1; then
   printf 'access install succeeded although the credential file could not be replaced\n' >&2
   exit 1
@@ -514,7 +517,7 @@ fi
 if env "${common_env[@]}" PATH="$FAKE_PROCESS_BIN:$PATH" \
   CLAUDE_SWITCH_TEST_FAIL_ACCESS_INSTALL=1 CLAUDE_SWITCH_TEST_FAIL_ACCESS_ROLLBACK=1 \
   CLAUDE_SWITCH_TEST_PROFILE_FILE="$STATE/profiles/3.auth.json" CLAUDE_SWITCH_TEST_CREDENTIALS_FILE="$CLAUDE/.credentials.json" \
-  "$HELPER" __node install-access 3 "$account_fp" "$access_fp" \
+  "$HELPER" __node install-access 3 "$account_fp" "$access_fp" "$taken_fp" \
   <"$ACCESS_ONLY" >"$TMP/double-rollback-failure.out" 2>&1; then
   printf 'access install succeeded after both rollback copies failed\n' >&2
   exit 1
@@ -549,6 +552,47 @@ kept_login=$(find "$OWN_LOGIN_HOME/state" -maxdepth 1 -name 'login-before-syncba
 [ "$(jq -r '.oauthAccount.accountUuid' "$kept_login")" = own-account ]
 [ "$(jq -r '.claudeAiOauth.refreshToken' "$kept_login")" = own-refresh ]
 [ "$(file_mode "$kept_login")" = 600 ]
+
+# Signed in again on the device itself, to a registered account: the login is handed to
+# SyncBar, and stays in use there until SyncBar names it as taken in.
+SIGNED_IN_HOME="$TMP/signed-in-home"
+mkdir -p "$SIGNED_IN_HOME/.claude" "$SIGNED_IN_HOME/state/profiles"
+chmod 700 "$SIGNED_IN_HOME" "$SIGNED_IN_HOME/.claude" "$SIGNED_IN_HOME/state" "$SIGNED_IN_HOME/state/profiles"
+signed_env=(HOME="$SIGNED_IN_HOME" CLAUDE_SWITCH_STATE_ROOT="$SIGNED_IN_HOME/state" CLAUDE_SWITCH_CONFIG_FILE="$SIGNED_IN_HOME/state/config.json")
+signed_node() { env -u CLAUDE_CONFIG_DIR "${signed_env[@]}" "$HELPER" __node "$@"; }
+sign_in_on_device() {
+  login_json "$1" "$2" "$3" >"$TMP/signed-in.json"
+  jq '{claudeAiOauth}' "$TMP/signed-in.json" >"$SIGNED_IN_HOME/.claude/.credentials.json"
+  jq '{oauthAccount}' "$TMP/signed-in.json" >"$SIGNED_IN_HOME/.claude.json"
+  chmod 600 "$SIGNED_IN_HOME/.claude/.credentials.json" "$SIGNED_IN_HOME/.claude.json"
+}
+cp "$ACCESS_ONLY" "$SIGNED_IN_HOME/state/profiles/3.auth.json"
+printf '3\n' >"$SIGNED_IN_HOME/state/current"
+chmod 600 "$SIGNED_IN_HOME/state/profiles/3.auth.json" "$SIGNED_IN_HOME/state/current"
+sign_in_on_device account-3 signed-access signed-refresh
+signed_fp=$(printf 'signed-access' | shasum -a 256 | awk '{print substr($1,1,12)}')
+exported=$(signed_node export-login)
+printf '%s\n' "$exported" | grep -F "state=own-login account_fp=$account_fp access_fp=$signed_fp login=" >/dev/null
+[ "$(printf '%s\n' "$exported" | sed -n 's/.* login=//p' | base64 --decode | jq -r '.claudeAiOauth.refreshToken')" = signed-refresh ]
+# Not taken in, or another login taken in: only the stored copy changes.
+signed_node install-access 3 "$account_fp" "$access_fp" <"$ACCESS_ONLY" | grep -F 'active=0 changed=0' | grep -F 'state=own-login' >/dev/null
+signed_node install-access 3 "$account_fp" "$access_fp" "$access_fp" <"$ACCESS_ONLY" | grep -F 'state=own-login' >/dev/null
+[ "$(jq -r '.claudeAiOauth.refreshToken' "$SIGNED_IN_HOME/.claude/.credentials.json")" = signed-refresh ]
+signed_node inspect-access 3 "$access_fp" | grep -F 'state=own-login' >/dev/null
+# Taken in: replaced by what SyncBar hands every device, with no refresh token.
+signed_node install-access 3 "$account_fp" "$access_fp" "$signed_fp" <"$ACCESS_ONLY" | grep -F 'active=1 changed=1' | grep -F 'state=synced' >/dev/null
+active_is "$ACCESS_ONLY" "$SIGNED_IN_HOME/.claude/.credentials.json" "$SIGNED_IN_HOME/.claude.json"
+[ "$(signed_node export-login)" = state=none ]
+# An account the device has no stored copy of yet is recognised by the login itself.
+sign_in_on_device account-5 fifth-access fifth-refresh
+jq -S -c '.claudeAiOauth.refreshToken = ""' "$TMP/signed-in.json" >"$TMP/fifth-access-only.json"
+fifth_account_fp=$(printf 'account-5' | shasum -a 256 | awk '{print substr($1,1,12)}')
+fifth_fp=$(printf 'fifth-access' | shasum -a 256 | awk '{print substr($1,1,12)}')
+signed_node install-access 5 "$fifth_account_fp" "$fifth_fp" <"$TMP/fifth-access-only.json" | grep -F 'state=own-login' >/dev/null
+[ "$(jq -r '.claudeAiOauth.refreshToken' "$SIGNED_IN_HOME/.claude/.credentials.json")" = fifth-refresh ]
+signed_node install-access 5 "$fifth_account_fp" "$fifth_fp" "$fifth_fp" <"$TMP/fifth-access-only.json" | grep -F 'active=1' >/dev/null
+[ "$(jq -r '.claudeAiOauth.refreshToken' "$SIGNED_IN_HOME/.claude/.credentials.json")" = "" ]
+[ "$(cat "$SIGNED_IN_HOME/state/current")" = 5 ]
 
 BOOTSTRAP_REMOTE_HOME="$TMP/bootstrap-remote-home"
 mkdir -p "$BOOTSTRAP_REMOTE_HOME"
