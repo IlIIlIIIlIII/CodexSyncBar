@@ -231,11 +231,13 @@ public sealed class SwitchPage : SyncPage
         var targets = Targets();
         var included = targets.Where(Included).ToArray();
         var ssh = included.Count(device => AppState.Str(device["kind"]) == "ssh");
+        var wsl = included.Count(device => AppState.Str(device["kind"]) == "wsl");
+        var others = new[] { wsl > 0 ? $"WSL {wsl}개" : null, ssh > 0 ? $"SSH 장치 {ssh}대" : null }.Where(part => part is not null);
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         head.Children.Add(Ui.Text("장치별 적용 미리보기", strong: true));
-        var scope = Ui.Caption(included.Length == 0 ? "등록된 장치가 없어요" : ssh == 0 ? "이 PC" : $"이 PC · SSH 장치 {ssh}대");
+        var scope = Ui.Caption(included.Length == 0 ? "등록된 장치가 없어요" : string.Join(" · ", others.Prepend("이 PC")));
         Grid.SetColumn(scope, 1);
         head.Children.Add(scope);
         var body = Ui.Stack(0, false, head);
@@ -290,16 +292,19 @@ public sealed class SwitchPage : SyncPage
     {
         var id = AppState.Str(device["id"]) ?? "";
         var local = AppState.Str(device["kind"]) == "local";
+        var wsl = AppState.Str(device["kind"]) == "wsl";
         var enabled = !(device["enabled"] is JsonValue e && !e.GetValue<bool>());
-        var connection = !enabled ? "대상 제외" : AppState.Str(device["status"]) == "unreachable" ? "연결 실패"
+        // A stopped WSL distribution is started when an account is applied: nothing for the user to put right.
+        var stopped = AppState.Str(device["status"]) == "stopped";
+        var connection = !enabled ? "대상 제외" : stopped ? "정지됨 · 적용할 때 시작" : AppState.Str(device["status"]) == "unreachable" ? "연결 실패"
             : QuotaFormat.Flag(device["isReachable"]) ? "연결됨" : "확인 필요";
-        var problem = enabled && connection != "연결됨";
+        var problem = enabled && !stopped && connection != "연결됨";
         var identityText = Ui.Stack(0, false, Ui.Text(AppState.Str(device["displayName"]) ?? "장치", wrap: false));
-        var kind = (local ? "Windows" : "SSH") + " · " + connection;
+        var kind = (local ? "Windows" : wsl ? "WSL" : "SSH") + " · " + connection;
         identityText.Children.Add(problem
             ? Ui.Stack(4, true, Ui.Glyph(Glyphs.Warning, 11, "SyncBarGlyphWarning"), ToneCaption(kind, true))
             : Ui.Caption(kind, wrap: false));
-        var identity = Ui.Stack(10, true, Ui.KindTile(local ? Glyphs.Pc : Glyphs.Server), identityText);
+        var identity = Ui.Stack(10, true, Ui.KindTile(local ? Glyphs.Pc : wsl ? Glyphs.Terminal : Glyphs.Server), identityText);
 
         var currentLabel = AppState.Str(device["currentAccountLabel"]) ?? "확인 필요";
         var current = Ui.Stack(0, false, Ui.Text(Wide ? currentLabel : "현재: " + currentLabel, wrap: false));

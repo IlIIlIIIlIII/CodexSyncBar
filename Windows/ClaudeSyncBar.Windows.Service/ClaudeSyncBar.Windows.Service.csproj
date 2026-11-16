@@ -20,7 +20,10 @@
     <Compile Include="../ClaudeSyncBar.Windows.Core/*.cs"
       Exclude="../ClaudeSyncBar.Windows.Core/WindowsPaths.cs;../ClaudeSyncBar.Windows.Core/WindowsSecretStore.cs;../ClaudeSyncBar.Windows.Core/WindowsPathSafety.cs;../ClaudeSyncBar.Windows.Core/BrowserLoginService.cs;../ClaudeSyncBar.Windows.Core/LocalSwitchService.cs;../ClaudeSyncBar.Windows.Core/ClaudeCliLocator.cs;../ClaudeSyncBar.Windows.Core/ClaudeDesktopLifecycle.cs;../ClaudeSyncBar.Windows.Core/CliManagementService.cs;../ClaudeSyncBar.Windows.Core/WslDeviceService.cs;../ClaudeSyncBar.Windows.Core/ClaudeProcessScope.cs;../ClaudeSyncBar.Windows.Core/WslDesktopAccountTarget.cs"
       Link="Core/%(Filename)%(Extension)" />
-    <!-- WSL devices are not part of the Claude port yet; the same inert hooks as on Ubuntu. -->
+    <!--
+      A WSL distribution is a device of the SSH kind reached with wsl.exe (Core/WslTransport.cs), so the
+      retired controller's separate WSL service stays the same inert hooks as on Ubuntu.
+    -->
     <Compile Include="../../Shared/ClaudeSyncBar.Core/WslCompatibility.cs" Link="Core/WslCompatibility.cs" />
     <Compile Include="../ClaudeSyncBar.Windows.Platform/*.cs" Link="Platform/%(Filename)%(Extension)" />
     <Compile Include="../../Ubuntu/ClaudeSyncBar.Ubuntu.Backend/Contracts.cs" Link="Backend/Contracts.cs" />

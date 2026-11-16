@@ -38,6 +38,8 @@ public sealed class SyncBarController : IDisposable
     private DateTimeOffset _lastUsageRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastDeviceRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastMaintenance = DateTimeOffset.MinValue;
+    // The WSL devices whose distribution was stopped at the last maintenance, which therefore passed them by.
+    private IReadOnlyList<string> _stoppedWsl = [];
     private string? _recordedSwitch;
     private CancellationTokenSource? _maintenanceCancellation;
     private int _maintenancePauses;
@@ -482,12 +484,17 @@ public sealed class SyncBarController : IDisposable
     private async Task RunBackgroundAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        // Nothing done here on a timer starts a stopped WSL distribution.
+        using var quiet = WslTransport.LeaveStopped();
         do
         {
             try
             {
                 if (DateTimeOffset.UtcNow - _lastUsageRefresh >= TimeSpan.FromMinutes(5)) await RefreshUsageAsync(cancellationToken);
                 if (DateTimeOffset.UtcNow - _lastDeviceRefresh >= TimeSpan.FromMinutes(30)) await RefreshDevicesAsync(cancellationToken);
+                // A distribution that was stopped when logins were last handed out gets its own once it runs.
+                if (_stoppedWsl.Count > 0 && (await WslTransport.RunningAsync(cancellationToken)).Overlaps(_stoppedWsl))
+                    _lastMaintenance = DateTimeOffset.MinValue;
                 if (DateTimeOffset.UtcNow - _lastMaintenance >= TimeSpan.FromHours(1)) await MaintainAuthAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
@@ -533,6 +540,8 @@ public sealed class SyncBarController : IDisposable
                 lock (_gate) _error = "일부 계정 인증 유지에 실패했습니다. 계정 상태를 확인해 주세요.";
             }
         }
+        var wsl = configuration.Devices.Where(device => device.Enabled && WslTransport.Handles(device)).Select(device => device.Host).ToArray();
+        _stoppedWsl = wsl.Length == 0 ? [] : wsl.Except(await WslTransport.RunningAsync(cancellationToken), StringComparer.OrdinalIgnoreCase).ToArray();
         _lastMaintenance = DateTimeOffset.UtcNow;
     }
 

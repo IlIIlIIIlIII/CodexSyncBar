@@ -470,6 +470,19 @@ public sealed class ConfigurationStore
             throw new ClaudeSyncBarException("SSH 사용자 이름 형식이 올바르지 않습니다.");
         }
 
+        if (WslTransport.Handles(device))
+        {
+            // A WSL distribution of this PC: its name is the host, and nothing is asked to get in.
+            WslTransport.ValidateDistribution(device.Host);
+            if (device.HasPassword || device.HasKeyPassphrase
+                || !string.IsNullOrWhiteSpace(device.IdentityFile) || !string.IsNullOrWhiteSpace(device.CertificateFile))
+            {
+                throw new ClaudeSyncBarException("WSL 배포판에는 SSH 인증 정보를 저장하지 않습니다.");
+            }
+
+            return;
+        }
+
         if (device.Authentication is not ("openSSHConfig" or "privateKey" or "password"))
         {
             throw new ClaudeSyncBarException("지원하지 않는 SSH 인증 방식입니다.");

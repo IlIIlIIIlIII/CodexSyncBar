@@ -14,11 +14,21 @@ public sealed class DemoService : IManagementService
     private readonly Dictionary<string, OperationView> _operations = [];
     private readonly List<SshDeviceConfiguration> _configuration =
     [
+#if SYNCBAR_WINDOWS
+        // Only Windows has WSL: a distribution of this PC is a device reached without SSH.
+        new() { Id = "wsl", DisplayName = "Ubuntu-24.04", Host = "Ubuntu-24.04", Username = "demo", Authentication = WslTransport.Authentication, Enabled = true },
+#endif
         new() { Id = "dev", DisplayName = "개발 서버", Host = "dev.example.invalid", Username = "demo", Port = 22, Enabled = true },
         new() { Id = "build", DisplayName = "빌드 서버", Host = "build.example.invalid", Username = "demo", Port = 22, Enabled = true },
     ];
     private int _local = 1;
-    private readonly Dictionary<string, int> _remoteAccounts = new() { ["ssh:dev"] = 1, ["ssh:build"] = 1 };
+    private readonly Dictionary<string, int> _remoteAccounts = new()
+    {
+#if SYNCBAR_WINDOWS
+        ["ssh:wsl"] = 1,
+#endif
+        ["ssh:dev"] = 1, ["ssh:build"] = 1,
+    };
     private Dictionary<string, int>? _recoveryBefore;
     private int _revision = 1;
     private bool _offline;
@@ -75,7 +85,7 @@ public sealed class DemoService : IManagementService
     private IReadOnlyList<DeviceView> Devices => new DeviceView[]
     {
         new("local", BackendPlatform.LocalDeviceName, "local", true, true, _local, Label(_local), DateTimeOffset.UtcNow, "ready"),
-    }.Concat(_configuration.Select(d => new DeviceView("ssh:" + d.Id, d.DisplayName, "ssh", _disabledDevice != "ssh:" + d.Id,
+    }.Concat(_configuration.Select(d => new DeviceView("ssh:" + d.Id, d.DisplayName, WslTransport.Handles(d) ? "wsl" : "ssh", _disabledDevice != "ssh:" + d.Id,
         !_offline && _disabledDevice != "ssh:" + d.Id, _offline ? null : _remoteAccounts["ssh:" + d.Id],
         _offline ? "알 수 없음" : Label(_remoteAccounts["ssh:" + d.Id]), DateTimeOffset.UtcNow,
         _disabledDevice == "ssh:" + d.Id ? "disabled" : _offline ? "unreachable" : "ready",
@@ -164,6 +174,7 @@ public sealed class DemoService : IManagementService
                 _tokenBasis = TokenBurnBasis.Normalize(Wire.Text(p, "tokenRateBasis", _tokenBasis));
                 return Settings;
             case "device.list": return _configuration;
+            case "wsl.list": return _configuration.Where(WslTransport.Handles).Select(d => new { name = d.Host, isRunning = true, registered = true }).ToArray();
             case "device.test": return new { isReachable = !_offline, message = "데모 장치 연결을 확인했습니다." };
             case "account.rename":
             {

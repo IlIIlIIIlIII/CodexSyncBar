@@ -10,9 +10,10 @@ using Microsoft.UI.Xaml.Controls;
 namespace ClaudeSyncBar.App.Pages;
 
 /// <summary>
-/// One SSH device: its state and checks, its connection and authentication,
-/// and whether switching includes it. The form is saved with its button; what
-/// is typed survives the page being drawn again.
+/// One device: its state and checks, its connection and authentication, and
+/// whether switching includes it. A WSL distribution of this PC has no
+/// connection to fill in. The form is saved with its button; what is typed
+/// survives the page being drawn again.
 /// </summary>
 public sealed class DeviceDetailPage : SyncPage
 {
@@ -36,6 +37,7 @@ public sealed class DeviceDetailPage : SyncPage
 
     private JsonObject? Status => _id is null ? null : State.Devices.FirstOrDefault(device => AppState.Str(device["id"]) == "ssh:" + _id);
     private JsonObject? Saved => State.DeviceConfiguration(_id);
+    private bool IsWsl => Value("authentication") == "wsl";
 
     // Only what this page shows; usage polls never redraw the form under the cursor.
     protected override string Signature() => string.Join("|", State.Busy, State.Error, AppState.Str(State.Operation?["state"]),
@@ -50,8 +52,8 @@ public sealed class DeviceDetailPage : SyncPage
     {
         if (_draft is null && Saved is { } saved) _draft = (JsonObject)saved.DeepClone();
         var name = Value("displayName") is { Length: > 0 } display ? display : Value("host") is { Length: > 0 } host ? host
-            : _id is null ? "새 SSH 장치" : "SSH 장치";
-        Crumb(_draft is null && _id is not null ? "SSH 장치" : name);
+            : _id is null ? "새 SSH 장치" : "장치";
+        Crumb(_draft is null && _id is not null ? "장치" : name);
         if (_draft is null)
         {
             Add(Ui.Card(Ui.Text(State.DeviceList is null ? "장치 설정을 불러오고 있어요…" : "이 장치를 찾지 못했어요. 장치 목록에서 다시 골라 주세요.", secondary: true)));
@@ -61,7 +63,7 @@ public sealed class DeviceDetailPage : SyncPage
         ErrorBar();
         if (_id is not null) Add(StatusCard(name));
         Add(ConnectionCard());
-        Add(AuthenticationCard());
+        if (!IsWsl) Add(AuthenticationCard());
         var options = Rows();
         var activated = QuotaFormat.Flag(Saved?["enabled"]);
         options.Children.Add(Ui.SettingRow(null, "전체 적용에 포함",
@@ -92,6 +94,7 @@ public sealed class DeviceDetailPage : SyncPage
         var unreachable = AppState.Str(status?["status"]) == "unreachable";
         var pill = !activated ? Ui.Pill("설치 및 활성화 전", Ui.PillKind.Neutral)
             : reachable ? Ui.Pill("연결됨", Ui.PillKind.Success, Glyphs.Check)
+            : AppState.Str(status?["status"]) == "stopped" ? Ui.Pill("정지됨", Ui.PillKind.Neutral)
             : unreachable ? Ui.Pill("연결 실패", Ui.PillKind.Caution, Glyphs.Warning)
             : Ui.Pill("확인 필요", Ui.PillKind.Neutral);
         var parts = new List<string> { activated ? "활성화 완료" : "설치를 마치면 전환에 포함돼요" };
@@ -102,12 +105,12 @@ public sealed class DeviceDetailPage : SyncPage
         var busy = State.Busy;
         var test = Ui.Button("연결 테스트", click: async (_, _) => await TestAsync());
         var install = Ui.Button(activated ? "다시 설치" : "설치 및 활성화", Glyphs.Download, accent: !activated, click: async (_, _) => await InstallAsync(_id!),
-            tip: "원격 장치에 전환 도구를 설치해요");
+            tip: IsWsl ? "배포판에 전환 도구를 설치해요" : "원격 장치에 전환 도구를 설치해요");
         test.IsEnabled = install.IsEnabled = !busy && State.Error is null;
         // Beside the name when there is room for both, under it otherwise.
         var body = Wide
-            ? (UIElement)Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text, Ui.Stack(8, true, test, install))
-            : Ui.Stack(12, false, Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text), Ui.Wrap(8, test, install));
+            ? (UIElement)Ui.Columns(16, 1, Ui.KindTile(IsWsl ? Glyphs.Terminal : Glyphs.Server), text, Ui.Stack(8, true, test, install))
+            : Ui.Stack(12, false, Ui.Columns(16, 1, Ui.KindTile(IsWsl ? Glyphs.Terminal : Glyphs.Server), text), Ui.Wrap(8, test, install));
         return Ui.Card(body);
     }
 
@@ -120,6 +123,11 @@ public sealed class DeviceDetailPage : SyncPage
 
     private Border ConnectionCard()
     {
+        // The distribution and its user are what was found when it was added; only its name here is the user's.
+        if (IsWsl)
+            return Ui.Card(Ui.Stack(12, false, Ui.Text("WSL 배포판", strong: true), Fields([Field("표시 이름", "displayName", "목록에 보일 이름")]),
+                Ui.Caption($"이 PC의 {Value("host")} · 사용자 {Value("username")}. wsl.exe로 바로 들어가서 SSH 설정이 필요 없어요. "
+                    + "정지된 배포판은 계정을 적용할 때만 시작해요.")));
         var fields = new UIElement[]
         {
             Field("표시 이름", "displayName", "목록에 보일 이름"),
@@ -307,14 +315,16 @@ public sealed class DeviceDetailPage : SyncPage
             return;
         }
 
-        if (await Flows.ConfirmAsync(XamlRoot, "이 SSH 장치에 적용할까요?", $"{AppState.AccountName(account)}을(를) 이 장치에만 적용해요. 다른 장치는 바뀌지 않아요.", "적용"))
+        if (await Flows.ConfirmAsync(XamlRoot, IsWsl ? "이 WSL 배포판에 적용할까요?" : "이 SSH 장치에 적용할까요?", $"{AppState.AccountName(account)}을(를) 이 장치에만 적용해요. 다른 장치는 바뀌지 않아요.", "적용"))
             await State.ApplyPreviewAsync(preview);
     }
 
     private async Task DeleteAsync()
     {
-        if (!await Flows.ConfirmAsync(XamlRoot, "SSH 장치를 삭제할까요?", "목록에서 지우고 저장한 비밀번호와 키 암호도 지워요. 원격 장치의 계정은 바꾸지 않아요.",
-            "삭제", destructive: true)) return;
+        if (!await (IsWsl
+            ? Flows.ConfirmAsync(XamlRoot, "WSL 배포판을 목록에서 지울까요?", "계정을 바꿔도 이 배포판은 더 따라오지 않아요. 배포판 안의 지금 로그인은 그대로 둬요.", "삭제", destructive: true)
+            : Flows.ConfirmAsync(XamlRoot, "SSH 장치를 삭제할까요?", "목록에서 지우고 저장한 비밀번호와 키 암호도 지워요. 원격 장치의 계정은 바꾸지 않아요.",
+                "삭제", destructive: true))) return;
         if (await State.CommandAsync("device.delete", new { deviceId = _id }, "장치를 삭제했어요.") is null) return;
         await State.LoadDeviceListAsync();
         Shell.Navigate("devices");

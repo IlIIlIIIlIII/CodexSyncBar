@@ -8,25 +8,38 @@ using Microsoft.UI.Xaml.Controls;
 namespace ClaudeSyncBar.App.Pages;
 
 /// <summary>
-/// This PC's Claude Code CLI and Claude Desktop, and the SSH devices that take
-/// part in switching. A device opens onto its own page.
+/// This PC's Claude Code CLI and Claude Desktop, and the devices that take part
+/// in switching: this PC's WSL distributions and SSH hosts. A device opens onto
+/// its own page.
 /// </summary>
 public sealed class DevicesPage : SyncPage
 {
     private JsonObject? _cli;
     private string? _cliError;
     private bool _cliLoading;
+    // This PC's WSL distributions, with which of them are devices already. Null until looked up, or where there is no WSL.
+    private JsonArray? _wsl;
 
     public DevicesPage()
     {
         Loaded += (_, _) =>
         {
             _ = State.LoadDeviceListAsync();
+            _ = LoadWslAsync();
             if (_cli is null && !_cliLoading) _ = LoadCliAsync();
         };
     }
 
-    protected override string Signature() => base.Signature() + State.DeviceList?.ToJsonString() + _cli?.ToJsonString() + _cliError + _cliLoading;
+    protected override string Signature() => base.Signature() + State.DeviceList?.ToJsonString() + _cli?.ToJsonString() + _cliError + _cliLoading
+        + _wsl?.ToJsonString();
+
+    // Asking which distributions there are starts none of them.
+    private async Task LoadWslAsync()
+    {
+        try { _wsl = await State.Client.CallAsync("wsl.list", timeout: TimeSpan.FromSeconds(30)) as JsonArray; }
+        catch (ServiceError) { return; }
+        Redraw();
+    }
 
     private async Task LoadCliAsync()
     {
@@ -65,7 +78,7 @@ public sealed class DevicesPage : SyncPage
         var update = Ui.Button("모든 장치 CLI 업데이트", Glyphs.Download, click: async (_, _) =>
         {
             if (await Flows.ConfirmAsync(XamlRoot, "모든 장치의 CLI를 업데이트할까요?",
-                "이 PC와 활성 SSH 장치의 Claude Code CLI를 업데이트해요. 실행 중인 세션은 다시 시작해야 새 버전을 써요.", "업데이트"))
+                "이 PC와 활성 장치의 Claude Code CLI를 업데이트해요. 실행 중인 세션은 다시 시작해야 새 버전을 써요.", "업데이트"))
                 await State.CommandAsync("cli.updateAll", success: "CLI를 업데이트하고 있어요.");
         }, tip: "활성 장치의 Claude Code CLI를 업데이트해요. 실행 중인 세션은 다시 시작해야 새 버전을 써요.");
         update.IsEnabled = !busy && State.Error is null;
@@ -80,9 +93,27 @@ public sealed class DevicesPage : SyncPage
             Ui.Stack(1, false, Ui.Text("Claude Code 기록과 설정"), Ui.Caption("세션 기록, 설정, MCP 서버, 메모리, 플러그인은 계정과 상관없이 모든 계정이 함께 써요.")),
             Ui.Button("폴더 열기", Glyphs.Folder, click: async (_, _) => await State.CommandAsync("open.claudeFolder")))));
 
+        // This PC's WSL distributions: the ones that are devices, then the ones found here that are not yet,
+        // each with its own button, so that nobody has to know a distribution can be added.
+        var devices = Configurations();
+        var registered = devices.Where(IsWsl).Select(device => AppState.Str(device["host"])).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var offered = (_wsl?.OfType<JsonObject>() ?? []).Where(distribution => !QuotaFormat.Flag(distribution["registered"])
+            && !registered.Contains(AppState.Str(distribution["name"]))).ToList();
+        if (registered.Count > 0 || offered.Count > 0)
+        {
+            Group("WSL", "이 PC의 WSL 배포판이에요. 등록하면 계정을 바꿀 때 그 안의 Claude Code 로그인도 함께 바뀌어요.");
+            var wsl = Rows();
+            foreach (var device in devices.Where(IsWsl)) wsl.Children.Add(DeviceRow(device));
+            foreach (var distribution in offered) wsl.Children.Add(WslOfferRow(distribution, busy));
+        }
+
         Group("SSH 장치");
         var ssh = Rows();
-        foreach (var row in SshRows(busy)) ssh.Children.Add(row);
+        var hosts = devices.Where(device => !IsWsl(device)).ToList();
+        if (hosts.Count == 0)
+            ssh.Children.Add(Ui.Card(Ui.Text(State.DeviceList is null ? "장치 목록을 불러오고 있어요…"
+                : "등록된 SSH 장치가 없어요. SSH config에서 추가하거나 직접 입력해 주세요.", secondary: true)));
+        foreach (var device in hosts) ssh.Children.Add(DeviceRow(device));
         Add(Ui.Caption("CLI를 업데이트해도 실행 중인 Claude Code 세션은 다시 시작해야 새 버전을 써요."));
     }
 
@@ -124,41 +155,36 @@ public sealed class DevicesPage : SyncPage
         return Ui.Row(Ui.Columns(16, 1, Ui.KindTile(Glyphs.Window), text, open));
     }
 
-    private IEnumerable<UIElement> SshRows(bool busy)
-    {
-        var statuses = State.Devices.Where(device => AppState.Str(device["kind"]) == "ssh").ToList();
-        var configurations = State.DeviceList?.OfType<JsonObject>().ToList()
-            ?? statuses.Select(device => new JsonObject
-            {
-                ["id"] = AppState.Str(device["id"]) is { } id && id.StartsWith("ssh:") ? id[4..] : AppState.Str(device["id"]),
-                ["displayName"] = AppState.Str(device["displayName"]), ["enabled"] = QuotaFormat.Flag(device["enabled"]),
-            }).ToList();
-        if (configurations.Count == 0)
-        {
-            yield return Ui.Card(Ui.Text(State.DeviceList is null ? "장치 목록을 불러오고 있어요…"
-                : "등록된 SSH 장치가 없어요. SSH config에서 추가하거나 직접 입력해 주세요.", secondary: true));
-            yield break;
-        }
+    private static bool IsWsl(JsonObject device) => AppState.Str(device["authentication"]) == "wsl";
 
-        foreach (var configuration in configurations)
-        {
-            var id = AppState.Str(configuration["id"]) ?? "";
-            var status = statuses.FirstOrDefault(device => AppState.Str(device["id"]) == "ssh:" + id);
-            yield return SshRow(configuration, status);
-        }
-    }
+    private JsonObject? StatusOf(string id) => State.Devices.FirstOrDefault(device => AppState.Str(device["id"]) == "ssh:" + id);
 
-    private UIElement SshRow(JsonObject configuration, JsonObject? status)
+    // The devices as configured; until that list is read, what the last look at them says.
+    private List<JsonObject> Configurations() => State.DeviceList?.OfType<JsonObject>().ToList()
+        ?? State.Devices.Where(device => AppState.Str(device["kind"]) != "local").Select(device => new JsonObject
+        {
+            ["id"] = AppState.Str(device["id"]) is { } id && id.StartsWith("ssh:") ? id[4..] : AppState.Str(device["id"]),
+            ["displayName"] = AppState.Str(device["displayName"]), ["enabled"] = QuotaFormat.Flag(device["enabled"]),
+            ["authentication"] = AppState.Str(device["kind"]) == "wsl" ? "wsl" : null,
+        }).ToList();
+
+    private UIElement DeviceRow(JsonObject configuration)
     {
         var id = AppState.Str(configuration["id"]) ?? "";
+        var status = StatusOf(id);
+        var wsl = IsWsl(configuration);
         var host = AppState.Str(configuration["host"]);
-        var name = AppState.Str(configuration["displayName"]) is { Length: > 0 } display ? display : host ?? "SSH 장치";
+        var name = AppState.Str(configuration["displayName"]) is { Length: > 0 } display ? display : host ?? (wsl ? "WSL 배포판" : "SSH 장치");
         var enabled = QuotaFormat.Flag(configuration["enabled"]);
         var reachable = QuotaFormat.Flag(status?["isReachable"]);
-        var unreachable = AppState.Str(status?["status"]) == "unreachable";
+        var state = AppState.Str(status?["status"]);
+        var unreachable = state == "unreachable";
         var parts = new List<string>();
-        if (host is not null) parts.Add($"{AppState.Str(configuration["username"])}@{host}:{configuration["port"]?.ToJsonString() ?? "22"}");
-        parts.Add(!enabled ? "설치 및 활성화 전" : reachable ? "연결됨" : unreachable ? "연결 실패" : "확인 필요");
+        if (host is not null)
+            // A distribution is usually listed under its own name, which is then not said twice.
+            parts.Add(wsl ? (name == host ? "" : host + " · ") + $"사용자 {AppState.Str(configuration["username"])}"
+                : $"{AppState.Str(configuration["username"])}@{host}:{configuration["port"]?.ToJsonString() ?? "22"}");
+        parts.Add(!enabled ? "설치 및 활성화 전" : reachable ? "연결됨" : state == "stopped" ? "정지됨 · 적용할 때 시작해요" : unreachable ? "연결 실패" : "확인 필요");
         if (reachable && AppState.Str(status?["currentAccountLabel"]) is { Length: > 0 } label) parts.Add("지금 " + label);
         if (QuotaFormat.Flag(configuration["skipOnSwitchFailure"])) parts.Add("전환 실패 시 건너뜀");
         var pill = !enabled ? Ui.Pill("전체 적용에서 빠짐", Ui.PillKind.Neutral)
@@ -168,7 +194,7 @@ public sealed class DevicesPage : SyncPage
         var chevron = Ui.Glyph(Glyphs.ChevronRight, 12, "SyncBarGlyphMuted");
         var button = new Button
         {
-            Content = Ui.Columns(16, 1, Ui.KindTile(Glyphs.Server), text, pill, chevron),
+            Content = Ui.Columns(16, 1, Ui.KindTile(wsl ? Glyphs.Terminal : Glyphs.Server), text, pill, chevron),
             HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(4),
         };
@@ -176,6 +202,30 @@ public sealed class DevicesPage : SyncPage
         ToolTipService.SetToolTip(button, "장치 설정 열기");
         button.Click += (_, _) => Shell.Navigate("device", id);
         return button;
+    }
+
+    // A distribution found on this PC that is not a device yet.
+    private Border WslOfferRow(JsonObject distribution, bool busy)
+    {
+        var name = AppState.Str(distribution["name"]) ?? "";
+        var caption = "아직 등록하지 않았어요 · " + (QuotaFormat.Flag(distribution["isRunning"]) ? "실행 중" : "정지됨 · 등록할 때 시작해요");
+        var register = Ui.Button("등록 및 설치", Glyphs.Add, click: async (_, _) => await AddWslAsync(name),
+            tip: "바로 등록하고 전환 도구를 설치해요");
+        // Each distribution's button says which one it is.
+        AutomationProperties.SetName(register, name + " 등록 및 설치");
+        register.IsEnabled = !busy && State.Error is null;
+        return Ui.Row(Ui.Columns(16, 1, Ui.KindTile(Glyphs.Terminal), Ui.Stack(1, false, Ui.Text(name, wrap: false), Ui.Caption(caption)), register));
+    }
+
+    // Registers the distribution and installs it at once, like any new device.
+    private async Task AddWslAsync(string name)
+    {
+        if (await State.CommandAsync("wsl.add", new { distribution = name }) is not { } saved) return;
+        await State.LoadDeviceListAsync();
+        _ = LoadWslAsync();
+        if (AppState.Str(saved["id"]) is not { } created) return;
+        Shell.Navigate("device", created);
+        await State.CommandAsync("device.bootstrap", new { deviceId = created }, "장치를 설치하고 활성화하고 있어요.");
     }
 
     // Lists the aliases of ~/.ssh/config; the chosen one is registered and installed at once.

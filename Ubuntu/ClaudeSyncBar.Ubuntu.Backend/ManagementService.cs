@@ -353,7 +353,8 @@ public sealed class ManagementService : IManagementService
                     _operation = FromSwitch(recovered.Operation, "recovery");
                     _error = "이전 작업의 복구를 먼저 완료해 주세요.";
                 }
-            await RefreshDevicesAsync(_lifetime.Token);
+            // Starting the app is no reason to start a stopped WSL distribution.
+            using (WslTransport.LeaveStopped()) await RefreshDevicesAsync(_lifetime.Token);
         }
         catch (Exception error) when (!_lifetime.IsCancellationRequested)
         {
@@ -446,6 +447,8 @@ public sealed class ManagementService : IManagementService
             case "device.list": return _config.LoadOrCreate().Devices;
             case "device.save": return await MutateAsync(() => SaveDevice(p), token);
             case "device.delete": return await MutateAsync(() => DeleteDevice(p), token);
+            case "wsl.list": return await WslDistributionsAsync(token);
+            case "wsl.add": return await AddWslDeviceAsync(Wire.Text(p, "distribution"), token);
             case "device.test":
             {
                 var tested = await _ssh.TestConnectionAsync(RequiredDevice(p), token);
@@ -514,7 +517,7 @@ public sealed class ManagementService : IManagementService
         lock (_state)
         {
             var operation = _operation ?? (dashboard.Operation is null ? null : FromSwitch(dashboard.Operation, "recovery"));
-            var devices = _devices.Where(d => d.Kind != "ssh" || configured.Contains(d.Id)).ToArray();
+            var devices = _devices.Where(d => d.Kind == "local" || configured.Contains(d.Id)).ToArray();
             return new(1, accounts, devices, active, _busy, operation,
                 Revision(c), DateTimeOffset.UtcNow, _error ?? dashboard.Error, Settings(),
                 accounts.ToDictionary(a => a.Id.ToString(), a => a.Usage));
@@ -544,15 +547,19 @@ public sealed class ManagementService : IManagementService
             new("local", BackendPlatform.LocalDeviceName, "local", true, true, active, AccountLabel(c, active), observed,
                 active is null ? "unknown" : "ready", _local.ReconnectionDetail, _local.ReconnectionDetail is not null),
         };
-        foreach (var device in c.Devices)
+        // This PC's own WSL distributions come before the SSH hosts.
+        foreach (var device in c.Devices.OrderBy(d => WslTransport.Handles(d) ? 0 : 1))
         {
             var status = statuses.FirstOrDefault(s => s.Id == device.Id);
             int? known = status?.AccountId is { } fingerprint && identities.TryGetValue(fingerprint, out var id) ? id : null;
             var mappingMismatch = known is not null && status?.ProfileId != known;
-            rows.Add(new("ssh:" + device.Id, device.DisplayLabel, "ssh", device.Enabled,
+            // A WSL distribution left stopped by a look in the background: applying an account starts it.
+            var stopped = status?.CliState == "stopped";
+            rows.Add(new("ssh:" + device.Id, device.DisplayLabel, WslTransport.Handles(device) ? "wsl" : "ssh", device.Enabled,
                 device.Enabled && status?.IsReachable == true, known, AccountLabel(c, known), observed,
-                !device.Enabled ? "disabled" : status?.IsReachable != true ? "unreachable" : known is null ? "unknown" : mappingMismatch ? "mappingMismatch" : "ready",
-                !device.Enabled ? "대상 제외 · 설치 및 활성화 필요" : status?.IsReachable != true ? "연결을 확인하지 못했습니다." : known is null ? "등록된 계정과 일치하지 않습니다." : mappingMismatch ? "계정 슬롯이 달라 설치 및 활성화가 필요합니다." : null,
+                !device.Enabled ? "disabled" : stopped ? "stopped" : status?.IsReachable != true ? "unreachable" : known is null ? "unknown" : mappingMismatch ? "mappingMismatch" : "ready",
+                !device.Enabled ? "대상 제외 · 설치 및 활성화 필요" : stopped ? "배포판이 정지되어 있습니다. 계정을 적용할 때 시작합니다."
+                    : status?.IsReachable != true ? "연결을 확인하지 못했습니다." : known is null ? "등록된 계정과 일치하지 않습니다." : mappingMismatch ? "계정 슬롯이 달라 설치 및 활성화가 필요합니다." : null,
                 SkipOnSwitchFailure: device.SkipOnSwitchFailure));
         }
         return rows;
@@ -703,6 +710,8 @@ public sealed class ManagementService : IManagementService
         }
 
         var devices = _config.LoadOrCreate().Devices.Where(d => d.Enabled && retiring.Devices.Contains(d.Id)).ToArray();
+        // A distribution that has stopped has no session left to end; it is not started to look.
+        using var quiet = WslTransport.LeaveStopped();
         var results = await Task.WhenAll(devices.Select(d => RetireOnDeviceAsync(d, retiring.Account, retiring.Run, token)));
         var left = devices.Where((_, index) => results[index] is not { Waiting: 0 }).Select(d => d.Id).ToArray();
         lock (_state)
@@ -846,6 +855,32 @@ public sealed class ManagementService : IManagementService
         }
     }
 
+    /// <summary>This PC's WSL distributions, and which of them are devices already.</summary>
+    private async Task<object> WslDistributionsAsync(CancellationToken token)
+    {
+        var registered = _config.LoadOrCreate().Devices.Where(WslTransport.Handles).Select(d => d.Host).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (await WslTransport.DiscoverAsync(token)).Select(d => new { d.Name, d.IsRunning, registered = registered.Contains(d.Name) }).ToArray();
+    }
+
+    /// <summary>
+    /// Makes a device of a WSL distribution: the same helper and steps as an SSH device, reached with wsl.exe.
+    /// Like any new device it is installed next, and takes part in switching once that is done.
+    /// </summary>
+    private async Task<object?> AddWslDeviceAsync(string distribution, CancellationToken token)
+    {
+        if (!(await WslTransport.DiscoverAsync(token)).Any(d => d.Name.Equals(distribution, StringComparison.OrdinalIgnoreCase)))
+            throw new RpcException("device_unavailable", "이 PC에서 WSL 배포판을 찾지 못했습니다.");
+        // Asking the distribution who its user is starts it when it is stopped.
+        var user = await WslTransport.DefaultUserAsync(distribution, token);
+        return await MutateAsync(() =>
+        {
+            if (_config.LoadOrCreate().Devices.Any(d => WslTransport.Handles(d) && d.Host.Equals(distribution, StringComparison.OrdinalIgnoreCase)))
+                throw new RpcException("device_exists", "이미 등록된 WSL 배포판입니다.");
+            var device = new SshDeviceConfiguration { DisplayName = distribution, Host = distribution, Username = user, Authentication = WslTransport.Authentication };
+            return SaveDevice(JsonSerializer.SerializeToElement(new { device }, Wire.Json));
+        }, token);
+    }
+
     private object DeleteDevice(JsonElement p)
     {
         var c = _config.LoadOrCreate();
@@ -952,11 +987,11 @@ public sealed class ManagementService : IManagementService
         }
 
         var c = _config.LoadOrCreate();
-        var ssh = c.Devices.Select(d => d.Id).ToHashSet(StringComparer.Ordinal);
+        var ssh = c.Devices.ToDictionary(d => d.Id, WslTransport.Handles, StringComparer.Ordinal);
         var devices = snapshot.Devices.Select(d => new TokenDeviceInput(
-            d.Id == "windows" ? "local" : ssh.Contains(d.Id) ? "ssh:" + d.Id : d.Id,
+            d.Id == "windows" ? "local" : ssh.ContainsKey(d.Id) ? "ssh:" + d.Id : d.Id,
             d.Id == "windows" ? BackendPlatform.LocalDeviceName : d.DisplayName,
-            d.Id == "windows" ? "local" : ssh.Contains(d.Id) ? "ssh" : "wsl",
+            d.Id == "windows" ? "local" : ssh.TryGetValue(d.Id, out var wsl) && !wsl ? "ssh" : "wsl",
             d.IsReachable, d.Error is null ? null : "사용량 수집을 완료하지 못했습니다.", d.Summary)).ToArray();
         int? active = null;
         try { active = _local.GetActiveProfileId(c.Accounts); } catch (Exception error) when (error is ClaudeSyncBarException or IOException or UnauthorizedAccessException) { }

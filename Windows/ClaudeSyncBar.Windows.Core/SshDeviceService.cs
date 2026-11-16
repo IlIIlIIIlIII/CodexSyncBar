@@ -388,7 +388,8 @@ public sealed class SshDeviceService
         return new SshTestResult(
             device.Id,
             result.ExitCode == 0 && message.Contains("claude-syncbar", StringComparison.Ordinal),
-            result.ExitCode == 0 ? "SSH 연결이 정상입니다." :
+            result.ExitCode == 0 ? WslTransport.Handles(device) ? "WSL 배포판에 연결했습니다." : "SSH 연결이 정상입니다." :
+                WslTransport.Handles(device) ? "WSL 배포판에서 명령을 실행하지 못했습니다: " + message :
                 message.Contains("Permission denied", StringComparison.OrdinalIgnoreCase) ? "SSH 인증에 실패했습니다. 사용자 이름과 선택한 인증 방식의 비밀번호·키를 확인해 주세요." :
                 message.Contains("Host key verification failed", StringComparison.OrdinalIgnoreCase) ? "서버 호스트 키가 known_hosts 기록과 다릅니다. 서버를 다시 설치했다면 이전 기록을 지운 뒤 다시 시도해 주세요." :
                 "SSH 네트워크·원격 명령 확인 실패: " + message);
@@ -446,7 +447,7 @@ public sealed class SshDeviceService
                     null,
                     null,
                     device.Authentication,
-                    "unreachable",
+                    error is WslStoppedException ? "stopped" : "unreachable",
                     false,
                     error.Message));
             }
@@ -580,13 +581,9 @@ public sealed class SshDeviceService
     public async Task<ProcessResult> RunClaudeHelperAsync(SshDeviceConfiguration device, bool update, CancellationToken cancellationToken = default)
     {
         await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
-        var secret = ResolveSecret(device);
-        var arguments = BuildCommonOptions(device, false, secret is not null);
-        arguments.AddRange([$"{device.Username}@{device.Host}", "bash -l -s -- __node " + (update ? "update-claude" : "claude-info")]);
-        return await ProcessRunner.RunAsync(FindExecutable("ssh"), arguments,
-            NormalizeRemoteInput(await File.ReadAllTextAsync(_paths.BundledClaudeSwitch, cancellationToken)), cancellationToken,
-            update ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(30),
-            AskPassEnvironment(device, secret)?.ToDictionary(pair => pair.Key, pair => pair.Value));
+        return await RunSshWithInputAsync(device, ["bash", "-l", "-s", "--", "__node", update ? "update-claude" : "claude-info"],
+            await File.ReadAllTextAsync(_paths.BundledClaudeSwitch, cancellationToken), ResolveSecret(device), cancellationToken,
+            update ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(30));
     }
 
     private sealed class SshAccountTarget(SshDeviceService service, SshDeviceConfiguration device) : IAccountTarget
@@ -2063,6 +2060,17 @@ public sealed class SshDeviceService
         string? secret,
         CancellationToken cancellationToken)
     {
+        if (WslTransport.Handles(device))
+        {
+            // No scp and no staged copy: the file goes in through the command's input.
+            SshUploadFile.EnsureSource(_paths, localFile);
+            var contents = SshUploadFile.PrepareContents(_paths, localFile, await File.ReadAllBytesAsync(localFile, cancellationToken));
+            var written = await WslTransport.WriteFileAsync(device, Encoding.UTF8.GetString(contents), remoteFile, cancellationToken);
+            if (written.ExitCode != 0)
+                throw new ClaudeSyncBarException($"{device.DisplayLabel}에 파일을 전송하지 못했습니다: {written.CombinedOutput.Trim()}");
+            return;
+        }
+
         var scp = FindExecutable("scp");
         using var upload = new SshUploadFile(_paths, localFile);
         var arguments = BuildCommonOptions(device, forScp: true, secret is not null);
@@ -2107,6 +2115,9 @@ public sealed class SshDeviceService
         CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
+        if (WslTransport.Handles(device))
+            return await WslTransport.RunAsync(device, remoteArguments, NormalizeRemoteInput(standardInput), cancellationToken,
+                timeout ?? TimeSpan.FromSeconds(120));
         var ssh = FindExecutable("ssh");
         var arguments = BuildCommonOptions(device, forScp: false, secret is not null);
         arguments.Add($"{device.Username}@{device.Host}");
@@ -2207,6 +2218,8 @@ public sealed class SshDeviceService
         TimeSpan timeout,
         string? secret = null)
     {
+        if (WslTransport.Handles(device))
+            return await WslTransport.RunAsync(device, remoteArguments, null, cancellationToken, timeout);
         var ssh = FindExecutable("ssh");
         var arguments = BuildCommonOptions(device, forScp: false, secret is not null);
         arguments.Add($"{device.Username}@{device.Host}");
