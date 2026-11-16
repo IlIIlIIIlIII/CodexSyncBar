@@ -38,10 +38,33 @@ public sealed class SmartSwitchSettings
     public bool? Chosen(int profileId) => Candidates.TryGetValue(profileId, out var chosen) ? chosen : null;
 }
 
+/// <summary>
+/// The part of each account's weekly quota that is the user's to use, in whole percent, where the user set it on
+/// the weekly timeline. An account not set here is all the user's. Only the timeline plans with it; no switch reads it.
+/// </summary>
+public sealed class WeekPlanSettings
+{
+    private Dictionary<int, int> _shares = [];
+
+    // A file that says "shares": null is read as one that sets none, so the timeline and the setting still work.
+    public Dictionary<int, int> Shares { get => _shares; set => _shares = value ?? []; }
+
+    public int Share(int profileId) => Shares.TryGetValue(profileId, out var share) ? Math.Clamp(share, 0, 100) : 100;
+
+    /// <summary>The share a request sets: a whole number from 0 to 100.</summary>
+    internal static int Asked(JsonElement p) =>
+        Wire.Item(p, "percent") is { ValueKind: JsonValueKind.Number } value && value.TryGetInt32(out var percent) && percent is >= 0 and <= 100
+            ? percent
+            : throw new RpcException("invalid_request", "내 몫은 0에서 100 사이로 정해 주세요.");
+}
+
 internal sealed class AutoSwitchStore(WindowsPaths paths) : SettingsFile<AutoSwitchSettings>(paths, "auto-switch.json", "자동 전환 설정 파일");
 
 // Its own file: the automatic switch rewrites auto-switch.json long after reading it.
 internal sealed class SmartSwitchStore(WindowsPaths paths) : SettingsFile<SmartSwitchSettings>(paths, "smart-switch.json", "스마트 전환 설정 파일");
+
+// Its own file for the same reason.
+internal sealed class WeekPlanStore(WindowsPaths paths) : SettingsFile<WeekPlanSettings>(paths, "week-plan.json", "주간 계획 설정 파일");
 
 internal class SettingsFile<T>(WindowsPaths paths, string name, string description) where T : new()
 {

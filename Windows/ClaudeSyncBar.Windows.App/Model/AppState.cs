@@ -22,6 +22,8 @@ public sealed class AppState(ServiceClient client)
     public JsonArray? DeviceList { get; private set; }
     private Task? _poll;
     private bool _pollAgain;
+    private Task? _timeline;
+    private bool _timelineAgain;
     private int _previewGeneration;
     private string? _previewRevision;
     private (string?, string?) _lastOperation;
@@ -171,6 +173,48 @@ public sealed class AppState(ServiceClient client)
 
     public JsonObject? DeviceConfiguration(string? id) => id is null ? null
         : DeviceList?.OfType<JsonObject>().FirstOrDefault(device => Str(device["id"]) == id);
+
+    /// <summary>The weekly timeline of the week that contains now, as last read. Null until first read.</summary>
+    public JsonObject? Timeline { get; private set; }
+
+    /// <summary>Why the last reading of the timeline failed; null once one succeeds.</summary>
+    public string? TimelineError { get; private set; }
+
+    /// <summary>
+    /// Reads this week's timeline again, for the quick view's strip and the timeline page. A failure keeps
+    /// the view already here. A reading asked for while one is under way follows it, since that one may
+    /// have started before whatever the caller just changed.
+    /// </summary>
+    public Task RefreshTimelineAsync()
+    {
+        if (_timeline is { IsCompleted: false })
+        {
+            _timelineAgain = true;
+            return _timeline;
+        }
+
+        return _timeline = TimelineLoopAsync();
+    }
+
+    private async Task TimelineLoopAsync()
+    {
+        do
+        {
+            _timelineAgain = false;
+            var before = (Timeline?.ToJsonString(), TimelineError);
+            try
+            {
+                if (await Client.CallAsync("timeline", new { week = 0 }, TimeSpan.FromSeconds(60)) is JsonObject view) Timeline = view;
+                TimelineError = null;
+            }
+            catch (ServiceError error)
+            {
+                TimelineError = error.Message;
+            }
+
+            if (before != (Timeline?.ToJsonString(), TimelineError)) Changed?.Invoke();
+        } while (_timelineAgain);
+    }
 
     // The switch page starts on an account other than the one in use, the one worth switching to.
     private int? FirstOther(int active) => Accounts.Where(account => Int(account["id"]) != active && !NeedsLogin(account))

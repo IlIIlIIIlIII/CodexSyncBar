@@ -51,6 +51,7 @@ public sealed class TrayFlyout : Window
     private string? _pending;
     private (string Message, NoticeKind Kind)? _note;
     private (string Notice, JsonObject Preview, string Name)? _confirm;
+    private DateTimeOffset _timelineAsked;
 
     public TrayFlyout(App app)
     {
@@ -128,7 +129,13 @@ public sealed class TrayFlyout : Window
             args.Cancel = true;
             Hide();
         };
-        app.State.Changed += () => { if (_visible) Render(); };
+        app.State.Changed += () =>
+        {
+            if (!_visible) return;
+            // The week's strip follows the clock: read again once a minute while the quick view is open.
+            if (DateTimeOffset.UtcNow - _timelineAsked >= TimeSpan.FromMinutes(1)) AskTimeline();
+            Render();
+        };
         app.State.Notice += (message, kind) =>
         {
             if (!_visible) return;
@@ -152,11 +159,19 @@ public sealed class TrayFlyout : Window
         ShowNear(anchor);
     }
 
+    // The answer comes back through the state's Changed, which draws the strip.
+    private void AskTimeline()
+    {
+        _timelineAsked = DateTimeOffset.UtcNow;
+        _ = _app.State.RefreshTimelineAsync();
+    }
+
     public void ShowNear(PointInt32? anchor)
     {
         _note = null;
         _confirm = null;
         _signature = null;
+        AskTimeline();
         Render();
         Position(anchor);
         AppWindow.Show();
@@ -265,7 +280,7 @@ public sealed class TrayFlyout : Window
         snapshot.Remove("updatedAt");
         // Reset times count down in minutes.
         return string.Join("|", snapshot.ToJsonString(), state.RefreshRequested, state.ConnectionError, _pending, _note?.Message, _note?.Kind,
-            _confirm?.Name, AppState.Str(_confirm?.Preview["previewId"]), DateTime.Now.ToString("HH:mm"));
+            _confirm?.Name, AppState.Str(_confirm?.Preview["previewId"]), DateTime.Now.ToString("HH:mm"), state.Timeline?.ToJsonString());
     }
 
     private void Redraw()
@@ -311,7 +326,79 @@ public sealed class TrayFlyout : Window
             title.Children.Add(Ui.Columns(6, 1, Ui.Glyph(Glyphs.Clock, 12, "SyncBarGlyphMuted"), timer));
         }
 
+        if (Strip(state.Timeline) is { } strip) title.Children.Add(strip);
         return title;
+    }
+
+    // This week's plan in one row: a band per account in reset order, the now line across it, and whose turn it is.
+    // Only when this week's timeline has been read lately and has a plan; the page has the record beside it. A view
+    // kept from a reading long ago, or from before a failed one, would show an old now and an old turn.
+    private static StackPanel? Strip(JsonObject? view)
+    {
+        var at = DateTimeOffset.UtcNow;
+        if (view is null || AppState.Str(view["state"]) != "ok" || AppState.Int(view["week"]) != 0 || !TimelineText.Current(view, at)) return null;
+        var days = TimelineText.Items(view["days"]);
+        var segments = TimelineText.Items(view["segments"]);
+        if (days.Count == 0 || segments.Count == 0) return null;
+
+        var count = Ui.Caption(TimelineText.StripCount(view), wrap: false);
+        count.HorizontalAlignment = HorizontalAlignment.Right;
+        var head = Ui.Columns(8, 1, Ui.Text("이번 주 구간", 12, strong: true, wrap: false), count);
+
+        // The now line comes down over the letters and the bands. A letter it would run through steps aside; a band
+        // stays one piece with its name at its left edge, and the line crosses it, so it reads as no extra segment.
+        var nowAt = QuotaFormat.Number(view["nowAt"]);
+        var letters = new TimelinePanel { Height = 14, Avoid = nowAt ?? double.NaN };
+        for (var i = 0; i < days.Count; i++)
+        {
+            var today = TimelineText.IsToday(days[i], at);
+            var letter = Ui.Text(TimelineText.DayLetter(days[i]), 11, strong: today, secondary: !today, wrap: false);
+            letter.VerticalAlignment = VerticalAlignment.Center;
+            letters.Text(letter, letters.Band(new Border(), (double)i / days.Count, 1.0 / days.Count), 4);
+        }
+
+        var bands = new TimelinePanel { Height = 24, Gap = 2 };
+        var spoken = new List<string>();
+        foreach (var segment in segments)
+        {
+            var name = AppState.Str(segment["name"]) ?? "계정";
+            var label = Ui.Text(name, 11, wrap: false);
+            label.VerticalAlignment = VerticalAlignment.Center;
+            var band = new Border { Style = Ui.Style("SyncBarTimelineStrip") };
+            var id = AppState.Int(segment["profileId"]);
+            var range = QuotaFormat.Time(segment["startsAt"]) is { } starts && QuotaFormat.Time(segment["endsAt"]) is { } ends
+                ? $"{name} · {TimelineText.EdgeText(view, id, starts)} ~ {TimelineText.EdgeText(view, id, ends)}" : name;
+            ToolTipService.SetToolTip(band, range);
+            AutomationProperties.SetName(band, range);
+            spoken.Add(range);
+            bands.Band(band, QuotaFormat.Number(segment["at"]) ?? 0, QuotaFormat.Number(segment["width"]) ?? 0);
+            bands.Text(label, band, 4, 18);
+        }
+
+        var chart = new Grid { RowSpacing = 4 };
+        chart.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        chart.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        chart.Children.Add(letters);
+        Grid.SetRow(bands, 1);
+        chart.Children.Add(bands);
+        if (nowAt is { } along)
+        {
+            var now = new TimelinePanel();
+            var line = now.Mark(new Border { Width = 2, CornerRadius = new CornerRadius(1), Style = Ui.Style("SyncBarTimelineNow") }, along);
+            var time = QuotaFormat.Time(view["now"]) is { } read ? $"지금 {read.ToLocalTime():HH:mm}" : "지금";
+            ToolTipService.SetToolTip(line, time);
+            AutomationProperties.SetName(line, time);
+            Grid.SetRowSpan(now, 2);
+            chart.Children.Add(now);
+        }
+
+        var turn = Ui.Stack(0, false, Ui.Text(TimelineText.TurnTitle(view), 12, strong: true));
+        if (TimelineText.StripCaption(view) is { Length: > 0 } caption) turn.Children.Add(Ui.Caption(caption));
+        var strip = Ui.Stack(6, false, head, chart, turn);
+        // The heading's lines sit 4 apart; the strip is a part of its own, as far from them as the cards are from it.
+        strip.Margin = new Thickness(0, 8, 0, 0);
+        AutomationProperties.SetName(strip, $"이번 주 구간, {TimelineText.StripCount(view)}, {string.Join(", ", spoken)}, {TimelineText.TurnTitle(view)}");
+        return strip;
     }
 
     private Border Account(JsonObject account, bool busy)

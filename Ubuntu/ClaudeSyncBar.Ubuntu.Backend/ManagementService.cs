@@ -30,6 +30,7 @@ public sealed class ManagementService : IManagementService
     private Task? _job;
     private readonly AutoSwitchStore _autoSwitch;
     private readonly SmartSwitchStore _smartSwitch;
+    private readonly WeekPlanStore _weekPlan;
     private readonly QuotaHistoryStore _quotaHistory;
     // The last token collection; a new period or basis is cut from it without reading every log again.
     private TokenUsageSnapshot? _tokenSnapshot;
@@ -66,6 +67,7 @@ public sealed class ManagementService : IManagementService
         _controller = new(paths, usageService);
         _autoSwitch = new(paths);
         _smartSwitch = new(paths);
+        _weekPlan = new(paths);
         _quotaHistory = new(paths);
         _resume = resume ?? ResumeHooks.For(paths);
         // A home given explicitly is a test's; its events never reach the desktop.
@@ -287,6 +289,48 @@ public sealed class ManagementService : IManagementService
         return new { saved = true };
     }
 
+    // How much of an account's week is the user's, set on the weekly timeline.
+    private object SetShare(JsonElement p)
+    {
+        var percent = WeekPlanSettings.Asked(p);
+        var c = _config.LoadOrCreate();
+        var id = RequiredAccount(c, p).Id;
+        var plan = _weekPlan.Load();
+        var changed = false;
+        // An account removed since is forgotten.
+        foreach (var gone in plan.Shares.Keys.Where(key => c.Accounts.All(account => account.Id != key)).ToArray())
+            changed |= plan.Shares.Remove(gone);
+        // The whole of it is what an account not set has, so that is not kept.
+        if (percent == 100) changed |= plan.Shares.Remove(id);
+        else if (!plan.Shares.TryGetValue(id, out var kept) || kept != percent)
+        {
+            plan.Shares[id] = percent;
+            changed = true;
+        }
+
+        // Setting what already holds writes nothing: no file appears for shares that are all the default.
+        if (changed) _weekPlan.Save(plan);
+        return new { saved = true };
+    }
+
+    /// <summary>The week split between the accounts by their shares, beside what the quota history shows of it. It only reads.</summary>
+    private async Task<object?> TimelineAsync(JsonElement p, CancellationToken token)
+    {
+        var (_, accounts, active) = await AccountsAsync(token);
+        var plan = _weekPlan.Load();
+        var week = Math.Clamp(Wire.Number(p, "week"), WeekTimelineCalculator.MinimumWeek, 0);
+        // The calculation has no clock of its own: this is the one place the time is read.
+        var now = DateTimeOffset.UtcNow;
+        IReadOnlyList<QuotaHistoryEntry> history = [];
+        // All the record that is kept, whichever week is shown: the plan itself is read from it (the reset of an account
+        // not used since, where the record begins), so a shorter look for a later week would plan that week differently.
+        try { history = _quotaHistory.Read(now - QuotaHistoryStore.Retention); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ClaudeSyncBarException) { }
+        return WeekTimelineCalculator.Calculate(new(now, week, accounts.Select(a => new WeekTimelineAccount(
+            a.Id, a.Alias, plan.Share(a.Id), !a.IsPending && !a.NeedsLogin, a.Usage?.Weekly?.UsedPercent, a.Usage?.Weekly?.ResetsAt,
+            a.Id == active, a.SmartCandidate)).ToArray(), history));
+    }
+
     private void Record(AutoSwitchSettings settings, AutoSwitchResult result)
     {
         settings.Last = result;
@@ -343,6 +387,7 @@ public sealed class ManagementService : IManagementService
             });
             case "tokens": return await TokensAsync(p, token);
             case "tokens.view": return await TokenViewAsync(p, token);
+            case "timeline": return await TimelineAsync(p, token);
             case "account.add": return StartLogin(null, false, false);
             case "account.login": return StartLogin(Wire.Number(p, "profileId"), Wire.Flag(p, "replaceExisting"), Wire.Flag(p, "fresh"));
             case "account.cancel": _loginCancellation?.Cancel(); return new { cancelled = true };
@@ -366,6 +411,7 @@ public sealed class ManagementService : IManagementService
                 return new { saved = true };
             }, token);
             case "account.smart": return await MutateAsync(() => SetSmartCandidate(p), token);
+            case "account.share": return await MutateAsync(() => SetShare(p), token);
             case "account.delete": return await MutateAsync(() =>
             {
                 var c = _config.LoadOrCreate();
@@ -375,6 +421,8 @@ public sealed class ManagementService : IManagementService
                 _config.RemoveAccount(c, account.Id);
                 var smart = _smartSwitch.Load();
                 if (smart.Candidates.Remove(account.Id)) _smartSwitch.Save(smart);
+                var plan = _weekPlan.Load();
+                if (plan.Shares.Remove(account.Id)) _weekPlan.Save(plan);
                 return new { removed = true };
             }, token);
             case "account.logout": return StartJob("logout", Wire.Number(p, "profileId"), async ct =>

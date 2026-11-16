@@ -81,9 +81,9 @@ public static class TokenRateCalculator
     private static readonly TimeSpan MaximumGap = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ResetDrift = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan LookBack = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan MaximumHold = TimeSpan.FromDays(7);
+    internal static readonly TimeSpan MaximumHold = TimeSpan.FromDays(7);
     // A login that is none of the registered accounts, held like an account but counted for none.
-    private const int UnregisteredAccount = -1;
+    internal const int UnregisteredAccount = -1;
 
     public static TokenPeriodView Calculate(TokenRateRequest request)
     {
@@ -288,7 +288,7 @@ public static class TokenRateCalculator
     }
 
     // Which account each device used, from looks at it and from switches that put an account on it.
-    private static Dictionary<string, List<(DateTimeOffset At, int? ProfileId, bool Switched)>> Observations(IReadOnlyList<QuotaHistoryEntry> history)
+    internal static Dictionary<string, List<(DateTimeOffset At, int? ProfileId, bool Switched)>> Observations(IReadOnlyList<QuotaHistoryEntry> history)
     {
         var result = new Dictionary<string, List<(DateTimeOffset, int?, bool)>>(StringComparer.Ordinal);
         foreach (var entry in history)
@@ -306,11 +306,11 @@ public static class TokenRateCalculator
         return result;
     }
 
-    private sealed record Hold(DateTimeOffset From, DateTimeOffset To, int ProfileId);
+    internal sealed record Hold(DateTimeOffset From, DateTimeOffset To, int ProfileId);
 
     // Between two looks that agree, or up to a switch, the device kept its account; when a look finds another
     // account with no switch in between, the change happened at a time unknown, so that stretch has no account.
-    private static List<Hold> Holders(List<(DateTimeOffset At, int? ProfileId, bool Switched)> seen, DateTimeOffset end)
+    internal static List<Hold> Holders(List<(DateTimeOffset At, int? ProfileId, bool Switched)> seen, DateTimeOffset end)
     {
         var holds = new List<Hold>();
         for (var i = 0; i < seen.Count; i++)

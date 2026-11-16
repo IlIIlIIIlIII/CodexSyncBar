@@ -14,6 +14,7 @@ public sealed partial class MainWindow : Window
     private static readonly Dictionary<string, Type> Pages = new()
     {
         ["usage"] = typeof(UsagePage),
+        ["timeline"] = typeof(TimelinePage),
         ["switch"] = typeof(SwitchPage),
         ["accounts"] = typeof(AccountsPage),
         ["devices"] = typeof(DevicesPage),
@@ -99,6 +100,9 @@ public sealed partial class MainWindow : Window
     public void CloseForExit()
     {
         _exiting = true;
+        // A flyout left open as its window closed took the process down with an access violation in WinUI.
+        if (Content?.XamlRoot is { } root)
+            foreach (var popup in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(root)) popup.IsOpen = false;
         Close();
     }
 

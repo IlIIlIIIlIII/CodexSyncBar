@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     SyncBar Fluent, Claude edition. WinUI theme resources are used as they are; this adds
-    only the remaining-amount meter, the six account colours and the card styles.
+    only the remaining-amount meter, the six account colours, the card styles and the
+    weekly timeline's neutral bands.
     Meter and number colours say how much is left (success, caution, critical) and never
     follow the accent, which marks only the account in use and focus.
 -->
@@ -26,6 +27,15 @@
             <SolidColorBrush x:Key="SyncBarAvatarRoseForeground" Color="#A3223F" />
             <SolidColorBrush x:Key="SyncBarAvatarGreenBackground" Color="#DDF3DF" />
             <SolidColorBrush x:Key="SyncBarAvatarGreenForeground" Color="#1B6B2B" />
+            <SolidColorBrush x:Key="SyncBarTimelinePlanBrush" Color="#0E000000" />
+            <SolidColorBrush x:Key="SyncBarTimelinePlanBorderBrush" Color="#14000000" />
+            <SolidColorBrush x:Key="SyncBarTimelineHoldBrush" Color="#1F000000" />
+            <SolidColorBrush x:Key="SyncBarTimelineStripBrush" Color="#12000000" />
+            <SolidColorBrush x:Key="SyncBarTimelineOutlineBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="SyncBarTimelineBarBrush" Color="#72000000" />
+            <SolidColorBrush x:Key="SyncBarTimelineTickBrush" Color="#9E000000" />
+            <SolidColorBrush x:Key="SyncBarTimelineNowBrush" Color="#E4000000" />
+            <SolidColorBrush x:Key="SyncBarTimelineGridBrush" Color="#14000000" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Default">
             <SolidColorBrush x:Key="SyncBarMeterTrackBrush" Color="#1FFFFFFF" />
@@ -44,6 +54,15 @@
             <SolidColorBrush x:Key="SyncBarAvatarRoseForeground" Color="#FFB3C2" />
             <SolidColorBrush x:Key="SyncBarAvatarGreenBackground" Color="#1B3F22" />
             <SolidColorBrush x:Key="SyncBarAvatarGreenForeground" Color="#A8E6B0" />
+            <SolidColorBrush x:Key="SyncBarTimelinePlanBrush" Color="#14FFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelinePlanBorderBrush" Color="#15FFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelineHoldBrush" Color="#2BFFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelineStripBrush" Color="#1AFFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelineOutlineBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="SyncBarTimelineBarBrush" Color="#87FFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelineTickBrush" Color="#C7FFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelineNowBrush" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="SyncBarTimelineGridBrush" Color="#15FFFFFF" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
             <SolidColorBrush x:Key="SyncBarMeterTrackBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
@@ -62,6 +81,16 @@
             <SolidColorBrush x:Key="SyncBarAvatarRoseForeground" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="SyncBarAvatarGreenBackground" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="SyncBarAvatarGreenForeground" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <!-- Bands keep the window colour behind their words and are told from the page by an outline. -->
+            <SolidColorBrush x:Key="SyncBarTimelinePlanBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelinePlanBorderBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineHoldBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineStripBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineOutlineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineBarBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineTickBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineNowBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SyncBarTimelineGridBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 
@@ -163,6 +192,44 @@
         <Setter Property="BorderBrush" Value="{ThemeResource SyncBarCurrentBorderBrush}" />
         <Setter Property="BorderThickness" Value="0,1,0,0" />
         <Setter Property="Padding" Value="36,14" />
+    </Style>
+
+    <!--
+        The weekly timeline. A planned segment, the account this PC held and a day's use are amounts
+        used or planned, never amounts left: they stay neutral and are told apart by lightness and by
+        their row. Only the hold of the account in use takes the current-account colours.
+    -->
+    <Style x:Key="SyncBarTimelinePlan" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SyncBarTimelinePlanBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SyncBarTimelinePlanBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+    </Style>
+    <Style x:Key="SyncBarTimelineHold" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SyncBarTimelineHoldBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SyncBarTimelineOutlineBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+    </Style>
+    <Style x:Key="SyncBarTimelineHoldCurrent" TargetType="Border" BasedOn="{StaticResource SyncBarTimelineHold}">
+        <Setter Property="Background" Value="{ThemeResource SyncBarCurrentBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SyncBarCurrentBorderBrush}" />
+    </Style>
+    <!-- The quick view's one row of planned segments. -->
+    <Style x:Key="SyncBarTimelineStrip" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SyncBarTimelineStripBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SyncBarTimelineOutlineBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="3" />
+    </Style>
+    <Style x:Key="SyncBarTimelineBar" TargetType="Border"><Setter Property="Background" Value="{ThemeResource SyncBarTimelineBarBrush}" /></Style>
+    <Style x:Key="SyncBarTimelineTick" TargetType="Border"><Setter Property="Background" Value="{ThemeResource SyncBarTimelineTickBrush}" /></Style>
+    <Style x:Key="SyncBarTimelineNow" TargetType="Border"><Setter Property="Background" Value="{ThemeResource SyncBarTimelineNowBrush}" /></Style>
+    <Style x:Key="SyncBarTimelineGrid" TargetType="Border"><Setter Property="Background" Value="{ThemeResource SyncBarTimelineGridBrush}" /></Style>
+    <!-- The dashed line of a day's plan across the bars. -->
+    <Style x:Key="SyncBarTimelinePlanLine" TargetType="Line">
+        <Setter Property="Stroke" Value="{ThemeResource SyncBarTimelineTickBrush}" />
+        <Setter Property="StrokeThickness" Value="1" />
     </Style>
 
     <Style x:Key="SyncBarPillAccent" TargetType="Border">

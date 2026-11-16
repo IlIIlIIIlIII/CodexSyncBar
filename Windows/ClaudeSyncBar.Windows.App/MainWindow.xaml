@@ -53,6 +53,9 @@
                 <NavigationViewItem Content="사용량" Tag="usage">
                     <NavigationViewItem.Icon><FontIcon Glyph="&#xEC4A;" /></NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="주간 타임라인" Tag="timeline">
+                    <NavigationViewItem.Icon><FontIcon Glyph="&#xE787;" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem Content="계정 전환" Tag="switch">
                     <NavigationViewItem.Icon><FontIcon Glyph="&#xE895;" /></NavigationViewItem.Icon>
                 </NavigationViewItem>

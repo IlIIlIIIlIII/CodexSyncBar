@@ -61,8 +61,15 @@ public abstract class SyncPage : Page
             + State.ConnectionError + DateTime.Now.ToString("HH:mm");
     }
 
-    private void Refresh()
+    /// <summary>
+    /// While true the page is left as drawn, even when asked to draw again: drawn under an open flyout, the control
+    /// that opened it would leave its place and close it. The page calls <see cref="Refresh"/> once it thaws.
+    /// </summary>
+    protected virtual bool Frozen => false;
+
+    protected void Refresh()
     {
+        if (Frozen) return;
         var signature = Signature();
         if (signature == _signature) return;
         _signature = signature;

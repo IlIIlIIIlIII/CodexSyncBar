@@ -25,6 +25,7 @@ public static class Glyphs
 /// <summary>More Segoe Fluent Icons code points, written as escapes.</summary>
 public static class MoreGlyphs
 {
+    public const string ChevronLeft = "";
     public const string OpenFile = "";
 }
 

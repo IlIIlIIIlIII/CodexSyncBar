@@ -35,6 +35,9 @@ public sealed class DemoService : IManagementService
     private int _tokenHours = TokenRateCalculator.MaximumHours;
     private string _tokenBasis = TokenBurnBasis.Uncached;
     private DemoTokens? _tokens;
+    // How much of each account's week is the user's; an account not here is all the user's.
+    private readonly Dictionary<int, int> _shares = [];
+    private DemoWeek? _week;
     public bool ShutdownRequested { get; private set; }
 
     public DemoService()
@@ -47,6 +50,7 @@ public sealed class DemoService : IManagementService
             new(1, "p***@example.com", "개인 계정", false, false, Usage(54), SmartCandidate: true),
             new(2, "w***@example.com", "업무 계정", false, false, Usage(42), SmartCandidate: true),
         ];
+        ShareTheFourth();
     }
 
     /// <summary>The same fixture with other accounts; the Windows app shows fresh values relative to now.</summary>
@@ -56,6 +60,13 @@ public sealed class DemoService : IManagementService
         _accounts = [.. accounts.Select(a => a with { SmartCandidate = a.SmartCandidate || SmartSwitch.IsCandidate(a.Plan, null) })];
         _local = activeProfileId;
         foreach (var device in _remoteAccounts.Keys.ToArray()) _remoteAccounts[device] = activeProfileId;
+        ShareTheFourth();
+    }
+
+    // One account is shared with other people from the start, so the weekly timeline has a share to show.
+    private void ShareTheFourth()
+    {
+        if (_accounts.Count >= 4) _shares[_accounts[3].Id] = 70;
     }
 
     private string Revision => "demo-" + _revision;
@@ -173,6 +184,15 @@ public sealed class DemoService : IManagementService
                 _accounts[index] = _accounts[index] with { SmartCandidate = Wire.Flag(p, "enabled") };
                 return new { saved = true };
             }
+            case "account.share":
+            {
+                var index = _accounts.FindIndex(a => a.Id == Wire.Number(p, "profileId"));
+                if (index < 0) throw new RpcException("account_unavailable", "계정을 찾지 못했습니다.");
+                var percent = WeekPlanSettings.Asked(p);
+                if (percent == 100) _shares.Remove(_accounts[index].Id);
+                else _shares[_accounts[index].Id] = percent;
+                return new { saved = true };
+            }
             case "account.move":
             {
                 var index = _accounts.FindIndex(a => a.Id == Wire.Number(p, "profileId"));
@@ -202,6 +222,15 @@ public sealed class DemoService : IManagementService
                     view,
                 };
             }
+            case "timeline":
+            {
+                // The made-up readings end when the timeline is first asked for; the week is cut at the time of each asking.
+                var now = DateTimeOffset.UtcNow;
+                _week ??= new DemoWeek(now, _accounts, _local, _shares.Where(share => share.Value < 100).Select(share => share.Key).ToHashSet());
+                return WeekTimelineCalculator.Calculate(new(now, Wire.Number(p, "week"), _accounts.Select(a => new WeekTimelineAccount(
+                    a.Id, a.Alias, _shares.GetValueOrDefault(a.Id, 100), !a.IsPending && !a.NeedsLogin, a.Usage?.Weekly?.UsedPercent,
+                    a.Usage?.Weekly?.ResetsAt, a.Id == _local, a.SmartCandidate)).ToArray(), _week.History));
+            }
             case "cli.status": return new { version = "demo", path = "/demo/claude", manager = "demo", canUpdate = false, notice = "격리된 데모에서는 실제 CLI를 실행하지 않습니다." };
             case "recovery.retry":
                 _failRecovery = false;
@@ -217,7 +246,11 @@ public sealed class DemoService : IManagementService
                 _offline = Wire.Flag(p, "offline", _offline);
                 _failApply = Wire.Flag(p, "failApply", _failApply);
                 _failRecovery = Wire.Flag(p, "failRecovery", _failRecovery);
-                _local = Wire.Number(p, "localProfileId", _local);
+                if (Wire.Number(p, "localProfileId", _local) is var chosen && chosen != _local)
+                {
+                    _local = chosen;
+                    _week?.Switched(chosen, ["local"]);
+                }
                 foreach (var id in _remoteAccounts.Keys.ToArray()) _remoteAccounts[id] = Wire.Number(p, "remoteProfileId", _remoteAccounts[id]);
                 if (Wire.Item(p, "disabledDeviceId").ValueKind == JsonValueKind.String) { _disabledDevice = Wire.Text(p, "disabledDeviceId"); _revision++; }
                 return new { configured = true };
@@ -251,6 +284,8 @@ public sealed class DemoService : IManagementService
             {
                 if (op.Targets.Any(t => t.Id == "local")) _local = op.ProfileId!.Value;
                 foreach (var target in op.Targets.Where(t => t.Id.StartsWith("ssh:", StringComparison.Ordinal))) _remoteAccounts[target.Id] = op.ProfileId!.Value;
+                // As the service keeps a completed switch in the quota history: the timeline's holds follow it.
+                _week?.Switched(op.ProfileId!.Value, op.Targets.Select(t => t.Id).ToArray());
                 _operation = op with { State = "completed", Message = "모든 활성 장치에 계정을 적용했습니다.", Targets = op.Targets.Select(t => t with { State = "verified" }).ToArray(), FinishedAt = DateTimeOffset.UtcNow };
             }
             else
@@ -268,6 +303,139 @@ public sealed class DemoService : IManagementService
     }
     public Task StopAsync() => Task.CompletedTask;
     public void Dispose() { }
+}
+
+/// <summary>
+/// Nine days of made-up quota readings for the weekly timeline, one look every five minutes, ending on what the
+/// snapshot shows of each account, so the timeline and the usage page agree. This PC goes from account to account
+/// in a fixed run of stretches, and an account's use climbs while it is held, by the hour of the day. Of the weeks
+/// that ended in those days, two ran dry while held, well before their resets, and the others left something
+/// unused. An account shared with other people also moves a little while this PC is on another.
+/// </summary>
+internal sealed class DemoWeek
+{
+    private const int Hours = 216;
+    private const int Looks = Hours * 12;
+    private const int InUse = -1;
+    private static readonly TimeSpan Slot = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan Week = TimeSpan.FromDays(7);
+    // How many hours before now each stretch begins and whose it is, counting the accounts in the order they
+    // reset next; the last stretch is the account in use.
+    private static readonly (int From, int Turn)[] Stretches =
+        [(216, 0), (176, 1), (140, 2), (110, 3), (100, 0), (68, 2), (56, 0), (46, 1), (36, 3), (26, InUse)];
+    // What each had used when its last week ended, in the same order: two ran dry while held, two left some.
+    private static readonly double[] Ended = [100, 62, 100, 58];
+    // And at the end of a week before that, of which the nine days see only the tail.
+    private const double EndedEarlier = 45;
+    // How busy each hour of the day is, in Korea.
+    private static readonly double[] Busy = [0.5, 0.3, 0.15, 0.05, 0, 0, 0, 0.05, 0.3, 0.7, 0.9, 1, 0.8, 0.9, 1, 1.1, 1, 0.9, 0.7, 0.8, 1, 1.1, 0.9, 0.7];
+    // Other people's pace on a shared account, against the user's while this PC holds it.
+    private const double OthersPace = 0.07;
+    private readonly List<QuotaHistoryEntry> _history = [];
+
+    public IReadOnlyList<QuotaHistoryEntry> History => _history;
+
+    public DemoWeek(DateTimeOffset now, IReadOnlyList<AccountView> accounts, int active, IReadOnlySet<int> shared)
+    {
+        var end = new DateTimeOffset(now.UtcTicks - now.UtcTicks % TimeSpan.TicksPerMinute, TimeSpan.Zero);
+        DateTimeOffset At(int look) => end - (Looks - look) * Slot;
+        // An account that needs a login gives no reading, as in the service.
+        var read = accounts.Where(a => !a.NeedsLogin && !a.IsPending && a.Usage?.Weekly is not null).ToList();
+        if (read.Count == 0) return;
+
+        // Those whose week is running, in the order they reset; then any whose reset is past or not known.
+        var turns = read.OrderBy(a => a.Usage!.Weekly!.ResetsAt is { } reset && reset > end ? reset : DateTimeOffset.MaxValue).ToList();
+        var inUse = read.FirstOrDefault(a => a.Id == active) ?? turns[2 % turns.Count];
+        var holders = new AccountView[Looks + 1];
+        var pace = new double[Looks + 1];
+        for (var look = 0; look <= Looks; look++)
+        {
+            var before = (Looks - look) / 12d;
+            var turn = Stretches.Last(stretch => stretch.From >= before).Turn;
+            holders[look] = turn == InUse ? inUse : turns[turn % turns.Count];
+            // Some days are busier than others, and no five minutes are like the next.
+            var clock = At(look) + TimeSpan.FromHours(9);
+            pace[look] = Busy[clock.Hour] * (0.55 + 0.9 * Noise((int)(clock.Ticks / TimeSpan.TicksPerDay % 1000), 2.7)) * (0.6 + 0.8 * Noise(look, 9.7));
+        }
+
+        var readings = read.ToDictionary(a => a.Id, a => Readings(a.Usage!.Weekly!, turns.IndexOf(a), end,
+            look => pace[look] * (holders[look].Id == a.Id ? 1 : shared.Contains(a.Id) ? OthersPace : 0)));
+        for (var look = 0; look <= Looks; look++)
+        {
+            var at = At(look);
+            // A switch is kept when it is made, between two looks; the next look finds the device on the new account.
+            if (look > 0 && holders[look].Id != holders[look - 1].Id)
+                _history.Add(new QuotaHistoryEntry
+                {
+                    Kind = QuotaHistoryEntry.Switch, At = at - TimeSpan.FromMinutes(2), ProfileId = holders[look].Id,
+                    DeviceIds = ["local", "ssh:dev", "ssh:build"],
+                });
+            _history.Add(new QuotaHistoryEntry
+            {
+                Kind = QuotaHistoryEntry.Poll, At = at,
+                Samples = read.Select(a => new QuotaSample(a.Id, at, a.Plan, readings[a.Id][look].Used, readings[a.Id][look].ResetsAt)).ToArray(),
+                Devices = [new("local", holders[look].Id, at)],
+            });
+        }
+    }
+
+    /// <summary>A switch made in the demo after the readings end: from then on its devices use its account.</summary>
+    public void Switched(int profileId, IReadOnlyList<string> devices) =>
+        _history.Add(new QuotaHistoryEntry { Kind = QuotaHistoryEntry.Switch, At = DateTimeOffset.UtcNow, ProfileId = profileId, DeviceIds = devices });
+
+    // One account's reading at every look. Each of its weeks the nine days touch climbs, at the pace given, to
+    // what that week ended on, and the running one to what the snapshot shows now, in whole percent as the service
+    // gives it. A week not yet used reads 0 and names no reset.
+    private static (double Used, DateTimeOffset? ResetsAt)[] Readings(UsageWindow snapshot, int turn, DateTimeOffset end, Func<int, double> pace)
+    {
+        var readings = new (double Used, DateTimeOffset? ResetsAt)[Looks + 1];
+        if (snapshot.ResetsAt is not { } resetsAt || resetsAt <= end)
+        {
+            // Read once and not since: the same reading all along.
+            Array.Fill(readings, (snapshot.UsedPercent, snapshot.ResetsAt));
+            return readings;
+        }
+
+        // The reset that ends the running week, should the one read be more than a week away.
+        var next = end.AddTicks(((resetsAt - end).Ticks - 1) % Week.Ticks + 1);
+        for (var week = 0; ; week++)
+        {
+            // The looks from this week's start up to its reset: the look at a reset already reads the new week.
+            var (from, to) = (next - (week + 1) * Week, next - week * Week);
+            var first = Math.Max(0, Looks - (int)((end - from).Ticks / Slot.Ticks));
+            var last = week == 0 ? Looks : Looks - (int)((end - to).Ticks / Slot.Ticks) - 1;
+            if (last < 0) break;
+
+            var target = Math.Clamp(week == 0 ? snapshot.UsedPercent : week == 1 ? Ended[turn % Ended.Length] : EndedEarlier, 0, 100);
+            // A week that began before the nine days had some of it used by then. Nothing moves before the first look.
+            var began = first > 0;
+            var start = Math.Max(first, 1);
+            var floor = began ? 0 : target * 0.8 * Math.Clamp((end - Looks * Slot - from) / Week, 0, 1);
+            var sum = 0d;
+            for (var look = start; look <= last; look++) sum += pace(look);
+            // Never held in a week that began in these days: it was used all the same, evenly.
+            var even = sum <= 0 && began;
+            if (even) sum = last - start + 1;
+
+            var moved = 0d;
+            for (var look = first; look <= last; look++)
+            {
+                if (look >= start) moved += even ? 1 : pace(look);
+                var value = sum > 0 && moved < sum ? floor + (target - floor) * moved / sum : target;
+                var used = week == 0 && look == Looks ? snapshot.UsedPercent : Math.Floor(value + 1e-9);
+                var named = used > 0 || (week == 0 && snapshot.UsedPercent <= 0);
+                readings[look] = (used, named ? week == 0 ? resetsAt : to : null);
+            }
+        }
+
+        return readings;
+    }
+
+    private static double Noise(int index, double salt)
+    {
+        var value = Math.Sin(index * 78.233 + salt) * 43758.5453;
+        return value - Math.Floor(value);
+    }
 }
 
 /// <summary>

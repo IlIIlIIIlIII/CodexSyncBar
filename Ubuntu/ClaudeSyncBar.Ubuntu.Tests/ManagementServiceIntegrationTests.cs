@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -41,6 +42,11 @@ public sealed class ManagementServiceIntegrationTests
 
     private static string Quotas(double weekly) =>
         "{\"seven_day\":{\"utilization\":" + weekly + ",\"resets_at\":\"2099-01-07T00:00:00Z\"}}";
+
+    // The week as the service gives it with its reset, or with none: a week not used since it last lapsed.
+    private static string Quotas(double weekly, DateTimeOffset? resetsAt) =>
+        "{\"seven_day\":{\"utilization\":" + weekly.ToString(CultureInfo.InvariantCulture) + ",\"resets_at\":"
+        + (resetsAt is { } reset ? "\"" + reset.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture) + "\"" : "null") + "}}";
 
     private static async Task RefreshUsage(Fixture fixture) =>
         Assert.Equal("completed", (await fixture.Wait(await fixture.Call<OperationView>("refresh", new { kind = "usage" }))).State);
@@ -293,6 +299,321 @@ public sealed class ManagementServiceIntegrationTests
         await fixture.Call<object>("account.delete", new { profileId = 2 });
         Assert.Empty(store.Load().Candidates);
         Assert.Equal(new[] { 1 }, (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Select(account => account.Id));
+    }
+
+    [Fact]
+    public async Task EachAccountsShareOfItsWeekIsKeptInItsOwnFileAndStartsAsTheWholeOfIt()
+    {
+        await using var fixture = new Fixture(withRemote: false);
+        var store = new WeekPlanStore(fixture.Paths);
+        var file = Path.Combine(fixture.Paths.StateRoot, "week-plan.json");
+        Task<object> Share(object parameters) => fixture.Call<object>("account.share", parameters);
+
+        // Until set, an account is all the user's and nothing is written.
+        Assert.Equal((100, 100), (store.Load().Share(1), store.Load().Share(2)));
+        Assert.False(File.Exists(file));
+        // Saying so of an account that was never set changes nothing, so it writes nothing either.
+        Assert.True(JsonSerializer.SerializeToElement(await Share(new { profileId = 1, percent = 100 }), Wire.Json).GetProperty("saved").GetBoolean());
+        Assert.False(File.Exists(file));
+
+        var saved = JsonSerializer.SerializeToElement(await Share(new { profileId = 2, percent = 70 }), Wire.Json);
+        Assert.True(saved.GetProperty("saved").GetBoolean());
+        Assert.Equal(new Dictionary<int, int> { [2] = 70 }, store.Load().Shares);
+        Assert.Equal((100, 70), (store.Load().Share(1), store.Load().Share(2)));
+        Assert.Contains("\"shares\"", File.ReadAllText(file));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+        // The switches keep their own files and learn nothing of it.
+        await fixture.Call<object>("account.smart", new { profileId = 2, enabled = false });
+        await fixture.Call<object>("settings.save", new { autoSwitchEnabled = true });
+        foreach (var other in new[] { "smart-switch.json", "auto-switch.json" })
+            Assert.DoesNotContain("shares", File.ReadAllText(Path.Combine(fixture.Paths.StateRoot, other)), StringComparison.OrdinalIgnoreCase);
+
+        // None of it is a share too; the whole of it is the default again and leaves no entry.
+        await Share(new { profileId = 1, percent = 0 });
+        Assert.Equal(new Dictionary<int, int> { [1] = 0, [2] = 70 }, store.Load().Shares);
+        await Share(new { profileId = 2, percent = 100 });
+        Assert.Equal(new Dictionary<int, int> { [1] = 0 }, store.Load().Shares);
+
+        // A share is a whole number from 0 to 100, of a registered account.
+        foreach (var bad in new object[]
+        {
+            new { profileId = 2, percent = 101 }, new { profileId = 2, percent = -1 }, new { profileId = 2, percent = 12.5 },
+            new { profileId = 2, percent = "50" }, new { profileId = 2 },
+        })
+            Assert.Equal("invalid_request", (await Assert.ThrowsAsync<RpcException>(() => Share(bad))).Code);
+        var unknown = await Assert.ThrowsAsync<RpcException>(() => Share(new { profileId = 9, percent = 50 }));
+        Assert.Equal("account_unavailable", unknown.Code);
+        Assert.Equal(new Dictionary<int, int> { [1] = 0 }, store.Load().Shares);
+
+        // The share an account already has is not written again: the file stays as it was, to the letter.
+        const string byHand = "{\"shares\":{\"1\":0,\"2\":70}}";
+        File.WriteAllText(file, byHand);
+        await Share(new { profileId = 2, percent = 70 });
+        await Share(new { profileId = 1, percent = 0 });
+        Assert.Equal(byHand, File.ReadAllText(file));
+        await Share(new { profileId = 2, percent = 60 });
+        Assert.Equal(new Dictionary<int, int> { [1] = 0, [2] = 60 }, store.Load().Shares);
+    }
+
+    [Fact]
+    public async Task AWeekPlanFileThatNamesNoSharesIsReadAsOneThatSetsNone()
+    {
+        await using var fixture = new Fixture(withRemote: false, usage: _ => Quotas(30));
+        var store = new WeekPlanStore(fixture.Paths);
+        var file = Path.Combine(fixture.Paths.StateRoot, "week-plan.json");
+        await RefreshUsage(fixture);
+
+        // Written by hand, or cut short: the key is there and holds nothing.
+        File.WriteAllText(file, "{\"shares\":null}");
+        Assert.Empty(store.Load().Shares);
+        Assert.Equal(100, store.Load().Share(1));
+        var view = JsonSerializer.SerializeToElement(await fixture.Call<WeekTimelineView>("timeline"), Wire.Json);
+        Assert.Equal(("ok", 200d), (view.GetProperty("state").GetString(), view.GetProperty("totalShare").GetDouble()));
+        // The setting still works from the screen, and so does deleting an account.
+        await fixture.Call<object>("account.share", new { profileId = 1, percent = 40 });
+        Assert.Equal(new Dictionary<int, int> { [1] = 40 }, store.Load().Shares);
+        File.WriteAllText(file, "{\"shares\":null}");
+        fixture.Auth.DeleteProfile(2);
+        await fixture.Call<object>("account.delete", new { profileId = 2 });
+        Assert.Equal(new[] { 1 }, (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Select(account => account.Id));
+    }
+
+    [Fact]
+    public async Task ADeletedAccountTakesItsShareWithIt()
+    {
+        await using var fixture = new Fixture(withRemote: false);
+        var store = new WeekPlanStore(fixture.Paths);
+        // A share left over from an account removed some other way is dropped when the next is set.
+        store.Save(new() { Shares = { [7] = 40 } });
+        await fixture.Call<object>("account.share", new { profileId = 2, percent = 70 });
+        Assert.Equal(new Dictionary<int, int> { [2] = 70 }, store.Load().Shares);
+
+        // A logged-out account is the only kind that can be deleted.
+        fixture.Auth.DeleteProfile(2);
+        await fixture.Call<object>("account.delete", new { profileId = 2 });
+        Assert.Empty(store.Load().Shares);
+        Assert.Equal(new[] { 1 }, (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Select(account => account.Id));
+    }
+
+    [Fact]
+    public async Task TheTimelineSplitsTheWeekByShareOnceTheUsageIsRead()
+    {
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(60), ["synthetic-access-2"] = Quotas(10) };
+        await using var fixture = new Fixture(withRemote: false, usage: token => usage[token]);
+        async Task<JsonElement> Timeline(object? parameters = null) =>
+            JsonSerializer.SerializeToElement(await fixture.Call<WeekTimelineView>("timeline", parameters), Wire.Json);
+        static JsonElement Of(JsonElement list, int profileId) => list.EnumerateArray().Single(item => item.GetProperty("profileId").GetInt32() == profileId);
+
+        await RefreshUsage(fixture);
+        var even = await Timeline();
+        Assert.Equal(("ok", 0), (even.GetProperty("state").GetString(), even.GetProperty("week").GetInt32()));
+        Assert.Equal(200, even.GetProperty("totalShare").GetDouble());
+        Assert.Equal(new[] { 0.5, 0.5 }, even.GetProperty("segments").EnumerateArray().Select(segment => Math.Round(segment.GetProperty("width").GetDouble(), 9)));
+        // The rows carry what the usage look read, by the names the account list shows.
+        var first = Of(even.GetProperty("accounts"), 1);
+        Assert.Equal(("계정1", 100, 40d, 40d, true), (first.GetProperty("name").GetString(), first.GetProperty("share").GetInt32(),
+            first.GetProperty("remaining").GetDouble(), first.GetProperty("mineLeft").GetDouble(), first.GetProperty("isCurrent").GetBoolean()));
+        Assert.True(first.GetProperty("planned").GetBoolean());
+        Assert.True(first.GetProperty("smartCandidate").GetBoolean());
+        // The reset read is decades away; the row gives the one that comes round within the week.
+        var resetsAt = first.GetProperty("resetsAt").GetDateTimeOffset();
+        Assert.Equal(0, (DateTimeOffset.Parse("2099-01-07T00:00:00Z") - resetsAt).Ticks % TimeSpan.FromDays(7).Ticks);
+        Assert.InRange(resetsAt - DateTimeOffset.UtcNow, TimeSpan.Zero, TimeSpan.FromDays(7));
+        // The look that read the usage also saw which account this PC holds, and that hold reaches now.
+        Assert.Equal(JsonValueKind.String, even.GetProperty("recordStartsAt").ValueKind);
+        var hold = Assert.Single(even.GetProperty("holds").EnumerateArray());
+        Assert.Equal((1, true), (hold.GetProperty("profileId").GetInt32(), hold.GetProperty("isOpen").GetBoolean()));
+        Assert.Equal(40, hold.GetProperty("remainingTo").GetDouble());
+        Assert.NotEqual(JsonValueKind.Null, even.GetProperty("nowAt").ValueKind);
+        // Both reset together, so the turn goes to the one with more left, as the smart switch would choose.
+        var turn = even.GetProperty("summary").GetProperty("turn");
+        Assert.Equal((2, false, 90d), (turn.GetProperty("profileId").GetInt32(), turn.GetProperty("isCurrent").GetBoolean(), turn.GetProperty("mineLeft").GetDouble()));
+
+        // A share of 70 takes that much less of the week, and no more than the share is the user's to use.
+        await fixture.Call<object>("account.share", new { profileId = 2, percent = 70 });
+        var shared = await Timeline(new { week = 0 });
+        Assert.Equal(170, shared.GetProperty("totalShare").GetDouble());
+        var segment = Of(shared.GetProperty("segments"), 2);
+        Assert.Equal((70, Math.Round(70d / 170, 9)), (segment.GetProperty("share").GetInt32(), Math.Round(segment.GetProperty("width").GetDouble(), 9)));
+        var second = Of(shared.GetProperty("accounts"), 2);
+        Assert.Equal((70, 90d, 10d, 60d), (second.GetProperty("share").GetInt32(), second.GetProperty("remaining").GetDouble(),
+            second.GetProperty("mineUsed").GetDouble(), second.GetProperty("mineLeft").GetDouble()));
+
+        // An earlier week ends where the next begins; the furthest back is four weeks.
+        var earlier = await Timeline(new { week = -1 });
+        Assert.Equal(-1, earlier.GetProperty("week").GetInt32());
+        Assert.Equal(shared.GetProperty("startsAt").GetDateTimeOffset(), earlier.GetProperty("endsAt").GetDateTimeOffset());
+        Assert.Equal(JsonValueKind.Null, earlier.GetProperty("summary").GetProperty("turn").ValueKind);
+        Assert.Equal(WeekTimelineCalculator.MinimumWeek, (await Timeline(new { week = -9 })).GetProperty("week").GetInt32());
+
+        // An account the smart switch may not choose says so on its row and is planned all the same. One that needs
+        // a login is left out of the plan, with what was last read of it still on its row.
+        await fixture.Call<object>("account.smart", new { profileId = 1, enabled = false });
+        var config = new ConfigurationStore(fixture.Paths);
+        config.MarkAccountNeedsLogin(config.LoadOrCreate(), 2);
+        var loggedOut = await Timeline();
+        Assert.Equal(("ok", 100d), (loggedOut.GetProperty("state").GetString(), loggedOut.GetProperty("totalShare").GetDouble()));
+        Assert.Equal(new[] { 1 }, loggedOut.GetProperty("segments").EnumerateArray().Select(part => part.GetProperty("profileId").GetInt32()));
+        first = Of(loggedOut.GetProperty("accounts"), 1);
+        Assert.Equal((true, false), (first.GetProperty("planned").GetBoolean(), first.GetProperty("smartCandidate").GetBoolean()));
+        second = Of(loggedOut.GetProperty("accounts"), 2);
+        Assert.Equal((false, "login", true, 90d), (second.GetProperty("planned").GetBoolean(), second.GetProperty("excluded").GetString(),
+            second.GetProperty("smartCandidate").GetBoolean(), second.GetProperty("remaining").GetDouble()));
+        // The turn is the smart switch's order, not its choice: an account it may not choose still has its turn.
+        Assert.Equal(1, loggedOut.GetProperty("summary").GetProperty("turn").GetProperty("profileId").GetInt32());
+        Assert.Equal(JsonValueKind.Null, loggedOut.GetProperty("summary").GetProperty("next").ValueKind);
+        var restored = config.LoadOrCreate();
+        restored.Accounts.Single(account => account.Id == 2).NeedsLogin = false;
+        config.Save(restored);
+        Assert.Equal(170, (await Timeline()).GetProperty("totalShare").GetDouble());
+
+        // With no share left to plan, the week is empty again and every account says so.
+        await fixture.Call<object>("account.share", new { profileId = 1, percent = 0 });
+        await fixture.Call<object>("account.share", new { profileId = 2, percent = 0 });
+        var none = await Timeline();
+        Assert.Equal("empty", none.GetProperty("state").GetString());
+        Assert.Equal(new[] { "share", "share" }, none.GetProperty("accounts").EnumerateArray().Select(row => row.GetProperty("excluded").GetString()));
+        Assert.Equal(0, none.GetProperty("days").GetArrayLength());
+    }
+
+    // What the timeline answers, as the screens get it.
+    private static async Task<JsonElement> TimelineOf(Fixture fixture, int week = 0) =>
+        JsonSerializer.SerializeToElement(await fixture.Call<WeekTimelineView>("timeline", new { week }), Wire.Json);
+
+    private static JsonElement OfProfile(JsonElement list, int profileId) =>
+        list.EnumerateArray().Single(item => item.GetProperty("profileId").GetInt32() == profileId);
+
+    // The timeline takes a reset to the nearest five minutes, so these tests count their days from a whole one.
+    private static DateTimeOffset WholeFiveMinutes(DateTimeOffset time) =>
+        new(time.UtcTicks - time.UtcTicks % TimeSpan.FromMinutes(5).Ticks, TimeSpan.Zero);
+
+    // A look at the usage as the service keeps it in the quota history, with this PC on account 1.
+    private static void Look(QuotaHistoryStore record, DateTimeOffset at, params (int ProfileId, double Used, DateTimeOffset ResetsAt)[] read) =>
+        record.Append(new()
+        {
+            At = at, Samples = [.. read.Select(sample => new QuotaSample(sample.ProfileId, at, SmartSwitch.Plan, sample.Used, sample.ResetsAt))],
+            Devices = [new("local", 1, at)],
+        });
+
+    [Fact]
+    public async Task TheTimelineSetsWhatTheQuotaHistoryKeptBesideThePlan()
+    {
+        var from = WholeFiveMinutes(DateTimeOffset.UtcNow);
+        DateTimeOffset Day(double days) => from.AddDays(days);
+        // Account 1 resets tomorrow and account 2 five days after it, so the week shown ends tomorrow and
+        // account 2's last reset, a day ago, lies inside it.
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(60, Day(1)), ["synthetic-access-2"] = Quotas(10, Day(6)) };
+        await using var fixture = new Fixture(withRemote: false, usage: token => usage[token]);
+        var record = new QuotaHistoryStore(fixture.Paths);
+        Look(record, Day(-23), (2, 80, Day(-22)));
+        Look(record, Day(-9), (1, 99.6, Day(-6)), (2, 55, Day(-8)));
+        Look(record, Day(-2), (1, 20, Day(1)), (2, 30, Day(-1)));
+        await RefreshUsage(fixture);
+
+        var week = await TimelineOf(fixture);
+        Assert.Equal((Day(-6), Day(1)), (week.GetProperty("startsAt").GetDateTimeOffset(), week.GetProperty("endsAt").GetDateTimeOffset()));
+        Assert.Equal(new[] { 2, 1 }, week.GetProperty("resets").EnumerateArray().Select(reset => reset.GetProperty("profileId").GetInt32()));
+        // The look two days ago read 30% of the week that ended yesterday: the other 70% went unused.
+        var lapsed = OfProfile(week.GetProperty("resets"), 2);
+        Assert.Equal((Day(-1), false, 70d, false), (lapsed.GetProperty("resetsAt").GetDateTimeOffset(), lapsed.GetProperty("upcoming").GetBoolean(),
+            lapsed.GetProperty("left").GetDouble(), lapsed.GetProperty("spent").GetBoolean()));
+        var ahead = OfProfile(week.GetProperty("resets"), 1);
+        Assert.Equal((true, JsonValueKind.Null), (ahead.GetProperty("upcoming").GetBoolean(), ahead.GetProperty("left").ValueKind));
+        Assert.Equal(70, week.GetProperty("summary").GetProperty("lost").GetDouble(), 6);
+        // Used in the week: account 1's 20% and then 40% more, four of the six days account 2's 30% rose over, and its 10% since.
+        Assert.Equal(90, week.GetProperty("summary").GetProperty("used").GetDouble(), 6);
+        Assert.Equal(90, week.GetProperty("days").EnumerateArray().Sum(day => day.GetProperty("used").GetDouble()), 6);
+
+        // The week before is read from the looks of that week: one account left 45%, the other was all but spent.
+        var earlier = await TimelineOf(fixture, -1);
+        Assert.Equal((Day(-13), Day(-6)), (earlier.GetProperty("startsAt").GetDateTimeOffset(), earlier.GetProperty("endsAt").GetDateTimeOffset()));
+        lapsed = OfProfile(earlier.GetProperty("resets"), 2);
+        Assert.Equal((Day(-8), 45d, false), (lapsed.GetProperty("resetsAt").GetDateTimeOffset(), lapsed.GetProperty("left").GetDouble(), lapsed.GetProperty("spent").GetBoolean()));
+        var spent = OfProfile(earlier.GetProperty("resets"), 1);
+        Assert.Equal((Day(-6), true), (spent.GetProperty("resetsAt").GetDateTimeOffset(), spent.GetProperty("spent").GetBoolean()));
+        Assert.Equal(0.4, spent.GetProperty("left").GetDouble(), 6);
+        Assert.Equal(45.4, earlier.GetProperty("summary").GetProperty("lost").GetDouble(), 6);
+        Assert.Equal(55 * 4 / 6d + 30 * 2 / 6d, earlier.GetProperty("summary").GetProperty("used").GetDouble(), 6);
+
+        // Three weeks back there is one look, which read 80% a day before account 2 reset; nothing tells of account 1.
+        var oldest = await TimelineOf(fixture, -3);
+        Assert.Equal(20, OfProfile(oldest.GetProperty("resets"), 2).GetProperty("left").GetDouble());
+        Assert.Equal(JsonValueKind.Null, OfProfile(oldest.GetProperty("resets"), 1).GetProperty("left").ValueKind);
+        // Each week says where the record begins and whether it reaches back before that week.
+        foreach (var shown in new[] { week, earlier, oldest })
+            Assert.Equal(Day(-23), shown.GetProperty("recordStartsAt").GetDateTimeOffset());
+        Assert.Equal((true, true, false), (week.GetProperty("hasEarlier").GetBoolean(), earlier.GetProperty("hasEarlier").GetBoolean(),
+            oldest.GetProperty("hasEarlier").GetBoolean()));
+    }
+
+    [Fact]
+    public async Task ThePlanIsReadFromTheSameRecordWhicheverWeekIsShown()
+    {
+        var from = WholeFiveMinutes(DateTimeOffset.UtcNow);
+        DateTimeOffset Day(double days) => from.AddDays(days);
+        // Account 2 was last used twenty days ago: its week lapsed and the service names no reset for it now.
+        var usage = new Dictionary<string, string> { ["synthetic-access-1"] = Quotas(60, Day(1)), ["synthetic-access-2"] = Quotas(0, null) };
+        await using var fixture = new Fixture(withRemote: false, usage: token => usage[token]);
+        var record = new QuotaHistoryStore(fixture.Paths);
+        Look(record, Day(-20), (2, 35, Day(-18)));
+        await RefreshUsage(fixture);
+        // A line older than the record is kept for, still in the file until the next look prunes it.
+        Look(record, Day(-40), (1, 5, Day(-36)));
+
+        // The reset the record last named for account 2 comes round every week, so it is planned from that in every
+        // week alike, and each week ends where the next begins.
+        for (var week = 0; week >= WeekTimelineCalculator.MinimumWeek; week--)
+        {
+            var shown = await TimelineOf(fixture, week);
+            Assert.Equal(("ok", week, 200d), (shown.GetProperty("state").GetString(), shown.GetProperty("week").GetInt32(), shown.GetProperty("totalShare").GetDouble()));
+            Assert.Equal((Day(-4 + 7 * week), Day(3 + 7 * week)), (shown.GetProperty("startsAt").GetDateTimeOffset(), shown.GetProperty("endsAt").GetDateTimeOffset()));
+            Assert.Equal(new[] { (1, 0.5), (2, 0.5) }, shown.GetProperty("segments").EnumerateArray()
+                .Select(part => (part.GetProperty("profileId").GetInt32(), Math.Round(part.GetProperty("width").GetDouble(), 9))));
+            var unused = OfProfile(shown.GetProperty("accounts"), 2);
+            Assert.Equal((true, true, Day(3), 100d), (unused.GetProperty("planned").GetBoolean(), unused.GetProperty("resetProjected").GetBoolean(),
+                unused.GetProperty("resetsAt").GetDateTimeOffset(), unused.GetProperty("mineLeft").GetDouble()));
+            // The record begins at the oldest look within what is kept, and that look is before the week from two weeks back on.
+            Assert.Equal(Day(-20), shown.GetProperty("recordStartsAt").GetDateTimeOffset());
+            Assert.Equal(week >= -2, shown.GetProperty("hasEarlier").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task TheTimelineOnlyReadsSoItAnswersWhileAJobRunsAndLeavesAPreviewStanding()
+    {
+        using var open = new ManualResetEventSlim(true);
+        await using var fixture = new Fixture(withRemote: false, usage: _ =>
+        {
+            open.Wait(TimeSpan.FromSeconds(30));
+            return Quotas(30);
+        });
+        await RefreshUsage(fixture);
+        var history = Path.Combine(fixture.Paths.StateRoot, "quota-history.jsonl");
+        var kept = File.ReadAllBytes(history);
+
+        // Asking for the timeline changes nothing: a switch previewed before still applies after, no plan file
+        // appears and the quota history is as it was.
+        var preview = await fixture.Call<SwitchPreview>("preview", new { profileId = 2 });
+        Assert.Equal("ok", (await TimelineOf(fixture)).GetProperty("state").GetString());
+        Assert.Equal(-1, (await TimelineOf(fixture, -1)).GetProperty("week").GetInt32());
+        Assert.False(File.Exists(Path.Combine(fixture.Paths.StateRoot, "week-plan.json")));
+        Assert.Equal(kept, File.ReadAllBytes(history));
+        Assert.Equal("completed", (await fixture.Apply(preview)).State);
+
+        // While a job runs a setting is refused, and the timeline still answers, with the account now in use.
+        open.Reset();
+        var refresh = await fixture.Call<OperationView>("refresh", new { kind = "usage" });
+        try
+        {
+            var refused = await Assert.ThrowsAsync<RpcException>(() => fixture.Call<object>("account.share", new { profileId = 2, percent = 70 }));
+            Assert.Equal("busy", refused.Code);
+            var during = await TimelineOf(fixture).WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.True(OfProfile(during.GetProperty("accounts"), 2).GetProperty("isCurrent").GetBoolean());
+            Assert.True((await fixture.Call<ManagementSnapshot>("snapshot")).IsBusy);
+        }
+        finally { open.Set(); }
+        Assert.Equal("completed", (await fixture.Wait(refresh)).State);
+        Assert.False(File.Exists(Path.Combine(fixture.Paths.StateRoot, "week-plan.json")));
     }
 
     [Fact]
