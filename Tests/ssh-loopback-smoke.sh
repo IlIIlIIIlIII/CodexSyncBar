@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Real SSH transport smoke; run as an ordinary user, never through sudo.
 # Dependencies: python3, bash, ssh, ssh-keygen, sshd, jq, and sshd's shared libs.
-# Ubuntu CI: sudo apt-get update && sudo apt-get install -y openssh-server jq
+# On Ubuntu: sudo apt-get update && sudo apt-get install -y openssh-server jq
 # A portable sshd may be selected using argument 1 or SSHD_EXECUTABLE. Supply its
 # shared library directory through LD_LIBRARY_PATH when needed; this script does
 # not install packages, modify SSH config, or use the real HOME/authentication.

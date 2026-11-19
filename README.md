@@ -38,12 +38,12 @@ bash Scripts/Ubuntu/install-user.sh
 
 `Ubuntu/`는 네이티브 UI·백엔드·플랫폼 코드, `Shared/`는 Ubuntu 공통 코어 프로젝트입니다. 일부 공통 소스는 아직 `Windows/CodexSyncBar.Windows.Core/`에서 참조하므로 경로 이름만으로 삭제하지 않습니다.
 
-기본 CI는 Ubuntu 테스트와 패키지 검사를 수행합니다. 실계정 로그인·계정 전환·데스크톱 재시작 검증은 격리 테스트와 별개입니다.
+테스트와 패키지 검사는 `bash Scripts/Ubuntu/test.sh`로 로컬에서 실행합니다. GitHub Actions 워크플로는 두지 않습니다. 실계정 로그인·계정 전환·데스크톱 재시작 검증은 격리 테스트와 별개입니다.
 
 ## 이전 플랫폼 (deprecated)
 
 [Windows 보관 문서](docs/windows/README.md) · [macOS 보관 문서](docs/macos/README.md)
 
-기존 코드·브랜치·릴리즈는 이력 보존을 위해 유지합니다. 해당 플랫폼의 신규 기능 개발과 자동 CI·배포는 중단하며, 레거시 워크플로는 명시적인 수동 실행만 허용합니다.
+기존 코드·브랜치·릴리즈는 이력 보존을 위해 유지합니다. 해당 플랫폼의 신규 기능 개발과 배포는 중단했습니다.
 
 > OpenAI의 공식 제품이 아닌 개인용 유틸리티입니다. 사용량 응답 형식 변경에 따라 수정이 필요할 수 있습니다.
