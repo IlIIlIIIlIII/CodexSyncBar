@@ -15,8 +15,9 @@ namespace ClaudeSyncBar.App.Tray;
 
 /// <summary>
 /// The quick view over the notification area: every account's quota at a
-/// glance and a switch of this PC alone. The smart switch and anything that
-/// changes every device go through the app. It hides when it loses focus.
+/// glance and a switch of every active device, this PC with its SSH hosts and
+/// WSL distributions, as the app's apply does. The smart switch asks in the
+/// app, where there is room to show its choice. It hides when it loses focus.
 /// </summary>
 public sealed class TrayFlyout : Window
 {
@@ -41,6 +42,7 @@ public sealed class TrayFlyout : Window
     private readonly Grid _working;
     private readonly Border _noteHost = new();
     private readonly Button _smart;
+    private readonly TextBlock _scope;
     private string? _signature;
     private readonly IntPtr _window;
     private IntPtr _hook;
@@ -102,8 +104,8 @@ public sealed class TrayFlyout : Window
         _smart.HorizontalAlignment = HorizontalAlignment.Stretch;
         var openFooter = Ui.Button("앱 열기", click: (_, _) => { Hide(); _app.ShowMainWindow(); });
         var quit = Ui.IconButton(Glyphs.Power, "Claude SyncBar 완전히 종료", (_, _) => _app.Quit());
-        var footer = Ui.Stack(10, false, _confirmCard, _working, _noteHost, Ui.Columns(8, 0, _smart, openFooter),
-            Ui.Columns(8, 0, Ui.Caption("전환 버튼은 이 PC에만 적용돼요. 모든 장치는 스마트 전환이나 앱에서 바꿔요."), quit));
+        _scope = Ui.Caption("");
+        var footer = Ui.Stack(10, false, _confirmCard, _working, _noteHost, Ui.Columns(8, 0, _smart, openFooter), Ui.Columns(8, 0, _scope, quit));
 
         var root = new Grid { Padding = new Thickness(16, 14, 16, 12), RowSpacing = 12 };
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
@@ -422,10 +424,10 @@ public sealed class TrayFlyout : Window
         }
         else
         {
-            var change = Ui.Button("전환", click: async (_, _) => await SwitchAsync(id, name), tip: $"{name} 계정으로 이 PC 전환");
+            var change = Ui.Button("전환", click: async (_, _) => await SwitchAsync(id, name), tip: $"{name} 계정으로 모든 장치 전환");
             change.IsEnabled = _pending is null && _confirm is null && !busy && state.Error is null
                 && AppState.Str(state.Operation?["state"]) != "recoveryRequired";
-            AutomationProperties.SetName(change, $"{name} 계정으로 이 PC 전환");
+            AutomationProperties.SetName(change, $"{name} 계정으로 모든 장치 전환");
             action = change;
         }
 
@@ -468,7 +470,7 @@ public sealed class TrayFlyout : Window
         {
             var go = Ui.Button("전환", accent: true, click: async (_, _) => await ApplyAsync(confirm.Preview));
             var cancel = Ui.Button("취소", click: (_, _) => { _confirm = null; Render(); });
-            var text = Ui.Stack(4, false, Ui.Text($"{confirm.Name}(으)로 이 PC를 전환할까요?", strong: true), Ui.Caption(confirm.Notice));
+            var text = Ui.Stack(4, false, Ui.Text($"{confirm.Name}(으)로 모든 장치를 전환할까요?", strong: true), Ui.Caption(confirm.Notice));
             _confirmCard.Child = Ui.Stack(10, false, text, Ui.Stack(8, true, go, cancel));
         }
         _confirmCard.Visibility = _confirm is null ? Visibility.Collapsed : Visibility.Visible;
@@ -494,9 +496,11 @@ public sealed class TrayFlyout : Window
         _noteHost.Visibility = _noteHost.Child is null ? Visibility.Collapsed : Visibility.Visible;
 
         _smart.IsEnabled = !busy && state.Error is null && state.Accounts.Count > 1;
+        var others = state.Devices.Count(device => AppState.Str(device["id"]) != "local" && QuotaFormat.Flag(device["enabled"]));
+        _scope.Text = others > 0 ? $"전환하면 이 PC와 활성 장치 {others}대가 함께 바뀌어요." : "전환하면 이 PC의 계정이 바뀌어요. 다른 장치는 앱에서 추가해요.";
     }
 
-    // Switches this PC only. Anything that would change another machine stops it.
+    // Every active device, as the app's apply: this PC, its SSH hosts and WSL distributions.
     private async Task SwitchAsync(int profileId, string name)
     {
         if (_pending is not null) return;
@@ -505,13 +509,12 @@ public sealed class TrayFlyout : Window
         Render();
         try
         {
-            var preview = await _app.State.Client.CallAsync("preview", new { profileId, deviceId = "local" }) as JsonObject
+            var preview = await _app.State.Client.CallAsync("preview", new { profileId }) as JsonObject
                 ?? throw new ServiceError("invalid_preview", "전환할 수 없어요. 앱에서 상태를 확인해 주세요.");
             if (!QuotaFormat.Flag(preview["canApply"]))
-                throw new ServiceError("blocked", AppState.Str(preview["blockingReason"]) ?? "전환할 수 없어요. 앱에서 상태를 확인해 주세요.");
-            var targets = (preview["targets"] as JsonArray)?.OfType<JsonObject>().Where(target => QuotaFormat.Flag(target["included"])).ToList() ?? [];
-            if (targets.Count != 1 || AppState.Str(targets[0]["id"]) != "local" || AppState.Int(preview["profileId"]) != profileId)
-                throw new ServiceError("scope", "이 PC에만 적용되는 전환인지 확인하지 못했어요.");
+                throw new ServiceError("blocked", Blocked(preview));
+            if (AppState.Int(preview["profileId"]) != profileId)
+                throw new ServiceError("scope", "전환할 계정을 확인하지 못했어요.");
             _pending = null;
             // Restarting Claude Desktop stops its sessions for a moment; the user says when.
             if (AppState.Str(preview["desktopNotice"]) is { Length: > 0 } notice)
@@ -531,10 +534,21 @@ public sealed class TrayFlyout : Window
         }
     }
 
+    // The quick view lists no devices, so a device that holds the switch back is named.
+    private static string Blocked(JsonObject preview)
+    {
+        var reason = AppState.Str(preview["blockingReason"]) ?? "전환할 수 없어요. 앱에서 상태를 확인해 주세요.";
+        var held = (preview["targets"] as JsonArray)?.OfType<JsonObject>()
+            .Where(target => QuotaFormat.Flag(target["included"]) && !QuotaFormat.Flag(target["skipOnSwitchFailure"])
+                && !(QuotaFormat.Flag(target["isReachable"]) && (AppState.Str(target["kind"]) == "local" || AppState.Str(target["status"]) == "ready")))
+            .Select(target => AppState.Str(target["displayName"])).OfType<string>().ToList() ?? [];
+        return held.Count == 0 ? reason : $"{reason} ({string.Join(", ", held)})";
+    }
+
     private async Task ApplyAsync(JsonObject preview)
     {
         _confirm = null;
-        _pending = "이 PC의 계정을 바꾸고 있어요…";
+        _pending = "모든 장치의 계정을 바꾸고 있어요…";
         Render();
         await _app.State.ApplyPreviewAsync(preview);
         _pending = null;

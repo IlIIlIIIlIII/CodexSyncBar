@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {quota, usage, percent, visibleQuotas, panelUsage, subtitle, switchable, switchLocal, smartSwitch, localNotice} from '../../gnome/model.js';
+import {quota, usage, percent, visibleQuotas, panelUsage, subtitle, switchable, switchAll, blocked, smartSwitch, localNotice} from '../../gnome/model.js';
 const now = Date.now();
 const at = hours => new Date(now + hours * 3600000).toISOString();
 const account = weekly => ({id: 2, usage: {
@@ -50,22 +50,33 @@ assert.equal(panelUsage(panelSnapshot, now + 700000).text, '주간 —');
 assert.equal(panelUsage({...panelSnapshot, accounts: [{...account(68), needsLogin: true}]}, now).text, '주간 —');
 assert.equal(panelUsage({...panelSnapshot, settings: {claudeWeekly: false}}, now).text, '');
 assert.match(panelUsage(panelSnapshot, now).description, /이 PC 주간 잔여량 68%, \d+월 \d+일 초기화/);
+// An account's switch asks for every active device, as the app's apply does, and applies what it is shown.
 const calls = [];
 const call = async (method, params) => {
     calls.push([method, params]);
-    return method === 'preview' ? {profileId: 2, previewId: 'p', canApply: true, targets: [{id: 'local', included: true}, {id: 'ssh:dev', included: false}]} : {id: 'o'};
+    return method === 'preview' ? {profileId: 2, previewId: 'p', canApply: true, targets: [{id: 'local', included: true}, {id: 'ssh:dev', included: true}]} : {id: 'o'};
 };
-await switchLocal(call, 2, 'request');
-assert.deepEqual(calls, [['preview', {profileId: 2, deviceId: 'local'}], ['apply', {previewId: 'p', requestId: 'request'}]]);
+await switchAll(call, 2, 'request');
+assert.deepEqual(calls, [['preview', {profileId: 2}], ['apply', {previewId: 'p', requestId: 'request'}]]);
 let applied = false;
-await assert.rejects(switchLocal(async method => {
+await assert.rejects(switchAll(async method => {
     if (method === 'apply') applied = true;
-    return {profileId: 2, canApply: true, targets: [{id: 'local', included: true}, {id: 'ssh:dev', included: true}]};
-}, 2, 'request'), /이 PC/);
+    return {profileId: 3, canApply: true, targets: [{id: 'local', included: true}]};
+}, 2, 'request'), /계정/);
 assert.equal(applied, false);
-await assert.rejects(switchLocal(async () => ({canApply: false, targets: [], blockingReason: '복구 필요'}), 2, 'request'), /복구 필요/);
+await assert.rejects(switchAll(async () => ({canApply: false, targets: [], blockingReason: '복구 필요'}), 2, 'request'), /복구 필요/);
+// A device holding the switch back is named; one left out, allowed to fail or ready is not.
+const held = {canApply: false, blockingReason: '장치를 확인해 주세요.', targets: [
+    {id: 'local', kind: 'local', displayName: '이 PC', included: true, isReachable: true, status: 'unknown'},
+    {id: 'ssh:wsl', kind: 'wsl', displayName: 'Ubuntu-26.04', included: true, isReachable: false, status: 'unreachable'},
+    {id: 'ssh:ok', kind: 'ssh', displayName: '서버', included: true, isReachable: true, status: 'ready'},
+    {id: 'ssh:off', kind: 'ssh', displayName: '꺼진 서버', included: false, isReachable: false, status: 'disabled'},
+    {id: 'ssh:opt', kind: 'ssh', displayName: '선택 서버', included: true, isReachable: false, status: 'unreachable', skipOnSwitchFailure: true}]};
+assert.equal(blocked(held), '장치를 확인해 주세요. (Ubuntu-26.04)');
+await assert.rejects(switchAll(async () => held, 2, 'request'), /Ubuntu-26\.04/);
+assert.equal(blocked({canApply: false, blockingReason: '복구 필요'}), '복구 필요');
 const order = [];
-await switchLocal(async method => {
+await switchAll(async method => {
     order.push(method);
     return method === 'preview' ? {profileId: 2, previewId: 'p', canApply: true, desktopNotice: '데스크톱 재시작', targets: [{id: 'local', included: true}]} : {id: 'o'};
 }, 2, 'request', notice => order.push(notice));

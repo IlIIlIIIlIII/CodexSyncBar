@@ -9,7 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {BarLevel} from 'resource:///org/gnome/shell/ui/barLevel.js';
 import {Client} from './client.js';
-import {usage, visibleQuotas, panelUsage, subtitle, switchable, switchLocal, smartSwitch, localNotice} from './model.js';
+import {usage, visibleQuotas, panelUsage, subtitle, switchable, switchAll, smartSwitch, localNotice} from './model.js';
 
 const label = (text, style = '') => new St.Label({text, style_class: style, y_align: Clutter.ActorAlign.CENTER});
 const icon = (name, size = 20) => new St.Icon({icon_name: name, icon_size: size});
@@ -251,7 +251,7 @@ export default class SyncBarExtension extends Extension {
         } else if (account.needsLogin || account.isPending) {
             action.set_child(label('—', 'clsb-subtitle'));
         } else {
-            const change = button(label('전환'), `${name} 계정으로 이 PC 전환`, () => this._switch(account.id), 'clsb-switch');
+            const change = button(label('전환'), `${name} 계정으로 모든 장치 전환`, () => this._switch(account.id), 'clsb-switch');
             change.reactive = !this._unavailable && switchable(account, this._snapshot, this._pending);
             change.can_focus = change.reactive;
             this._accountButtons.push([account.id, change]);
@@ -286,12 +286,12 @@ export default class SyncBarExtension extends Extension {
         if (!account || this._unavailable || !switchable(account, this._snapshot, this._pending)) return;
         const epoch = this._epoch;
         this._snapshotVersion++;
-        this._pending = true; this._pendingMessage = '이 PC의 계정을 전환하는 중…'; this._actionError = null; this._render();
+        this._pending = true; this._pendingMessage = '모든 장치의 계정을 전환하는 중…'; this._actionError = null; this._render();
         try {
             const client = this._client;
-            const operation = await switchLocal((method, params) => client.call(method, params), profileId, GLib.uuid_string_random(), () => {
+            const operation = await switchAll((method, params) => client.call(method, params), profileId, GLib.uuid_string_random(), () => {
                 if (!this._enabled || epoch !== this._epoch) return;
-                this._pendingMessage = '이 PC의 계정을 전환하고 Claude 데스크톱 앱을 다시 여는 중…'; this._render();
+                this._pendingMessage = '모든 장치의 계정을 전환하고 Claude 데스크톱 앱을 다시 여는 중…'; this._render();
             });
             if (this._enabled && epoch === this._epoch) {
                 this._snapshot.operation = operation; this._snapshot.isBusy = !operation.isComplete;
