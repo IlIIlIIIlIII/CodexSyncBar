@@ -268,8 +268,11 @@ public sealed class AuthStore
     }
 
     /// <summary>When the stored login stops being renewable and has to be signed in again, if Claude Code recorded it.</summary>
-    public DateTimeOffset? ReadLoginEnd(int profileId) =>
-        LoginEndsAt(ReadAuthFile(ProfileAuthFile(profileId)).Oauth) is { } end ? DateTimeOffset.FromUnixTimeMilliseconds(end) : null;
+    public DateTimeOffset? ReadLoginEnd(int profileId) => LoginEnd(ReadAuthFile(ProfileAuthFile(profileId)).Oauth);
+
+    /// <summary>When a login stops being renewable and has to be signed in again, if Claude Code recorded it.</summary>
+    public static DateTimeOffset? LoginEnd(ClaudeOauthTokens tokens) =>
+        LoginEndsAt(tokens) is { } end ? DateTimeOffset.FromUnixTimeMilliseconds(end) : null;
 
     // A sign-in starts a login that the service ends on a date set then
     // (refreshTokenExpiresAt); a refresh renews only the access token within

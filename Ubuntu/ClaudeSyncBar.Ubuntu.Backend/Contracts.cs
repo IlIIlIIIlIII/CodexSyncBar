@@ -24,8 +24,13 @@ public sealed class RpcException(string code, string message, object? data = nul
 public sealed record RpcRequest(string Id, string Method, JsonElement Params);
 public sealed record RpcError(string Code, string Message, object? Data = null);
 public sealed record RpcResponse(string? Id, bool Ok, object? Result = null, RpcError? Error = null);
+/// <summary>
+/// <paramref name="LoginEndsAt"/> is when the stored login has to be signed in to again. <paramref name="LoginEnded"/> says that
+/// time has passed or the service refused the login; <paramref name="NeedsLogin"/> is then true as well, while the stored login,
+/// which can still be signed out of, remains.
+/// </summary>
 public sealed record AccountView(int Id, string Email, string Alias, bool IsPending, bool NeedsLogin, DashboardUsage? Usage, string? Plan = null,
-    bool SmartCandidate = false);
+    bool SmartCandidate = false, DateTimeOffset? LoginEndsAt = null, bool LoginEnded = false);
 public sealed record AccountIdentityHash(int ProfileId, string AccountIdSha256, string EmailSha256);
 public sealed record AccountIdentityHashes(IReadOnlyList<AccountIdentityHash> Profiles, string ConfigurationRevision, string ClaudeHomeSha256);
 public sealed record DeviceView(string Id, string DisplayName, string Kind, bool Enabled, bool IsReachable,

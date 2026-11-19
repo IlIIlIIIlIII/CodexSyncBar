@@ -10,7 +10,7 @@ gi.require_version('Adw', '1')
 gi.require_version('Gsk', '4.0')
 from gi.repository import Adw, Gdk, Gio, GLib, Gsk, Gtk, Pango
 from .ipc import Client, ServiceError
-from .quota import account_usage, visible_quotas
+from .quota import account_usage, timestamp, visible_quotas
 from .usage_overview import UsageOverview, CSS as USAGE_CSS, retone
 from .token_dialog import CSS as TOKENS_CSS
 
@@ -537,7 +537,16 @@ class SyncBarApplication(Adw.Application):
         selected = self.selected()
         self.selected_email.set_text(selected.get('email', ''))
         needs_login = selected.get('needsLogin') or selected.get('isPending')
-        self.auth_status.set_text('로그인이 필요합니다.' if needs_login else ('인증 정상' if selected else '계정을 추가해 주세요.'))
+        # When the stored login has to be signed in to again: the service sets it at the sign-in.
+        ends = timestamp(selected.get('loginEndsAt'))
+        until = f' · 로그인 {ends.month}월 {ends.day}일 {ends:%H:%M}까지' if ends else ''
+        if selected.get('loginEnded'):
+            status = '로그인 기간이 끝났습니다. 다시 로그인해 주세요.'
+        elif needs_login:
+            status = '로그인이 필요합니다.'
+        else:
+            status = '인증 정상' + until if selected else '계정을 추가해 주세요.'
+        self.auth_status.set_text(status)
         self.login_button.set_visible(bool(needs_login))
         usage = selected.get('usage') or {}
         shown = visible_quotas(self.snapshot.get('settings'))

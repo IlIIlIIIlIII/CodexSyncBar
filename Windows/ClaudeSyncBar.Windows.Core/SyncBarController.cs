@@ -42,8 +42,9 @@ public sealed class SyncBarController : IDisposable
     private DateTimeOffset _lastDeviceRefresh = DateTimeOffset.MinValue;
     private DateTimeOffset _lastMaintenance = DateTimeOffset.MinValue;
     private DateTimeOffset _lastLoginLook = DateTimeOffset.MinValue;
-    // The accounts whose login the service last refused: only a new sign-in helps them.
-    private readonly HashSet<int> _refused = [];
+    // The accounts whose login the service last refused, each with when its stored login was written then:
+    // only a new sign-in helps, and a stored login written since is that sign-in.
+    private readonly Dictionary<int, DateTime> _refused = [];
     // The WSL devices whose distribution was stopped at the last maintenance, which therefore passed them by.
     private IReadOnlyList<string> _stoppedWsl = [];
     private string? _recordedSwitch;
@@ -254,7 +255,14 @@ public sealed class SyncBarController : IDisposable
                 {
                     var credentials = _auth.ReadCredentials(account.Id);
                     UsageSnapshot usage;
-                    try { usage = await _usage.FetchAsync(credentials, cancellationToken); }
+                    try
+                    {
+                        // A token past its expiry goes to the refresh below without asking the service, which
+                        // answers such tokens asked about every few minutes with "rate limited", not a refusal.
+                        if (credentials.ExpiresAt is { } expires && expires <= DateTimeOffset.UtcNow)
+                            throw new AuthenticationRequiredException("인증이 만료되었습니다.");
+                        usage = await _usage.FetchAsync(credentials, cancellationToken);
+                    }
                     catch (AuthenticationRequiredException)
                     {
                         using var mutation = await ControllerMutationLock.AcquireAsync(_paths, cancellationToken: cancellationToken);
@@ -274,7 +282,8 @@ public sealed class SyncBarController : IDisposable
                         {
                             var maintenance = new ClaudeAuthMaintenanceService(_paths, _auth, _local);
                             var refresh = await maintenance.RefreshAsync(account.Id, deadline.Token);
-                            if (refresh.DidDefer) throw;
+                            // Put off for the Claude Code running here, which renews the login itself: nothing was refused.
+                            if (refresh.DidDefer) throw new ClaudeSyncBarException("실행 중인 Claude Code가 인증을 쓰고 있어 갱신을 미뤘습니다.");
                             credentials = _auth.ReadCredentials(account.Id);
                             usage = await _usage.FetchAsync(credentials, deadline.Token);
                             // Distribution is done by the next maintenance pass under this same controller lock.
@@ -292,7 +301,7 @@ public sealed class SyncBarController : IDisposable
                 {
                     lock (_gate)
                     {
-                        if (error is AuthenticationRequiredException) _refused.Add(account.Id);
+                        if (error is AuthenticationRequiredException) Refused(account.Id);
                         _error = "일부 계정 사용량을 갱신하지 못했습니다. 마지막 정상 값을 표시합니다.";
                         var cached = _usageCache.GetValueOrDefault(account.Id)
                             ?? new DashboardUsage(null, DateTimeOffset.MinValue);
@@ -538,15 +547,28 @@ public sealed class SyncBarController : IDisposable
         lock (_gate) return _lastLoginLook;
     }
 
+    // Call holding _gate.
+    private void Refused(int profileId) => _refused[profileId] = StoredLoginWritten(profileId);
+
+    private DateTime StoredLoginWritten(int profileId)
+    {
+        var file = _auth.ProfileAuthFile(profileId);
+        return File.Exists(file) ? File.GetLastWriteTimeUtc(file) : DateTime.MinValue;
+    }
+
+    /// <summary>Whether the service refused the account's stored login, and no other has been stored since.</summary>
+    internal bool LoginRefused(int profileId)
+    {
+        DateTime written;
+        lock (_gate) if (!_refused.TryGetValue(profileId, out written)) return false;
+        return written == StoredLoginWritten(profileId);
+    }
+
     // A login the service refused, or one ending within the three days Claude Code warns of before,
     // is what makes someone sign in again in a device's Claude Code.
     private bool WaitingForSignIn(AppConfiguration configuration)
     {
-        lock (_gate)
-        {
-            _refused.IntersectWith(configuration.Accounts.Select(account => account.Id));
-            if (_refused.Count > 0) return true;
-        }
+        if (configuration.Accounts.Any(account => LoginRefused(account.Id))) return true;
         var soon = DateTimeOffset.UtcNow.AddDays(3);
         foreach (var account in configuration.Accounts.Where(account => !account.IsPending && !account.NeedsLogin))
         {
@@ -623,7 +645,7 @@ public sealed class SyncBarController : IDisposable
         {
             _lastLoginLook = DateTimeOffset.UtcNow;
             if (renewed.Count == 0) return taken;
-            _refused.ExceptWith(renewed);
+            foreach (var profileId in renewed) _refused.Remove(profileId);
             _lastUsageRefresh = DateTimeOffset.MinValue;
         }
         if (taken.Count > 0) LoginsTaken?.Invoke(taken);
@@ -657,7 +679,7 @@ public sealed class SyncBarController : IDisposable
             {
                 lock (_gate)
                 {
-                    if (error is AuthenticationRequiredException) _refused.Add(account.Id);
+                    if (error is AuthenticationRequiredException) Refused(account.Id);
                     _error = "일부 계정 인증 유지에 실패했습니다. 계정 상태를 확인해 주세요.";
                 }
             }

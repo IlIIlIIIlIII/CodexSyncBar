@@ -42,7 +42,7 @@ public sealed class ManagementService : IManagementService
     private DateTimeOffset _lastResumeLook = DateTimeOffset.MinValue;
     private readonly ResumeHooks _resume;
     // Reading a plan decrypts the stored login; it changes only when that login does.
-    private readonly Dictionary<int, (DateTime Written, string? Plan)> _plans = [];
+    private readonly Dictionary<int, (DateTime Written, string? Plan, DateTimeOffset? EndsAt)> _plans = [];
     private bool _shutdownRequested;
     public bool ShutdownRequested { get { lock (_state) return _shutdownRequested; } }
     // A session left running with a shell of its own may never go idle; a later switch looks again.
@@ -173,20 +173,26 @@ public sealed class ManagementService : IManagementService
         return switched;
     }
 
-    private string? PlanOf(int profileId)
+    private string? PlanOf(int profileId) => LoginOf(profileId).Plan;
+
+    private (string? Plan, DateTimeOffset? EndsAt) LoginOf(int profileId)
     {
         try
         {
             var file = _auth.ProfileAuthFile(profileId);
             var written = File.Exists(file) ? File.GetLastWriteTimeUtc(file) : DateTime.MinValue;
             lock (_plans)
-                if (_plans.TryGetValue(profileId, out var known) && known.Written == written) return known.Plan;
-            var plan = written == DateTime.MinValue ? null : _auth.ReadCredentials(profileId).Plan;
-            lock (_plans) _plans[profileId] = (written, plan);
-            return plan;
+                if (_plans.TryGetValue(profileId, out var known) && known.Written == written) return (known.Plan, known.EndsAt);
+            var (plan, endsAt) = written == DateTime.MinValue ? (null, null) : (_auth.ReadCredentials(profileId).Plan, _auth.ReadLoginEnd(profileId));
+            lock (_plans) _plans[profileId] = (written, plan, endsAt);
+            return (plan, endsAt);
         }
-        catch (ClaudeSyncBarException) { return null; }
+        catch (ClaudeSyncBarException) { return (null, null); }
     }
+
+    // Past the end the service set at the sign-in, or refused by it: only signing in again helps.
+    private bool LoginEnded(int profileId, DateTimeOffset? endsAt) =>
+        endsAt is { } end && end <= DateTimeOffset.UtcNow || _controller.LoginRefused(profileId);
 
     /// <summary>
     /// The smart switch's choice, with a preview to apply it to every active
@@ -273,9 +279,11 @@ public sealed class ManagementService : IManagementService
         var smart = _smartSwitch.Load();
         return c.Accounts.Select(a =>
         {
-            var plan = PlanOf(a.Id);
-            return new AccountView(a.Id, a.Email, a.CustomAlias ?? a.Email, a.IsPending, a.NeedsLogin,
-                dashboard.Accounts.FirstOrDefault(x => x.ProfileId == a.Id)?.Usage, plan, SmartSwitch.IsCandidate(plan, smart.Chosen(a.Id)));
+            var (plan, endsAt) = LoginOf(a.Id);
+            var ended = !a.IsPending && !a.NeedsLogin && LoginEnded(a.Id, endsAt);
+            return new AccountView(a.Id, a.Email, a.CustomAlias ?? a.Email, a.IsPending, a.NeedsLogin || ended,
+                dashboard.Accounts.FirstOrDefault(x => x.ProfileId == a.Id)?.Usage, plan, SmartSwitch.IsCandidate(plan, smart.Chosen(a.Id)),
+                LoginEndsAt: endsAt, LoginEnded: ended);
         }).ToArray();
     }
 
@@ -594,6 +602,9 @@ public sealed class ManagementService : IManagementService
         var c = _config.LoadOrCreate();
         var account = c.Accounts.FirstOrDefault(a => a.Id == profileId && !a.IsPending && !a.NeedsLogin)
             ?? throw new RpcException("account_unavailable", "로그인된 계정을 선택해 주세요.");
+        // Applied, it would leave every device with a login the service no longer takes.
+        if (LoginEnded(profileId, LoginOf(profileId).EndsAt))
+            throw new RpcException("account_unavailable", "로그인 기간이 끝난 계정이에요. 다시 로그인해 주세요.");
         var credential = _auth.ReadCredentials(profileId);
         var revision = Revision(c);
         var devices = await QueryDevicesAsync(c, token);

@@ -147,7 +147,8 @@ class ManagerDialog(Adw.Dialog):
                 logout_row.append(button('로그아웃', callback=lambda _b,p=profile_id,c=chooser,items=fallback: self.logout(p,items[c.get_selected()]['id'])))
             else:
                 logout_row.append(label('로그아웃하려면 다른 로그인 계정이 필요합니다.', 'muted small', True))
-            if account.get('isPending') or account.get('needsLogin'):
+            # A login that has ended is still stored and is signed out of, not deleted.
+            if account.get('isPending') or (account.get('needsLogin') and not account.get('loginEnded')):
                 logout_row.append(button('계정 삭제', callback=lambda _b,p=profile_id: self.confirm('계정을 삭제할까요?', '선택한 계정의 보관 정보가 제거됩니다.', '삭제', lambda: self.run('account.delete', {'profileId':p}, self.reload_accounts), True)))
             group.add_row(logout_row)
 

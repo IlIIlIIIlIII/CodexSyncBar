@@ -1007,6 +1007,42 @@ public sealed class ManagementServiceIntegrationTests
     }
 
     [Fact]
+    public async Task ALoginPastItsEndAsksForASignInAgainAndIsNotApplied()
+    {
+        // The service no longer takes the second account's tokens. It answers an expired one asked about
+        // every few minutes with "rate limited", so such a token must not be offered at all.
+        var offered = new List<string>();
+        await using var fixture = new Fixture(withRemote: false, usage: token =>
+        {
+            lock (offered) offered.Add(token);
+            return token == "synthetic-access-2" ? null : Quotas(30);
+        });
+        fixture.StoreLogin(1, "synthetic-access-1", DateTimeOffset.UtcNow.AddDays(20));
+        fixture.StoreLogin(2, "ended-access-2", DateTimeOffset.UtcNow.AddHours(-1), expiresAt: DateTimeOffset.UtcNow.AddMinutes(-5));
+        await RefreshUsage(fixture);
+        lock (offered) Assert.DoesNotContain("ended-access-2", offered);
+        var accounts = (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts;
+        var ended = accounts.Single(account => account.Id == 2);
+        Assert.True(ended.NeedsLogin);
+        Assert.True(ended.LoginEnded);
+        Assert.True(ended.LoginEndsAt < DateTimeOffset.UtcNow);
+        // Told as a sign-in to do, not as a failure to look again: no refresh was tried past the end.
+        Assert.Equal("재로그인이 필요합니다.", ended.Usage?.Error);
+        var current = accounts.Single(account => account.Id == 1);
+        Assert.False(current.NeedsLogin);
+        Assert.False(current.LoginEnded);
+        Assert.True(current.LoginEndsAt > DateTimeOffset.UtcNow.AddDays(19));
+        var refused = await Assert.ThrowsAsync<RpcException>(() => fixture.Call<SwitchPreview>("preview", new { profileId = 2 }));
+        Assert.Equal("account_unavailable", refused.Code);
+
+        // Signed in again: it counts at once, before the next look at the usage.
+        fixture.StoreLogin(2, "synthetic-access-2-again", DateTimeOffset.UtcNow.AddDays(30));
+        var renewed = (await fixture.Call<ManagementSnapshot>("snapshot")).Accounts.Single(account => account.Id == 2);
+        Assert.False(renewed.NeedsLogin);
+        Assert.False(renewed.LoginEnded);
+    }
+
+    [Fact]
     public async Task ADeviceSignedInAgainIsTakenInBeforeASwitchMovesItToAnotherAccount()
     {
         await using var fixture = new Fixture(withRemote: true);
@@ -1145,7 +1181,7 @@ public sealed class ManagementServiceIntegrationTests
         public Task StopAsync() => _service.StopAsync();
 
         public Fixture(bool withRemote, bool mixedCaseEmail = false, bool optionalRemote = false, bool blockBackgroundSync = false,
-            Func<string, string>? usage = null, Action<string>? notify = null, ResumeHooks? resume = null)
+            Func<string, string?>? usage = null, Action<string>? notify = null, ResumeHooks? resume = null)
         {
             Paths = new(Path.Combine(_root, "home"), Path.Combine(_root, "data"), Path.Combine(_root, "runtime"));
             Paths.EnsureDirectories();
@@ -1282,6 +1318,16 @@ public sealed class ManagementServiceIntegrationTests
             var oauth = document.RootElement.GetProperty("claudeAiOauth");
             return (oauth.GetProperty("accessToken").GetString(), oauth.GetProperty("refreshToken").GetString());
         }
+        // The account's stored login, as a sign-in that ends at the given time leaves it.
+        public void StoreLogin(int id, string access, DateTimeOffset endsAt, DateTimeOffset? expiresAt = null)
+        {
+            var login = Contracts.Create("fixture-account-" + id, access, access + "-refresh", email: $"fixture{id}@example.invalid",
+                expiresAt: (expiresAt ?? DateTimeOffset.UtcNow.AddDays(40)).ToUnixTimeMilliseconds());
+            login.Oauth.Extra = new() { ["refreshTokenExpiresAt"] = JsonSerializer.SerializeToElement(endsAt.ToUnixTimeMilliseconds()) };
+            var source = Path.Combine(Paths.LoginSessionsDirectory, $"stored-{id}-{Guid.NewGuid():N}.json");
+            WindowsPathSafety.WritePrivateBytes(source, Contracts.Bytes(login));
+            Auth.ImportAuth(source, id, replaceExisting: true);
+        }
         public void SignInOnDevice(ClaudeAuthFile login)
         {
             void Replace(string path, object contents)
@@ -1362,15 +1408,17 @@ public sealed class ManagementServiceIntegrationTests
             throw new InvalidOperationException("Run from this repository.");
         }
     }
-    // Usage by access token when given; otherwise a payload with no Claude quotas in it.
-    private sealed class UsageHandler(Func<string, string>? usage) : HttpMessageHandler
+    // Usage by access token when given, where null is a token the service no longer takes; otherwise a payload with no Claude quotas in it.
+    private sealed class UsageHandler(Func<string, string?>? usage) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
-            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(usage is not null && request.RequestUri!.AbsolutePath.EndsWith("/usage", StringComparison.Ordinal)
-                    ? usage(request.Headers.Authorization!.Parameter!)
-                    : """{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800}}}"""),
-            });
+        {
+            var body = usage is not null && request.RequestUri!.AbsolutePath.EndsWith("/usage", StringComparison.Ordinal)
+                ? usage(request.Headers.Authorization!.Parameter!)
+                : """{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":604800}}}""";
+            return Task.FromResult(body is null
+                ? new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        }
     }
 }

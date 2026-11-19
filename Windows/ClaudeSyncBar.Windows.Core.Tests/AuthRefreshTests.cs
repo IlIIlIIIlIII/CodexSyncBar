@@ -148,6 +148,25 @@ public sealed class AuthRefreshTests
         Assert.Equal("access-new", fixture.Auth.ReadActiveAuth()!.AccessToken);
     }
 
+    [Fact]
+    public async Task ALoginPastItsEndIsNotOfferedToTheServiceAgain()
+    {
+        using var fixture = new Fixture();
+        var ended = AuthFile("ended");
+        ended.Oauth.Extra = new() { ["refreshTokenExpiresAt"] = JsonSerializer.SerializeToElement(DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds()) };
+        fixture.Import(ended);
+        var asked = false;
+        var service = new ClaudeAuthMaintenanceService(fixture.Paths, fixture.Auth, runRefreshServer: (_, _, _) =>
+        {
+            asked = true;
+            return Task.FromResult("validated=true");
+        });
+        await Assert.ThrowsAsync<AuthenticationRequiredException>(() => service.RefreshAsync(1));
+        Assert.False(asked);
+        Assert.Equal("refresh-ended", fixture.Auth.ReadCredentials(1).RefreshToken);
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Paths.LoginSessionsDirectory, "refresh-profile-*"));
+    }
+
     private static ClaudeAuthFile AuthFile(string generation, string account = "account") =>
         TestAuth.Create(account, "access-" + generation, "refresh-" + generation);
 

@@ -95,7 +95,16 @@ public sealed class AccountsPage : SyncPage
             ? Ui.Stack(6, true, Keep("loginRing", () => new ProgressRing { IsActive = true, Width = 12, Height = 12 }), Ui.Caption("로그인 대기 중", wrap: false))
             : AppState.NeedsLogin(account)
                 ? Ui.Pill(QuotaFormat.Flag(account["isPending"]) ? "로그인 전" : "재로그인 필요", Ui.PillKind.Caution, Glyphs.Lock)
-                : Ui.Status("인증 정상", Tone.Healthy, Glyphs.Completed);
+                // The last look failed for another reason (the network, the service): the login was not seen working.
+                : account["usage"]?["error"] is JsonValue
+                    ? Ui.Status("확인 실패", Tone.Warning, Glyphs.Warning)
+                    : Ui.Status("인증 정상", Tone.Healthy, Glyphs.Completed);
+        if (LoginEnd(account) is { } ending)
+        {
+            var column = Ui.Stack(2, false, status, ending);
+            column.HorizontalAlignment = HorizontalAlignment.Right;
+            status = column;
+        }
         var chevron = Ui.ExpandButton(open, name, () =>
         {
             if (!Open.Remove(id)) Open.Add(id);
@@ -107,6 +116,19 @@ public sealed class AccountsPage : SyncPage
         header.Padding = new Thickness(16, 10, 16, 10);
         AutomationProperties.SetName(header, $"{index + 1}번째, {name}");
         return open ? Ui.Expander(header, Details(account, id, name, index, count, busy)) : header;
+    }
+
+    // When the stored login has to be signed in to again: the service sets it at the sign-in, and a refresh keeps it.
+    private static TextBlock? LoginEnd(JsonObject account)
+    {
+        if (QuotaFormat.Time(account["loginEndsAt"]) is not { } end) return null;
+        var now = DateTimeOffset.Now;
+        var text = Ui.Caption(end <= now ? $"로그인 {QuotaFormat.Date(end)} 만료됨" : $"로그인 {QuotaFormat.Date(end)}까지", wrap: false);
+        // Within the three days Claude Code warns of, the colour says so too.
+        if (end - now <= TimeSpan.FromDays(3)) text.Style = Ui.Style("SyncBarToneWarning");
+        text.FontSize = 12;
+        text.HorizontalAlignment = HorizontalAlignment.Right;
+        return text;
     }
 
     // Whether the smart switch may choose this account, ticked right on the list. It saves the moment it changes,
@@ -172,9 +194,11 @@ public sealed class AccountsPage : SyncPage
         sync.IsEnabled = !busy && signedIn;
         rows.Add(Ui.SubRow("인증", Ui.Wrap(8, refresh, sync, LoginMenu(id, busy))));
 
+        // A login that has ended is still stored here, and the devices on it can be moved off it.
+        var stored = signedIn || QuotaFormat.Flag(account["loginEnded"]);
         var others = State.Accounts.Where(other => AppState.Int(other["id"]) != id && !AppState.NeedsLogin(other)).ToList();
         var logout = new List<UIElement?>();
-        if (signedIn && others.Count > 0)
+        if (stored && others.Count > 0)
         {
             var fallback = new ComboBox
             {
@@ -191,12 +215,12 @@ public sealed class AccountsPage : SyncPage
             button.IsEnabled = !busy;
             logout.AddRange([Ui.Caption("대신 적용할 계정", wrap: false), fallback, button]);
         }
-        else if (signedIn)
+        else if (stored)
         {
             logout.Add(Ui.Caption("로그아웃하려면 로그인된 다른 계정이 필요해요."));
         }
 
-        if (!signedIn)
+        if (!stored)
         {
             var delete = Ui.Button("계정 삭제", Glyphs.Delete, click: async (_, _) =>
             {
@@ -209,7 +233,7 @@ public sealed class AccountsPage : SyncPage
             logout.Add(delete);
         }
 
-        rows.Add(Ui.SubRow(signedIn ? "로그아웃" : "삭제", Ui.Wrap(8, [.. logout])));
+        rows.Add(Ui.SubRow(stored ? "로그아웃" : "삭제", Ui.Wrap(8, [.. logout])));
         return rows;
     }
 

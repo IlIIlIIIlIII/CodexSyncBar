@@ -131,6 +131,10 @@ public sealed class ClaudeAuthMaintenanceService
         _authStore.ReconcileActiveCredentials(profileId);
         var source = _authStore.ProfileAuthFile(profileId);
         var before = _authStore.ReadAuthFile(source);
+        // The service ends a login on the date it set at the sign-in. Past it a refresh can only be
+        // refused, and asking again every few minutes would only be refused again.
+        if (AuthStore.LoginEnd(before.Oauth) is { } end && end <= DateTimeOffset.UtcNow)
+            throw new AuthenticationRequiredException("로그인 기간이 끝났습니다. 다시 로그인해 주세요.");
         if (ShouldDeferForRunningClient(before))
         {
             return new AuthMaintenanceResult(
