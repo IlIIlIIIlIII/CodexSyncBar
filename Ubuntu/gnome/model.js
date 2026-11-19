@@ -90,13 +90,19 @@ export async function smartSwitch(call, requestId, onDesktopChange) {
     return {message: smart.message, operation: await call('apply', {previewId: preview.previewId, requestId})};
 }
 
-export async function switchLocal(call, profileId, requestId, onDesktopChange) {
-    const preview = await call('preview', {profileId, deviceId: 'local'});
-    const targets = preview.targets.filter(target => target.included);
-    if (!preview.canApply) throw new Error(preview.blockingReason || '전환할 수 없습니다. 앱에서 상태를 확인해 주세요.');
-    // Fail closed if an incompatible backend includes another machine.
-    if (targets.length !== 1 || targets[0].id !== 'local' || preview.profileId !== profileId)
-        throw new Error('이 PC에만 적용되는 전환인지 확인하지 못했습니다.');
+// The menu lists no devices, so a device that holds the switch back is named.
+export function blocked(preview) {
+    const reason = preview.blockingReason || '전환할 수 없습니다. 앱에서 상태를 확인해 주세요.';
+    const held = (preview.targets ?? []).filter(target => target.included && !target.skipOnSwitchFailure
+        && !(target.isReachable && (target.kind === 'local' || target.status === 'ready'))).map(target => target.displayName).filter(Boolean);
+    return held.length ? `${reason} (${held.join(', ')})` : reason;
+}
+
+// An account's switch button applies to every active device too, like the app's apply button.
+export async function switchAll(call, profileId, requestId, onDesktopChange) {
+    const preview = await call('preview', {profileId});
+    if (!preview.canApply) throw new Error(blocked(preview));
+    if (preview.profileId !== profileId) throw new Error('전환할 계정을 확인하지 못했습니다.');
     if (preview.desktopNotice) onDesktopChange?.(preview.desktopNotice);
     return call('apply', {previewId: preview.previewId, requestId});
 }

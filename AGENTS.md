@@ -14,6 +14,10 @@
 - 로그인을 넣을 때 `~/.claude.json`에 `hasCompletedOnboarding: true`도 함께 넣는다(helper의 `store_active_view`, 이 PC는 `AuthStore.WriteActive`). 이 표시가 없으면 Claude Code는 로그인이 들어 있어도 첫 실행 설정을 띄워 다시 로그인하라고 한다. 데스크톱 앱 세션만 쓰던 장치에는 이 표시가 없다(2026-11-16, WSL에서 확인).
 - Claude 데스크톱 앱이 SSH 장치에 띄운 세션은 앱이 재시작해도 원격 데몬 아래 살아 있고, 시작할 때 받은 토큰을 환경변수(`CLAUDE_CODE_OAUTH_TOKEN`)로 계속 쥔다. 자격 증명 파일만 바꿔서는 이 세션이 다른 계정으로 넘어가지 않는다. 그래서 이 PC가 포함된 적용을 마치면 `__node retire-sessions`로 다른 계정을 쥔 유휴 세션을 SIGTERM으로 끝내고, 작업 중인 세션은 끝날 때까지 기다린다. 앱은 다음 메시지에서 현재 로그인으로 `--resume`한다.
 
+## 팝업의 전환 범위
+
+- 팝업(Windows 빠른 보기, Ubuntu GNOME 메뉴)의 계정별 `전환`은 스마트 전환과 앱의 `모든 장치에 적용`처럼 이 PC와 활성 장치(SSH, WSL) 전부에 적용한다(사용자 요청 2026-11-19). 이 PC만 바꾸는 전환(`preview`의 `deviceId: "local"`)을 팝업에 다시 두지 않는다. 팝업에는 장치 목록이 없으니 전환을 막은 장치는 이름을 붙여 알린다.
+
 ## WSL 장치 (Windows 앱)
 
 - Windows 앱은 이 PC의 WSL 배포판을 장치로 등록할 수 있다(사용자 요청 2026-11-16: 계정을 바꿔도 WSL의 Claude 로그인이 따라오지 않았다). `authentication`이 `wsl`이고 `host`가 배포판 이름인 장치이며, SSH 장치와 같은 helper·같은 흐름(설치, 적용, 토큰 재배포, 세션 정리, 로그아웃)을 쓰고 들어가는 방법만 `ssh` 대신 `wsl.exe`다(`WslTransport`). WSL용 흐름을 따로 만들지 않는다.
