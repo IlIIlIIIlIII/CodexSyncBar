@@ -176,13 +176,7 @@ CODEX_SYNCBAR_UNIVERSAL=1 ./build-app.sh
 - `~/.local/lib/gpt-switch/codex-syncbar-askpass`
 - `~/.local/lib/gpt-switch/usage-summary.mjs`
 
-`v*` 태그 릴리즈는 다음 GitHub Actions secret이 모두 있어야 실행됩니다. P12와 App Store Connect API 개인 키는 각각 base64로 저장합니다.
-
-- `APPLE_DEVELOPER_ID_P12_BASE64`
-- `APPLE_DEVELOPER_ID_P12_PASSWORD`
-- `APPLE_NOTARY_KEY_BASE64`
-- `APPLE_NOTARY_KEY_ID`
-- `APPLE_NOTARY_ISSUER_ID`
+`v*` 태그로 서명·공증 릴리즈를 만들던 GitHub Actions 워크플로는 2026-11-19에 제거했습니다.
 
 ## 데이터 위치와 삭제
 

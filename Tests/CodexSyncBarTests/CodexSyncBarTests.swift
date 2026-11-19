@@ -2086,22 +2086,6 @@ final class CodexSyncBarTests: XCTestCase {
         XCTAssertGreaterThan(try Data(contentsOf: iconURL).count, 100_000)
     }
 
-    func testReleaseWorkflowRequiresDeveloperIDNotarizationAndStapling() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let workflow = try String(contentsOf: packageRoot
-            .appendingPathComponent(".github/workflows/release.yml"), encoding: .utf8)
-
-        XCTAssertTrue(workflow.contains("APPLE_DEVELOPER_ID_P12_BASE64"))
-        XCTAssertTrue(workflow.contains("Developer ID Application"))
-        XCTAssertTrue(workflow.contains("xcrun notarytool submit"))
-        XCTAssertTrue(workflow.contains("xcrun stapler staple"))
-        XCTAssertTrue(workflow.contains("xcrun stapler validate"))
-        XCTAssertTrue(workflow.contains("spctl --assess --type execute"))
-    }
-
     func testSettingsUsesRetainedForegroundWindowAndSwitchIsImmediate() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
